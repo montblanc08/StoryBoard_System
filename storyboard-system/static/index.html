@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>FRAMEFORGE · 私有分镜制作系统</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div id="toast" class="toast" aria-live="polite"></div>
+  <main id="loginView" class="login-shell hidden">
+    <section class="login-card">
+      <div class="brand-mark">F<span>F</span></div>
+      <p class="eyebrow">PRIVATE PRODUCTION SYSTEM</p>
+      <h1>FRAMEFORGE</h1>
+      <p class="muted">从旁白节奏到最终镜头清单，一套服务于 TVC、MG、3D、电影与纪录片的私有工作台。</p>
+      <form id="loginForm">
+        <label>用户名<input name="username" autocomplete="username" required></label>
+        <label>密码<input name="password" type="password" autocomplete="current-password" required></label>
+        <button class="primary full" type="submit">进入制作系统</button>
+        <p id="loginError" class="error" role="alert"></p>
+      </form>
+    </section>
+  </main>
+
+  <main id="shareView" class="hidden"></main>
+
+  <div id="appView" class="app hidden">
+    <header class="topbar">
+      <div class="brand"><div class="brand-mark small">F<span>F</span></div><div><b>FRAMEFORGE</b><small>PRIVATE STORYBOARD OS</small></div></div>
+      <nav class="top-actions">
+        <span id="storageBadge" class="badge"><i></i> 内网数据节点</span>
+        <button id="backBtn" class="ghost hidden">← 项目列表</button>
+        <button id="logoutBtn" class="ghost">退出</button>
+      </nav>
+    </header>
+
+    <section id="dashboard" class="page">
+      <div class="hero">
+        <div><p class="eyebrow">PRODUCTION CONTROL</p><h1>把创意拆成可执行的镜头。</h1><p class="muted">项目、旁白、分镜、媒体与分享全部存放在公司内网。</p></div>
+        <button id="newProjectBtn" class="primary">＋ 新建项目</button>
+      </div>
+      <div class="section-head"><div><h2>制作项目</h2><p id="projectCount" class="muted"></p></div></div>
+      <div id="projectGrid" class="project-grid"></div>
+    </section>
+
+    <section id="workspace" class="workspace hidden">
+      <aside class="rail">
+        <div class="rail-section"><span>视图</span><button class="rail-btn active" data-view="board">▦<b>分镜板</b></button><button class="rail-btn" data-view="table">☷<b>执行表</b></button></div>
+        <div class="rail-section"><span>工具</span><button id="importBtn" class="rail-btn">⇧<b>导入表格</b></button><button id="timingBtn" class="rail-btn">◷<b>旁白计时</b></button><button id="shareBtn" class="rail-btn">↗<b>审片分享</b></button></div>
+        <input id="fileImport" type="file" accept=".xlsx,.csv,.tsv" hidden>
+      </aside>
+      <div class="work-main">
+        <div class="project-bar">
+          <div><p class="eyebrow" id="projectType">FILM</p><h1 id="projectName">项目</h1></div>
+          <div class="project-metrics"><div><span>总时长</span><b id="totalDuration">00:00</b></div><div><span>镜头</span><b id="shotCount">0</b></div><div><span>起始时码</span><b id="startTc">01:00:00:00</b></div></div>
+          <div class="bar-actions"><button id="settingsBtn" class="ghost">项目设置</button><button id="saveBtn" class="primary">保存修改</button></div>
+        </div>
+        <div class="toolbar">
+          <button id="addShotBtn" class="primary compact">＋ 新增镜头</button>
+          <button id="autoTimingBtn" class="ghost">自动分配旁白时长</button>
+          <label class="search">⌕<input id="searchInput" placeholder="搜索镜号、场景、旁白…"></label>
+          <div class="view-toggle"><button data-mode="board" class="active">分镜</button><button data-mode="table">表格</button></div>
+        </div>
+        <div id="boardView" class="shot-board"></div>
+        <div id="tableView" class="table-wrap hidden"></div>
+      </div>
+    </section>
+  </div>
+
+  <dialog id="projectDialog">
+    <form method="dialog" id="projectForm" class="dialog-form">
+      <div class="dialog-head"><div><p class="eyebrow">NEW PRODUCTION</p><h2>新建制作项目</h2></div><button value="cancel" class="icon-btn">×</button></div>
+      <label>项目名称<input name="name" required placeholder="例如：品牌年度形象片"></label>
+      <div class="two"><label>制作类型<select name="production_type"><option value="film">电影 / 剧情</option><option value="tvc">TVC 广告</option><option value="documentary">纪录片</option><option value="mg">MG 动画</option><option value="3d">3D / CG</option></select></label><label>画幅<select name="aspect_ratio"><option>16:9</option><option>2.39:1</option><option>1.85:1</option><option>9:16</option><option>1:1</option></select></label></div>
+      <div class="two"><label>帧率<select name="fps"><option>25</option><option>24</option><option>23.976</option><option>30</option><option>29.97</option><option>50</option><option>60</option></select></label><label>目标片长（秒）<input name="target_seconds" type="number" min="1" value="60" required></label></div>
+      <button class="primary full" value="default">创建项目</button>
+    </form>
+  </dialog>
+
+  <dialog id="settingsDialog"><form method="dialog" id="settingsForm" class="dialog-form"><div class="dialog-head"><h2>项目设置</h2><button value="cancel" class="icon-btn">×</button></div><label>项目名称<input name="name" required></label><div class="two"><label>目标片长（秒）<input name="target_seconds" type="number" min="1"></label><label>起始时码<input name="start_tc" pattern="\d{2}:\d{2}:\d{2}:\d{2}"></label></div><div class="two"><label>帧率<select name="fps"><option>23.976</option><option>24</option><option>25</option><option>29.97</option><option>30</option><option>50</option><option>59.94</option><option>60</option></select></label><label>画幅<input name="aspect_ratio"></label></div><button class="primary full" value="default">保存设置</button></form></dialog>
+
+  <dialog id="shareDialog"><div class="dialog-form"><div class="dialog-head"><div><p class="eyebrow">PERMANENT REVIEW LINK</p><h2>匿名审片与下载</h2></div><button class="icon-btn" data-close="shareDialog">×</button></div><p class="muted">链接永久有效；访问者无需账号，只能查看并可下载完整项目包。撤销后原链接立即失效。</p><div id="shareResult"></div><div class="dialog-actions"><button id="createShareBtn" class="primary">生成永久链接</button><button id="revokeShareBtn" class="danger hidden">撤销链接</button></div></div></dialog>
+
+  <dialog id="timingDialog"><div class="dialog-form wide"><div class="dialog-head"><div><p class="eyebrow">VOICEOVER TIMING</p><h2>旁白时间分配</h2></div><button class="icon-btn" data-close="timingDialog">×</button></div><p>按文字信息量、标点停顿和目标片长计算。锁定的镜头保持手动时长不变。</p><div class="timing-summary" id="timingSummary"></div><button id="applyTimingBtn" class="primary full">计算并应用</button></div></dialog>
+
+  <template id="shotCardTemplate">
+    <article class="shot-card" draggable="true">
+      <div class="shot-top"><span class="shot-no"></span><span class="tc"></span><button class="menu-btn" title="删除">×</button></div>
+      <div class="frame"><div class="frame-empty"><span>16:9</span><b>添加参考画面</b><small>图片 / 视频将在浏览器压缩</small></div><input class="media-input" type="file" accept="image/*,video/*" hidden></div>
+      <div class="shot-body"><input class="title-input" placeholder="镜头标题"><div class="meta-grid"><label>景别<input data-key="shot_size" placeholder="大全景"></label><label>焦段<input data-key="lens" placeholder="24mm"></label><label>运镜<input data-key="movement" placeholder="跟拍 / 推轨"></label><label>执行<input data-key="execution" placeholder="实拍 / MG / 3D"></label></div><label>画面描述<textarea data-key="description" rows="3"></textarea></label><label>旁白<textarea data-key="voiceover" rows="2"></textarea></label><div class="shot-foot"><label class="duration">时长<input data-key="duration" type="number" min="0.04" step="0.04">秒</label><label class="lock"><input data-key="locked" type="checkbox"> 锁定</label><span class="dept"></span></div></div>
+    </article>
+  </template>
+  <script src="/app.js" defer></script>
+</body>
+</html>
