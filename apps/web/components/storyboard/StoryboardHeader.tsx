@@ -120,7 +120,16 @@ export function StoryboardHeader({
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
+          {/* Import Table Button */}
+          <button
+            onClick={() => useWorkspaceStore.getState().setImportModalOpen(true)}
+            className="flex items-center gap-1.5 rounded border border-studio-700 bg-studio-950 px-3 py-1.5 text-xs font-medium text-slate-300 hover:border-amber hover:text-amber transition"
+          >
+            <svg className="g-icon h-4 w-4"><use href="#icon-table_rows" /></svg>
+            导入分镜表
+          </button>
+
           {/* VO Auto-Timing Button */}
           <button
             onClick={() => setVOTimingModalOpen(true)}

@@ -9,8 +9,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.v1.auth import router as auth_router
+from app.api.v1.exports import router as exports_router
 from app.api.v1.health import router as health_router
+from app.api.v1.imports import router as imports_router
 from app.api.v1.productions import router as productions_router
+from app.api.v1.shares import router as shares_router
 from app.api.v1.shots import router as shots_router
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal, Base, async_engine
@@ -106,6 +109,10 @@ app.include_router(health_router, prefix=settings.API_V1_PREFIX)
 app.include_router(auth_router, prefix=settings.API_V1_PREFIX)
 app.include_router(productions_router, prefix=settings.API_V1_PREFIX)
 app.include_router(shots_router, prefix=settings.API_V1_PREFIX)
+app.include_router(imports_router, prefix=settings.API_V1_PREFIX)
+app.include_router(exports_router, prefix=settings.API_V1_PREFIX)
+app.include_router(shares_router, prefix=settings.API_V1_PREFIX)
+app.include_router(shares_router, prefix="")  # Public /share/{token} endpoint
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ import { ShotInspector } from '@/components/shot/ShotInspector';
 import { BulkActionToolbar } from '@/components/storyboard/BulkActionToolbar';
 import { VOTimingModal } from '@/components/storyboard/VOTimingModal';
 import { NewShotModal } from '@/components/storyboard/NewShotModal';
+import { ImportModal } from '@/components/storyboard/ImportModal';
 
 export default function StoryboardPage() {
   const params = useParams();
@@ -187,6 +188,13 @@ export default function StoryboardPage() {
         production={production}
         sequences={sequences}
         nextNumber={nextShotNumber}
+      />
+
+      {/* Smart Table Import Modal */}
+      <ImportModal
+        production={production}
+        isOpen={useWorkspaceStore(s => s.isImportModalOpen)}
+        onClose={() => useWorkspaceStore.getState().setImportModalOpen(false)}
       />
     </div>
   );

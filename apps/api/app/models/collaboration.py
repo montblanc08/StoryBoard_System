@@ -54,6 +54,7 @@ class Share(Base):
 
     production_id: Mapped[str] = mapped_column(ForeignKey("productions.id", ondelete="CASCADE"), index=True)
     snapshot_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    snapshot_json: Mapped[dict] = mapped_column(JSON, default=dict)
     token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     allow_download: Mapped[bool] = mapped_column(Boolean, default=True)
     password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)

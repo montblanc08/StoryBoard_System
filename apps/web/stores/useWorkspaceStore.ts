@@ -24,6 +24,7 @@ interface WorkspaceState {
   isInspectorOpen: boolean;
   isVOTimingModalOpen: boolean;
   isNewShotModalOpen: boolean;
+  isImportModalOpen: boolean;
 
   // Actions
   setViewMode: (mode: StoryboardViewMode) => void;
@@ -39,6 +40,7 @@ interface WorkspaceState {
   toggleInspector: () => void;
   setVOTimingModalOpen: (open: boolean) => void;
   setNewShotModalOpen: (open: boolean) => void;
+  setImportModalOpen: (open: boolean) => void;
 }
 
 const DEFAULT_FILTERS: FilterState = {
@@ -62,6 +64,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   isInspectorOpen: false,
   isVOTimingModalOpen: false,
   isNewShotModalOpen: false,
+  isImportModalOpen: false,
 
   setViewMode: viewMode => set({ viewMode }),
   setCardSize: cardSize => set({ cardSize }),
@@ -114,5 +117,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     })),
 
   setVOTimingModalOpen: isVOTimingModalOpen => set({ isVOTimingModalOpen }),
-  setNewShotModalOpen: isNewShotModalOpen => set({ isNewShotModalOpen })
+  setNewShotModalOpen: isNewShotModalOpen => set({ isNewShotModalOpen }),
+  setImportModalOpen: isImportModalOpen => set({ isImportModalOpen })
 }));
