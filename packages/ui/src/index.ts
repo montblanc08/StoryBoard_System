@@ -1,0 +1,124 @@
+/**
+ * FrameForge UI Design Tokens & Atomic Primitives
+ */
+
+export const DESIGN_TOKENS = {
+  spacing: {
+    4: '4px',
+    8: '8px',
+    12: '12px',
+    16: '16px',
+    24: '24px',
+    32: '32px'
+  },
+  radius: {
+    sm: '4px',
+    md: '6px',
+    lg: '8px',
+    xl: '12px'
+  },
+  heights: {
+    topBar: '50px',
+    navRail: '240px',
+    navRailCollapsed: '48px',
+    inspector: '360px',
+    tableRow: '36px',
+    toolbar: '40px'
+  },
+  typography: {
+    pageTitle: '20px',
+    sectionTitle: '14px',
+    body: '13px',
+    metadata: '12px',
+    micro: '11px'
+  },
+  fonts: {
+    sans: "'Sarasa UI SC', 'Sarasa Gothic SC', 'Sarasa Term SC', '更纱黑体', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, -apple-system, sans-serif",
+    mono: "'Sarasa Term SC', 'Sarasa Mono SC', 'SFMono-Regular', Consolas, Menlo, monospace"
+  }
+};
+
+export type Locale = 'zh-CN' | 'en-US';
+
+export const I18N_DICTIONARY = {
+  'zh-CN': {
+    appName: 'FRAMEFORGE OS',
+    appSub: '专业影视分镜与镜头制作管理系统',
+    loginTitle: '登录制作工作台',
+    loginDesc: '单公司私有部署，镜头数据唯一来源 (Shot = Source of Truth)。',
+    email: '系统邮箱',
+    password: '登录密码',
+    loginBtn: '进入制作工作台',
+    registerBtn: '注册内部账号',
+    productions: '制作项目',
+    newProduction: '新建制作项目',
+    storyboard: '分镜卡片板',
+    wallView: '分镜视觉墙',
+    shotList: '镜头制作表',
+    timeline: '规划时间线',
+    assets: '素材资产库',
+    review: '审片与审批',
+    deliverables: '交付与导出',
+    settings: '项目设置',
+    save: '保存更改',
+    saved: '已保存',
+    saving: '保存中…',
+    offline: '离线模式',
+    syncing: '同步中…',
+    conflict: '并发版本冲突',
+    autoTiming: '智能旁白计时',
+    importTable: '导入分镜表',
+    export: '导出交付',
+    share: '发布审片',
+    shot: '镜号',
+    method: '制作方式',
+    duration: '时长',
+    frames: '帧数',
+    status: '状态',
+    department: '部门',
+    owner: '负责人',
+    description: '画面描述',
+    voiceover: '对应旁白',
+    camera: '机位与摄影'
+  },
+  'en-US': {
+    appName: 'FRAMEFORGE OS',
+    appSub: 'Professional Film Storyboard & Shot OS',
+    loginTitle: 'Sign In to Production Studio',
+    loginDesc: 'Private self-hosted deployment. Shot is the single source of truth.',
+    email: 'Account Email',
+    password: 'Password',
+    loginBtn: 'Sign In',
+    registerBtn: 'Register Account',
+    productions: 'Productions',
+    newProduction: 'New Production',
+    storyboard: 'Storyboard Cards',
+    wallView: 'Visual Wall',
+    shotList: 'Shot List',
+    timeline: 'Planning Timeline',
+    assets: 'Media Assets',
+    review: 'Review & Approvals',
+    deliverables: 'Deliverables & Export',
+    settings: 'Settings',
+    save: 'Save Changes',
+    saved: 'Saved',
+    saving: 'Saving…',
+    offline: 'Offline',
+    syncing: 'Syncing…',
+    conflict: 'Revision Conflict',
+    autoTiming: 'VO Auto-Timing',
+    importTable: 'Import Table',
+    export: 'Export',
+    share: 'Publish Review',
+    shot: 'Shot',
+    method: 'Method',
+    duration: 'Duration',
+    frames: 'Frames',
+    status: 'Status',
+    department: 'Department',
+    owner: 'Owner',
+    description: 'Description',
+    voiceover: 'Voice Over',
+    camera: 'Camera'
+  }
+};

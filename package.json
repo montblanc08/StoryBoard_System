@@ -1,0 +1,21 @@
+{
+  "name": "frameforge-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Professional Film & Video Storyboard and Shot Production Management System",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=apps/web",
+    "dev:api": "python apps/api/main.py",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:backend": "pytest tests/backend",
+    "lint": "npm run lint --workspaces --if-present"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}

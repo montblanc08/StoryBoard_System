@@ -1,0 +1,20 @@
+FROM node:20-alpine AS base
+
+WORKDIR /app
+
+COPY package.json ./
+COPY apps/web/package.json ./apps/web/
+COPY packages/types/package.json ./packages/types/
+COPY packages/timecode/package.json ./packages/timecode/
+COPY packages/ui/package.json ./packages/ui/
+COPY packages/contracts/package.json ./packages/contracts/
+
+RUN npm install
+
+COPY apps/web ./apps/web
+COPY packages ./packages
+
+WORKDIR /app/apps/web
+EXPOSE 3000
+
+CMD ["npm", "run", "dev"]

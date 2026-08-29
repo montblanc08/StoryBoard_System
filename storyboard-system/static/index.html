@@ -2,95 +2,880 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>FRAMEFORGE · 私有分镜制作系统</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FRAMEFORGE V3.0 · 专业影视分镜与镜头制作管理系统</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
+  <!-- Offline Google Material Symbols SVG Sprite Registry -->
+  <svg xmlns="http://www.w3.org/2000/svg" style="display:none;">
+    <defs>
+      <g id="icon-movie"><path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/></g>
+      <g id="icon-slideshow"><path d="M10 8v8l5-4-5-4zm9-5H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14z"/></g>
+      <g id="icon-view_timeline"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14zM6 15h6v2H6zm4-4h8v2h-8zm-4-4h6v2H6z"/></g>
+      <g id="icon-view_kanban"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM7 17H5V7h2v10zm6-4h-2V7h2v6zm4 2h-2V7h2v8z"/></g>
+      <g id="icon-table_rows"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 2v3H5V5h14zm0 5v4H5v-4h14zM5 19v-3h14v3H5z"/></g>
+      <g id="icon-dashboard"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></g>
+      <g id="icon-videocam"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></g>
+      <g id="icon-palette"><path d="M12 3c-4.97 0-9 4.03-9 9 0 2.12.74 4.07 1.97 5.61L4.35 19.4c-.39.39-.39 1.02 0 1.41.39.39 1.02.39 1.41 0l2.06-2.06C9.17 19.49 10.53 20 12 20c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-5.5 8c-.83 0-1.5-.67-1.5-1.5S5.67 8 6.5 8 8 8.67 8 9.5 7.33 11 6.5 11zm3-4C8.67 7 8 6.33 8 5.5S8.67 4 9.5 4s1.5.67 1.5 1.5S10.33 7 9.5 7zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 4 14.5 4s1.5.67 1.5 1.5S15.33 7 14.5 7zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 8 17.5 8s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/></g>
+      <g id="icon-layers"><path d="M11.99 18.54l-7.37-5.73L3 14.07l9 7 9-7-1.63-1.27-7.38 5.74zM12 16l7.36-5.73L21 9.07l-9-7-9 7 1.63 1.27L12 16z"/></g>
+      <g id="icon-schedule"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></g>
+      <g id="icon-timer"><path d="M15 1H9v2h6V1zm-4 13h2V8h-2v6zm8.03-6.61l1.42-1.42c-.43-.51-.9-.99-1.41-1.41l-1.42 1.42C16.07 4.74 14.12 4 12 4c-4.97 0-9 4.03-9 9s4.02 9 9 9 9-4.03 9-9c0-2.12-.74-4.07-1.97-5.61zM12 20c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></g>
+      <g id="icon-lock"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></g>
+      <g id="icon-lock_open"><path d="M12 17c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm6-9h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6h1.9c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm0 12H6V10h12v10z"/></g>
+      <g id="icon-add"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></g>
+      <g id="icon-delete"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></g>
+      <g id="icon-edit"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></g>
+      <g id="icon-check_circle"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></g>
+      <g id="icon-cancel"><path d="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z"/></g>
+      <g id="icon-cloud_upload"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></g>
+      <g id="icon-download"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></g>
+      <g id="icon-share"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92 1.61 0 2.92-1.31 2.92-2.92s-1.31-2.92-2.92-2.92z"/></g>
+      <g id="icon-rate_review"><path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 14v-2.47l6.88-6.88c.2-.2.51-.2.71 0l1.77 1.77c.2.2.2.51 0 .71L8.47 14H6zm12 0h-7.5l2-2H18v2z"/></g>
+      <g id="icon-compare"><path d="M10 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h5v2h2V1h-2v2zm0 15H5l5-6v6zm9-15h-5v2h5v13l-5-6v9h5c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></g>
+      <g id="icon-brush"><path d="M7 14c-1.66 0-3 1.34-3 3 0 1.31-1.16 2-2 2 .92 1.22 2.49 2 4 2 2.21 0 4-1.79 4-4 0-1.66-1.34-3-3-3zm13.71-9.37l-1.34-1.34c-.39-.39-1.02-.39-1.41 0L9 12.25 11.75 15l8.96-8.96c.39-.39.39-1.02 0-1.41z"/></g>
+      <g id="icon-play_arrow"><path d="M8 5v14l11-7z"/></g>
+      <g id="icon-pause"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></g>
+      <g id="icon-skip_next"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></g>
+      <g id="icon-skip_previous"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></g>
+      <g id="icon-fullscreen"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></g>
+      <g id="icon-crop"><path d="M17 15h2V7c0-1.1-.9-2-2-2H9v2h8v8zM7 17V1H5v4H1v2h4v10c0 1.1.9 2 2 2h10v4h2v-4h4v-2H7z"/></g>
+      <g id="icon-aspect_ratio"><path d="M19 12h-2v3h-3v2h5v-5zM7 9h3V7H5v5h2V9zm14-6H3c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h18c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16.01H3V4.99h18v14.02z"/></g>
+      <g id="icon-description"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></g>
+      <g id="icon-folder"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></g>
+      <g id="icon-tune"><path d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"/></g>
+      <g id="icon-search"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></g>
+      <g id="icon-close"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></g>
+      <g id="icon-refresh"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></g>
+      <g id="icon-undo"><path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/></g>
+      <g id="icon-redo"><path d="M18.4 10.6C16.55 8.99 14.15 8 11.5 8c-4.65 0-8.58 3.03-9.96 7.22L3.9 16c1.05-3.19 4.05-5.5 7.6-5.5 1.95 0 3.73.72 5.12 1.88L13 16h9V7l-3.6 3.6z"/></g>
+      <g id="icon-settings"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></g>
+      <g id="icon-security"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></g>
+      <g id="icon-account_circle"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></g>
+      <g id="icon-content_cut"><path d="M9.64 7.64c.23-.5.36-1.05.36-1.64 0-2.21-1.79-4-4-4S2 3.79 2 6s1.79 4 4 4c.59 0 1.14-.13 1.64-.36L10 12l-2.36 2.36C7.14 14.13 6.59 14 6 14c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4c0-.59-.13-1.14-.36-1.64L12 14l7 7h3v-1L9.64 7.64zM6 8c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm0 12c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm6-7.5c-.28 0-.5-.22-.5-.5s.22-.5.5-.5.5.22.5.5-.22.5-.5.5zM19 3l-6 6 2 2 7-7V3h-3z"/></g>
+      <g id="icon-print"><path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/></g>
+    </defs>
+  </svg>
+
   <div id="toast" class="toast" aria-live="polite"></div>
+
+  <!-- Command Palette Modal (Ctrl/Cmd + K) -->
+  <dialog id="cmdPalette" class="cmd-dialog">
+    <div class="cmd-box">
+      <div class="cmd-input-wrap">
+        <svg class="g-icon"><use href="#icon-search"></use></svg>
+        <input id="cmdInput" placeholder="输入命令或搜索动作 (例如: 新增镜头, 旁白计时, 导出PDF, 筛选AE)...">
+        <span class="kbd">ESC</span>
+      </div>
+      <div id="cmdList" class="cmd-list"></div>
+    </div>
+  </dialog>
+
+  <!-- Login View -->
   <main id="loginView" class="login-shell hidden">
     <section class="login-card">
-      <div class="brand-mark">F<span>F</span></div>
-      <p class="eyebrow">PRIVATE PRODUCTION SYSTEM</p>
-      <h1>FRAMEFORGE</h1>
-      <p class="muted">从旁白节奏到最终镜头清单，一套服务于 TVC、MG、3D、电影与纪录片的私有工作台。</p>
+      <div class="brand-badge">
+        <svg class="g-icon brand-icon"><use href="#icon-movie"></use></svg>
+        <span>FRAMEFORGE 3.0</span>
+      </div>
+      <p class="eyebrow">PROFESSIONAL SHOT OS · PRIVATE DEPLOY</p>
+      <h1>专业影视分镜与镜头制作管理系统</h1>
+      <p class="muted">以 Shot 为核心单一事实来源（Source of Truth），面向电影、TVC、宣传片、纪录片、MG 与 3D/VFX 管线的一体化私有工作台。</p>
       <form id="loginForm">
-        <label>用户名<input name="username" autocomplete="username" required></label>
-        <label>密码<input name="password" type="password" autocomplete="current-password" required></label>
-        <button class="primary full" type="submit">进入制作系统</button>
+        <label>系统账号<input name="username" value="admin" autocomplete="username" required></label>
+        <label>登录密码<input name="password" type="password" value="FrameForge2026!Admin" autocomplete="current-password" required></label>
+        <button class="primary full" type="submit">
+          <svg class="g-icon"><use href="#icon-security"></use></svg> 进入内网制作工作台
+        </button>
         <p id="loginError" class="error" role="alert"></p>
       </form>
     </section>
   </main>
 
+  <!-- Anonymous Review View -->
   <main id="shareView" class="hidden"></main>
 
+  <!-- Main App Shell -->
   <div id="appView" class="app hidden">
+    <!-- Top Command Bar (Spec Section 60) -->
     <header class="topbar">
-      <div class="brand"><div class="brand-mark small">F<span>F</span></div><div><b>FRAMEFORGE</b><small>PRIVATE STORYBOARD OS</small></div></div>
-      <nav class="top-actions">
-        <span id="storageBadge" class="badge"><i></i> 内网数据节点</span>
-        <button id="backBtn" class="ghost hidden">← 项目列表</button>
-        <button id="logoutBtn" class="ghost">退出</button>
-      </nav>
+      <div class="topbar-left">
+        <div class="brand">
+          <svg class="g-icon logo-icon"><use href="#icon-movie"></use></svg>
+          <div class="brand-text">
+            <b>FRAMEFORGE</b>
+            <small>PRO SHOT OS V3.0</small>
+          </div>
+        </div>
+        <div class="breadcrumb" id="topBreadcrumb">
+          <span class="crumb-proj" id="crumbProject">项目</span>
+          <span class="crumb-sep">/</span>
+          <span class="crumb-view" id="crumbView">分镜卡片板</span>
+        </div>
+      </div>
+
+      <div class="topbar-center">
+        <!-- TVC Remaining Frames HUD (Spec Section 15) -->
+        <div id="tvcCounter" class="tvc-counter hidden">
+          <span class="tvc-label" id="tvcMasterLabel">30s MASTER</span>
+          <span class="tvc-used" id="tvcUsedTime">00:29:22 USED</span>
+          <span class="tvc-remain" id="tvcRemainFrames">0 FRAMES REMAINING</span>
+        </div>
+        <!-- Global Search Bar -->
+        <div class="global-search">
+          <svg class="g-icon"><use href="#icon-search"></use></svg>
+          <input id="globalSearchInput" placeholder="按 / 键搜索镜号、描述、旁白、制作方式或按 Ctrl+K 唤起指令...">
+        </div>
+      </div>
+
+      <div class="topbar-right">
+        <!-- Network Connection Status (Spec Section 123) -->
+        <div class="net-badge internal" id="netBadge">
+          <span class="dot"></span>
+          <span id="netBadgeText">内网数据节点 · 安全隔离</span>
+        </div>
+        <!-- Undo / Redo -->
+        <button id="undoBtn" class="icon-action-btn" title="撤销 (Ctrl+Z)">
+          <svg class="g-icon"><use href="#icon-undo"></use></svg>
+        </button>
+        <button id="redoBtn" class="icon-action-btn" title="重做 (Ctrl+Shift+Z)">
+          <svg class="g-icon"><use href="#icon-redo"></use></svg>
+        </button>
+        <!-- Quick Actions -->
+        <button id="exportMenuBtn" class="ghost compact-btn" title="导出与交换格式">
+          <svg class="g-icon"><use href="#icon-download"></use></svg> 导出
+        </button>
+        <button id="topShareBtn" class="ghost compact-btn" title="发布匿名审片链接">
+          <svg class="g-icon"><use href="#icon-share"></use></svg> 审片
+        </button>
+        <button id="backToListBtn" class="ghost compact-btn hidden" title="返回项目列表">
+          <svg class="g-icon"><use href="#icon-folder"></use></svg> 项目列表
+        </button>
+        <div class="user-profile">
+          <svg class="g-icon"><use href="#icon-account_circle"></use></svg>
+          <span id="userNameLabel">管理员</span>
+          <button id="logoutBtn" class="ghost icon-only-btn" title="安全退出">
+            <svg class="g-icon"><use href="#icon-close"></use></svg>
+          </button>
+        </div>
+      </div>
     </header>
 
-    <section id="dashboard" class="page">
-      <div class="hero">
-        <div><p class="eyebrow">PRODUCTION CONTROL</p><h1>把创意拆成可执行的镜头。</h1><p class="muted">项目、旁白、分镜、媒体与分享全部存放在公司内网。</p></div>
-        <button id="newProjectBtn" class="primary">＋ 新建项目</button>
-      </div>
-      <div class="section-head"><div><h2>制作项目</h2><p id="projectCount" class="muted"></p></div></div>
-      <div id="projectGrid" class="project-grid"></div>
-    </section>
+    <!-- App Body: Left Rail + Main Content + Right Inspector -->
+    <div class="app-body">
+      <!-- Left Navigation Rail (Spec Section 61) -->
+      <aside class="nav-rail" id="navRail">
+        <div class="rail-group">
+          <span class="rail-title">总览</span>
+          <button class="rail-item" data-tab="overview">
+            <svg class="g-icon"><use href="#icon-dashboard"></use></svg>
+            <span>制作概览</span>
+          </button>
+        </div>
 
-    <section id="workspace" class="workspace hidden">
-      <aside class="rail">
-        <div class="rail-section"><span>视图</span><button class="rail-btn active" data-view="board">▦<b>分镜板</b></button><button class="rail-btn" data-view="table">☷<b>执行表</b></button></div>
-        <div class="rail-section"><span>工具</span><button id="importBtn" class="rail-btn">⇧<b>导入表格</b></button><button id="timingBtn" class="rail-btn">◷<b>旁白计时</b></button><button id="shareBtn" class="rail-btn">↗<b>审片分享</b></button></div>
-        <input id="fileImport" type="file" accept=".xlsx,.csv,.tsv" hidden>
+        <div class="rail-group">
+          <span class="rail-title">创意与脚本</span>
+          <button class="rail-item" data-tab="script">
+            <svg class="g-icon"><use href="#icon-description"></use></svg>
+            <span>旁白与对齐</span>
+          </button>
+        </div>
+
+        <div class="rail-group">
+          <span class="rail-title">分镜规划</span>
+          <button class="rail-item active" data-tab="board">
+            <svg class="g-icon"><use href="#icon-view_kanban"></use></svg>
+            <span>分镜卡片板</span>
+          </button>
+          <button class="rail-item" data-tab="wall">
+            <svg class="g-icon"><use href="#icon-slideshow"></use></svg>
+            <span>分镜视觉墙</span>
+          </button>
+          <button class="rail-item" data-tab="table">
+            <svg class="g-icon"><use href="#icon-table_rows"></use></svg>
+            <span>镜头制作表</span>
+          </button>
+          <button class="rail-item" data-tab="timeline">
+            <svg class="g-icon"><use href="#icon-view_timeline"></use></svg>
+            <span>规划时间线</span>
+          </button>
+        </div>
+
+        <div class="rail-group">
+          <span class="rail-title">素材与制作</span>
+          <button class="rail-item" data-tab="assets">
+            <svg class="g-icon"><use href="#icon-palette"></use></svg>
+            <span>素材资产库</span>
+          </button>
+          <button class="rail-item" data-tab="method_groups">
+            <svg class="g-icon"><use href="#icon-layers"></use></svg>
+            <span>制作方式分组</span>
+          </button>
+        </div>
+
+        <div class="rail-group">
+          <span class="rail-title">审片与交付</span>
+          <button class="rail-item" data-tab="review">
+            <svg class="g-icon"><use href="#icon-rate_review"></use></svg>
+            <span>审片与版本</span>
+          </button>
+          <button class="rail-item" data-tab="deliverables">
+            <svg class="g-icon"><use href="#icon-download"></use></svg>
+            <span>交付与导出</span>
+          </button>
+        </div>
+
+        <div class="rail-group rail-bottom">
+          <button class="rail-item" data-tab="settings">
+            <svg class="g-icon"><use href="#icon-settings"></use></svg>
+            <span>项目设置</span>
+          </button>
+        </div>
       </aside>
-      <div class="work-main">
-        <div class="project-bar">
-          <div><p class="eyebrow" id="projectType">FILM</p><h1 id="projectName">项目</h1></div>
-          <div class="project-metrics"><div><span>总时长</span><b id="totalDuration">00:00</b></div><div><span>镜头</span><b id="shotCount">0</b></div><div><span>起始时码</span><b id="startTc">01:00:00:00</b></div></div>
-          <div class="bar-actions"><button id="settingsBtn" class="ghost">项目设置</button><button id="saveBtn" class="primary">保存修改</button></div>
+
+      <!-- Main Central Workspace -->
+      <main class="main-workspace" id="mainWorkspace">
+        <!-- 1. Projects Dashboard Page -->
+        <section id="dashboardView" class="page-view hidden">
+          <div class="dash-hero">
+            <div class="dash-copy">
+              <p class="eyebrow">FRAMEFORGE PRODUCTION HUB</p>
+              <h1>面向专业管线的镜头生产管理工作台</h1>
+              <p class="muted">单公司私有部署，镜头数据唯一来源（Shot = Source of Truth）。支持电影、纪录片、TVC、宣传片、MG 与 3D/VFX 制作。</p>
+            </div>
+            <div class="dash-actions">
+              <button id="dashNewProjectBtn" class="primary">
+                <svg class="g-icon"><use href="#icon-add"></use></svg> 新建制作项目
+              </button>
+            </div>
+          </div>
+
+          <div class="section-header">
+            <h2>当前制作项目</h2>
+            <span id="projCountLabel" class="counter-badge">1 个项目</span>
+          </div>
+          <div id="projectGrid" class="project-cards-grid"></div>
+        </section>
+
+        <!-- 2. Active Project Workspace -->
+        <section id="projectWorkView" class="page-view">
+          <!-- Sub Header Bar -->
+          <div class="sub-header-bar">
+            <div class="sub-header-left">
+              <div class="proj-title-stack">
+                <span class="type-tag" id="currentProjTypeTag">PROMO</span>
+                <h2 id="currentProjName">天津国际农产品交易中心 · 4分30秒形象宣传片</h2>
+              </div>
+              <div class="proj-meta-chips">
+                <span class="chip-item"><b id="hudTotalDuration">04:30.00</b> 总时长</span>
+                <span class="chip-item"><b id="hudTotalFrames">6750f</b> 帧数</span>
+                <span class="chip-item"><b id="hudFps">25 fps</b> 帧率</span>
+                <span class="chip-item"><b id="hudAspectRatio">16:9</b> 画幅</span>
+                <span class="chip-item"><b id="hudShotCount">80</b> 镜头</span>
+              </div>
+            </div>
+
+            <div class="sub-header-right">
+              <button id="addShotActionBtn" class="primary compact-btn">
+                <svg class="g-icon"><use href="#icon-add"></use></svg> 新增镜头
+              </button>
+              <button id="autoTimingActionBtn" class="ghost compact-btn" title="按旁白字数与标点智能计算分配帧数">
+                <svg class="g-icon"><use href="#icon-timer"></use></svg> 智能旁白计时
+              </button>
+              <button id="importExcelBtn" class="ghost compact-btn" title="导入 Excel/CSV 分镜清单">
+                <svg class="g-icon"><use href="#icon-cloud_upload"></use></svg> 导入表格
+              </button>
+              <button id="saveProjectBtn" class="primary compact-btn">
+                <svg class="g-icon"><use href="#icon-check_circle"></use></svg> 保存更改
+              </button>
+            </div>
+          </div>
+
+          <!-- Secondary Toolbar: Filters & Column Presets -->
+          <div class="filter-toolbar">
+            <div class="filter-group">
+              <label>筛选方式:
+                <select id="methodFilter">
+                  <option value="ALL">全部制作方式</option>
+                  <option value="LIVE">LIVE 实拍</option>
+                  <option value="STOCK">STOCK 素材</option>
+                  <option value="CLIENT">CLIENT 客户</option>
+                  <option value="AE">AE / 包装</option>
+                  <option value="MG">MG 动画</option>
+                  <option value="3D">3D 三维</option>
+                  <option value="VFX">VFX 特效</option>
+                </select>
+              </label>
+              <label>部门:
+                <select id="deptFilter">
+                  <option value="ALL">全部部门</option>
+                  <option value="Camera">摄影 Camera</option>
+                  <option value="Director">导演 Director</option>
+                  <option value="Production">制片 Production</option>
+                  <option value="Motion">动效 Motion</option>
+                  <option value="3D">三维 3D</option>
+                  <option value="Stock">素材采购 Stock</option>
+                </select>
+              </label>
+              <label>状态:
+                <select id="statusFilter">
+                  <option value="ALL">全部状态</option>
+                  <option value="Draft">Draft 草稿</option>
+                  <option value="WIP">WIP 制作中</option>
+                  <option value="Approved">Approved 导演已批准</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="preset-group" id="tablePresetGroup">
+              <span class="preset-label">列预设:</span>
+              <button class="preset-btn active" data-preset="director">导演 Director</button>
+              <button class="preset-btn" data-preset="dp">摄影 DP</button>
+              <button class="preset-btn" data-preset="production">制片 Production</button>
+              <button class="preset-btn" data-preset="motion">包装 Motion</button>
+              <button class="preset-btn" data-preset="stock">素材 Stock</button>
+              <button class="preset-btn" data-preset="vfx">特效 VFX</button>
+            </div>
+          </div>
+
+          <!-- Multi-View Container -->
+          <div class="view-viewport">
+            <!-- 1. Cards View (Spec Section 64-67) -->
+            <div id="viewBoard" class="view-content">
+              <div id="shotCardGrid" class="shot-card-grid"></div>
+            </div>
+
+            <!-- 2. Wall View (Spec Section 68) -->
+            <div id="viewWall" class="view-content hidden">
+              <div id="wallGrid" class="wall-grid"></div>
+            </div>
+
+            <!-- 3. Table View (Spec Section 71-73) -->
+            <div id="viewTable" class="view-content hidden">
+              <div id="tableScrollWrap" class="table-scroll-wrap"></div>
+            </div>
+
+            <!-- 4. Planning Timeline & Animatic Player (Spec Section 85-94) -->
+            <div id="viewTimeline" class="view-content hidden">
+              <div class="timeline-container">
+                <!-- Animatic Preview Player -->
+                <div class="animatic-player-box">
+                  <div class="animatic-screen-wrap">
+                    <div id="animaticScreen" class="animatic-screen">
+                      <div class="animatic-empty">
+                        <svg class="g-icon"><use href="#icon-play_arrow"></use></svg>
+                        <span>按空格键或点击播放 Animatic 分镜动态预演</span>
+                      </div>
+                    </div>
+                    <!-- Safe Area Overlay (Spec Section 82) -->
+                    <div id="safeAreaOverlay" class="safe-area-overlay">
+                      <div class="action-safe-box" title="90% Action Safe"></div>
+                      <div class="title-safe-box" title="80% Title Safe"></div>
+                      <div class="thirds-grid"></div>
+                    </div>
+                  </div>
+                  <div class="animatic-controls">
+                    <div class="ctrl-left">
+                      <button id="playerPrevBtn" class="icon-btn" title="上一个镜头 (←)"><svg class="g-icon"><use href="#icon-skip_previous"></use></svg></button>
+                      <button id="playerPlayBtn" class="icon-btn primary-btn" title="播放/暂停 (Space)"><svg class="g-icon"><use href="#icon-play_arrow"></use></svg></button>
+                      <button id="playerNextBtn" class="icon-btn" title="下一个镜头 (→)"><svg class="g-icon"><use href="#icon-skip_next"></use></svg></button>
+                      <span id="playerCurrentTc" class="player-tc">01:00:00:00</span>
+                      <span class="player-shot-info" id="playerShotInfo">SHOT 001 · 渤海日出</span>
+                    </div>
+                    <div class="ctrl-right">
+                      <button id="toggleSafeAreasBtn" class="ghost compact-btn">
+                        <svg class="g-icon"><use href="#icon-aspect_ratio"></use></svg> 安全框
+                      </button>
+                      <button id="fullscreenPlayerBtn" class="ghost compact-btn">
+                        <svg class="g-icon"><use href="#icon-fullscreen"></use></svg> 全屏
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Multi-Track Timeline -->
+                <div class="timeline-tracks-wrap" id="timelineTracksWrap">
+                  <div class="timeline-ruler" id="timelineRuler"></div>
+                  <div class="track-lanes" id="trackLanes"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 5. Production Overview (Spec Section 118-119) -->
+            <div id="viewOverview" class="view-content hidden">
+              <div class="overview-grid">
+                <div class="stat-card">
+                  <span class="stat-num" id="statTotalShots">80</span>
+                  <span class="stat-label">总镜头数</span>
+                </div>
+                <div class="stat-card">
+                  <span class="stat-num" id="statLiveReady">34 / 34</span>
+                  <span class="stat-label">LIVE 实拍就绪</span>
+                </div>
+                <div class="stat-card">
+                  <span class="stat-num" id="statStockPurchased">18 / 18</span>
+                  <span class="stat-label">STOCK 素材采购确认</span>
+                </div>
+                <div class="stat-card">
+                  <span class="stat-num" id="statClientReceived">7 / 7</span>
+                  <span class="stat-label">CLIENT 客户供片归档</span>
+                </div>
+                <div class="stat-card">
+                  <span class="stat-num" id="statAeApproved">12 / 12</span>
+                  <span class="stat-label">AE/MG 包装设计完成</span>
+                </div>
+                <div class="stat-card">
+                  <span class="stat-num" id="stat3dApproved">6 / 6</span>
+                  <span class="stat-label">3D/VFX 渲染通过</span>
+                </div>
+              </div>
+
+              <div class="overview-chart-box">
+                <h3>制作方式占比与执行进度</h3>
+                <div id="methodProgressBars" class="progress-bars-stack"></div>
+              </div>
+            </div>
+
+            <!-- 6. Script & VO Auto-Timing Studio (Spec Section 28-30) -->
+            <div id="viewScript" class="view-content hidden">
+              <div class="script-split-studio">
+                <div class="script-left-pane">
+                  <div class="pane-header">
+                    <h3>旁白文字脚本 (VO Narration)</h3>
+                    <span class="muted">支持标点权重计算</span>
+                  </div>
+                  <div id="scriptEditorList" class="script-editor-list"></div>
+                </div>
+                <div class="script-right-pane">
+                  <div class="pane-header">
+                    <h3>时码与停顿分解解释 (Explainable Timing)</h3>
+                    <button id="recomputeAutoTimingBtn" class="primary compact-btn">
+                      <svg class="g-icon"><use href="#icon-timer"></use></svg> 重新智能分配
+                    </button>
+                  </div>
+                  <div id="timingExplainList" class="timing-explain-list"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 7. Media Assets Hub (Spec Section 46-49) -->
+            <div id="viewAssets" class="view-content hidden">
+              <div class="assets-header">
+                <div class="asset-filters">
+                  <button class="asset-filter-btn active" data-cat="ALL">全部素材</button>
+                  <button class="asset-filter-btn" data-cat="Storyboard">分镜图版</button>
+                  <button class="asset-filter-btn" data-cat="Stock">购买素材</button>
+                  <button class="asset-filter-btn" data-cat="Client">客户资料</button>
+                  <button class="asset-filter-btn" data-cat="AE">AE/MG工程</button>
+                  <button class="asset-filter-btn" data-cat="Audio">音频/旁白</button>
+                </div>
+                <button id="uploadNewAssetBtn" class="primary compact-btn">
+                  <svg class="g-icon"><use href="#icon-cloud_upload"></use></svg> 上传新素材代理
+                </button>
+                <input id="assetFileInput" type="file" accept="image/*,video/*,.pdf" hidden>
+              </div>
+              <div id="assetsGrid" class="assets-card-grid"></div>
+            </div>
+
+            <!-- 8. Review & Approval Workspace (Spec Section 95-99) -->
+            <div id="viewReview" class="view-content hidden">
+              <div class="review-workbench">
+                <div class="review-screen-box">
+                  <div id="reviewPlayerScreen" class="review-player-screen"></div>
+                  <div class="review-toolbar">
+                    <div class="version-badges">
+                      <span class="v-badge current">当前版本 Current v007</span>
+                      <span class="v-badge approved">批准版本 Approved v005</span>
+                    </div>
+                    <div class="compare-modes">
+                      <button class="ghost compact-btn active" data-compare="single">单帧</button>
+                      <button class="ghost compact-btn" data-compare="sidebyside">左右并排</button>
+                      <button class="ghost compact-btn" data-compare="overlay">透明叠加</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="review-side-panel">
+                  <div class="approval-action-box">
+                    <h4>审批状态流</h4>
+                    <select id="reviewApprovalSelect" class="status-select">
+                      <option value="Draft">Draft 草稿</option>
+                      <option value="WIP">WIP 制作中</option>
+                      <option value="Ready for Review">Ready for Review 提审</option>
+                      <option value="Changes Requested">Changes Requested 需修改</option>
+                      <option value="Approved">Approved 导演已批准</option>
+                      <option value="Locked">Locked 锁定交付</option>
+                    </select>
+                  </div>
+
+                  <div class="review-comments-box">
+                    <h4>时间戳批注与导演意见</h4>
+                    <div id="reviewCommentsList" class="comments-list"></div>
+                    <form id="addCommentForm" class="comment-input-form">
+                      <input id="commentTextInput" placeholder="输入审片批注 (例如: 建议换50mm特写)..." required>
+                      <button class="primary compact-btn" type="submit">发送</button>
+                    </form>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 9. Deliverables & Export Hub (Spec Section 105-113) -->
+            <div id="viewDeliverables" class="view-content hidden">
+              <div class="deliverables-page">
+                <h2>专业交付与外部交换格式</h2>
+                <p class="muted">一键导出符合行业标准的拍摄通告、素材采购清单、剪辑工程交换文件与分镜图册。</p>
+                <div class="deliverables-grid">
+                  <div class="deliverable-card">
+                    <svg class="g-icon card-ico"><use href="#icon-description"></use></svg>
+                    <h3>导演分镜图版 (Director PDF)</h3>
+                    <p>包含镜号、分镜图版、时长、运镜、焦段与对应旁白，供导演现场拍摄与排期。</p>
+                    <button class="primary" onclick="window.print()">
+                      <svg class="g-icon"><use href="#icon-print"></use></svg> 打印 / 导出 PDF
+                    </button>
+                  </div>
+
+                  <div class="deliverable-card">
+                    <svg class="g-icon card-ico"><use href="#icon-table_rows"></use></svg>
+                    <h3>现场拍摄通告表 (Shooting List XLSX)</h3>
+                    <p>包含镜号、场景、焦段、机位、运镜、道具与责任人，供制片现场调度。</p>
+                    <a class="ghost download-btn" id="exportShootingListBtn" href="#">
+                      <svg class="g-icon"><use href="#icon-download"></use></svg> 导出 Excel 表格
+                    </a>
+                  </div>
+
+                  <div class="deliverable-card">
+                    <svg class="g-icon card-ico"><use href="#icon-movie"></use></svg>
+                    <h3>剪辑工程交换 (CMX3600 EDL)</h3>
+                    <p>标准 CMX3600 EDL 时码剪辑表，完美导入 DaVinci Resolve、Premiere Pro、Avid。</p>
+                    <a class="ghost download-btn" id="exportEdlBtn" href="#">
+                      <svg class="g-icon"><use href="#icon-download"></use></svg> 下载 EDL
+                    </a>
+                  </div>
+
+                  <div class="deliverable-card">
+                    <svg class="g-icon card-ico"><use href="#icon-view_timeline"></use></svg>
+                    <h3>OpenTimelineIO (OTIO)</h3>
+                    <p>好莱坞 Academy 影视管线通用交换协议，包含完整镜头元数据与分轨信息。</p>
+                    <a class="ghost download-btn" id="exportOtioBtn" href="#">
+                      <svg class="g-icon"><use href="#icon-download"></use></svg> 下载 OTIO JSON
+                    </a>
+                  </div>
+
+                  <div class="deliverable-card">
+                    <svg class="g-icon card-ico"><use href="#icon-subtitles"></use></svg>
+                    <h3>旁白时码字幕 (SRT / VTT)</h3>
+                    <p>根据镜头精确时码计算生成的旁白解说词与对白字幕文件。</p>
+                    <a class="ghost download-btn" id="exportSrtBtn" href="#">
+                      <svg class="g-icon"><use href="#icon-download"></use></svg> 下载 SRT 字幕
+                    </a>
+                  </div>
+
+                  <div class="deliverable-card">
+                    <svg class="g-icon card-ico"><use href="#icon-palette"></use></svg>
+                    <h3>素材采购清单 (Stock List CSV)</h3>
+                    <p>汇集所有 STOCK 类型镜头、版权提供商、价格、授权范围与购买状态。</p>
+                    <a class="ghost download-btn" id="exportStockListBtn" href="#">
+                      <svg class="g-icon"><use href="#icon-download"></use></svg> 导出采购清单
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 10. Production Method Grouping View (Spec Section 69-70) -->
+            <div id="viewMethodGroups" class="view-content hidden">
+              <div id="methodGroupsContainer" class="method-groups-container"></div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <!-- Right Inspector Sidebar (Spec Section 74-78) -->
+      <aside class="inspector-sidebar" id="inspectorSidebar">
+        <div class="inspector-header">
+          <div class="inspector-title">
+            <span class="inspector-badge" id="inspMethodBadge">LIVE</span>
+            <h3 id="inspShotNumber">SHOT 001</h3>
+          </div>
+          <div class="inspector-tools">
+            <button id="inspTrashBtn" class="icon-btn danger" title="移入回收站">
+              <svg class="g-icon"><use href="#icon-delete"></use></svg>
+            </button>
+            <button id="inspCloseBtn" class="icon-btn" title="收起面板">
+              <svg class="g-icon"><use href="#icon-close"></use></svg>
+            </button>
+          </div>
         </div>
-        <div class="toolbar">
-          <button id="addShotBtn" class="primary compact">＋ 新增镜头</button>
-          <button id="autoTimingBtn" class="ghost">自动分配旁白时长</button>
-          <label class="search">⌕<input id="searchInput" placeholder="搜索镜号、场景、旁白…"></label>
-          <div class="view-toggle"><button data-mode="board" class="active">分镜</button><button data-mode="table">表格</button></div>
+
+        <div class="inspector-scroll" id="inspectorScroll">
+          <!-- Status & Title -->
+          <div class="insp-section">
+            <label class="insp-label">镜头标题
+              <input id="inspTitle" class="insp-input" placeholder="输入镜头名称">
+            </label>
+            <div class="insp-two-col">
+              <label class="insp-label">状态
+                <select id="inspStatus" class="insp-select">
+                  <option value="Draft">Draft 草稿</option>
+                  <option value="WIP">WIP 制作中</option>
+                  <option value="Ready for Review">Ready 提审</option>
+                  <option value="Changes Requested">Changes 待修改</option>
+                  <option value="Approved">Approved 已批准</option>
+                  <option value="Locked">Locked 锁定</option>
+                </select>
+              </label>
+              <label class="insp-label">责任部门
+                <select id="inspDept" class="insp-select">
+                  <option value="Camera">摄影 Camera</option>
+                  <option value="Director">导演 Director</option>
+                  <option value="Production">制片 Production</option>
+                  <option value="Motion">动效 Motion</option>
+                  <option value="3D">三维 3D</option>
+                  <option value="VFX">特效 VFX</option>
+                  <option value="Stock">素材 Stock</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <!-- Timing Inspector (Spec Section 77) -->
+          <div class="insp-section">
+            <div class="insp-sec-title">
+              <svg class="g-icon"><use href="#icon-schedule"></use></svg>
+              <span>时码与帧数 (Timing)</span>
+            </div>
+            <div class="insp-two-col">
+              <label class="insp-label">TC IN
+                <input id="inspTcIn" class="insp-input mono" readonly>
+              </label>
+              <label class="insp-label">TC OUT
+                <input id="inspTcOut" class="insp-input mono" readonly>
+              </label>
+            </div>
+            <div class="insp-two-col">
+              <label class="insp-label">持续帧数 (Frames)
+                <input id="inspDurationFrames" type="number" min="1" class="insp-input mono">
+              </label>
+              <label class="insp-label">秒数 (Seconds)
+                <input id="inspDurationSec" type="number" step="0.04" class="insp-input mono">
+              </label>
+            </div>
+            <div class="insp-checkbox-row">
+              <label><input type="checkbox" id="inspLocked"> 锁定镜头时长 (自动重算时不修改)</label>
+            </div>
+          </div>
+
+          <!-- Production Method Dynamic Panel (Spec Section 76) -->
+          <div class="insp-section insp-method-box">
+            <div class="insp-sec-title">
+              <svg class="g-icon"><use href="#icon-layers"></use></svg>
+              <span>主制作方式 (Primary Method)</span>
+            </div>
+            <select id="inspPrimaryMethod" class="insp-select method-select">
+              <option value="LIVE">LIVE 实拍 (真人/外景/航拍)</option>
+              <option value="STOCK">STOCK 购买素材 (Getty/Pond5/Adobe)</option>
+              <option value="CLIENT">CLIENT 客户供片 (历史资料/企业已有)</option>
+              <option value="ARCHIVE">ARCHIVE 档案素材 (纪录片)</option>
+              <option value="STILL">STILL 静帧图片 (老照片/海报)</option>
+              <option value="AE">AE / MOTION 动态包装 (地图/UI/数据)</option>
+              <option value="MG">MG 扁平动画 (图形/图标视觉化)</option>
+              <option value="3D">3D 三维制作 (建筑/园区/产品)</option>
+              <option value="VFX">VFX 视觉特效 (跟踪/抠像/合成)</option>
+              <option value="TYPE">TYPE 文字字卡</option>
+            </select>
+
+            <!-- Dynamic Fields Container -->
+            <div id="inspDynamicMethodFields" class="dynamic-method-fields"></div>
+          </div>
+
+          <!-- Multi-Panel Strip (Spec Section 79) -->
+          <div class="insp-section">
+            <div class="insp-sec-title">
+              <svg class="g-icon"><use href="#icon-slideshow"></use></svg>
+              <span>分镜画板 (Panels)</span>
+              <button id="addPanelBtn" class="ghost icon-only-btn" title="添加关键画板"><svg class="g-icon"><use href="#icon-add"></use></svg></button>
+            </div>
+            <div id="inspPanelStrip" class="panel-strip"></div>
+            <button id="openCanvasDrawBtn" class="primary full compact-btn">
+              <svg class="g-icon"><use href="#icon-brush"></use></svg> 打开分镜涂鸦与安全框绘制
+            </button>
+          </div>
+
+          <!-- Camera & Movement (Spec Section 10) -->
+          <div class="insp-section">
+            <div class="insp-sec-title">
+              <svg class="g-icon"><use href="#icon-videocam"></use></svg>
+              <span>机位与摄影 (Camera)</span>
+            </div>
+            <div class="insp-two-col">
+              <label class="insp-label">景别
+                <input id="inspShotSize" class="insp-input" placeholder="大全景 / 特写">
+              </label>
+              <label class="insp-label">焦段
+                <input id="inspLens" class="insp-input" placeholder="24mm / 50mm">
+              </label>
+            </div>
+            <div class="insp-two-col">
+              <label class="insp-label">运镜
+                <input id="inspMovement" class="insp-input" placeholder="固定 / 航拍推镜头">
+              </label>
+              <label class="insp-label">机位角度
+                <input id="inspAngle" class="insp-input" placeholder="平视 / 俯拍">
+              </label>
+            </div>
+          </div>
+
+          <!-- Creative & Script (Spec Section 10) -->
+          <div class="insp-section">
+            <div class="insp-sec-title">
+              <svg class="g-icon"><use href="#icon-description"></use></svg>
+              <span>画面与解说词 (Creative)</span>
+            </div>
+            <label class="insp-label">画面描述
+              <textarea id="inspDescription" rows="3" class="insp-textarea" placeholder="描述画面动作、构图与光影..."></textarea>
+            </label>
+            <label class="insp-label">对应旁白 / 配音
+              <textarea id="inspVoiceover" rows="2" class="insp-textarea" placeholder="输入对应解说词旁白..."></textarea>
+            </label>
+          </div>
+
+          <!-- Production Steps (Spec Section 7) -->
+          <div class="insp-section">
+            <div class="insp-sec-title">
+              <svg class="g-icon"><use href="#icon-check_circle"></use></svg>
+              <span>制作步骤跟踪 (Production Steps)</span>
+            </div>
+            <div id="inspStepsList" class="steps-checklist"></div>
+          </div>
         </div>
-        <div id="boardView" class="shot-board"></div>
-        <div id="tableView" class="table-wrap hidden"></div>
-      </div>
-    </section>
+      </aside>
+    </div>
   </div>
 
-  <dialog id="projectDialog">
-    <form method="dialog" id="projectForm" class="dialog-form">
-      <div class="dialog-head"><div><p class="eyebrow">NEW PRODUCTION</p><h2>新建制作项目</h2></div><button value="cancel" class="icon-btn">×</button></div>
-      <label>项目名称<input name="name" required placeholder="例如：品牌年度形象片"></label>
-      <div class="two"><label>制作类型<select name="production_type"><option value="film">电影 / 剧情</option><option value="tvc">TVC 广告</option><option value="documentary">纪录片</option><option value="mg">MG 动画</option><option value="3d">3D / CG</option></select></label><label>画幅<select name="aspect_ratio"><option>16:9</option><option>2.39:1</option><option>1.85:1</option><option>9:16</option><option>1:1</option></select></label></div>
-      <div class="two"><label>帧率<select name="fps"><option>25</option><option>24</option><option>23.976</option><option>30</option><option>29.97</option><option>50</option><option>60</option></select></label><label>目标片长（秒）<input name="target_seconds" type="number" min="1" value="60" required></label></div>
-      <button class="primary full" value="default">创建项目</button>
+  <!-- HTML5 Canvas Panel Drawing Studio Modal (Spec Section 79-84) -->
+  <dialog id="drawModal" class="draw-dialog">
+    <div class="draw-studio">
+      <div class="draw-topbar">
+        <div class="draw-tool-group">
+          <button class="draw-tool-btn active" data-tool="pen" title="画笔"><svg class="g-icon"><use href="#icon-brush"></use></svg></button>
+          <button class="draw-tool-btn" data-tool="line" title="直线 / 箭头"><svg class="g-icon"><use href="#icon-straighten"></use></svg></button>
+          <button class="draw-tool-btn" data-tool="rect" title="方框"><svg class="g-icon"><use href="#icon-crop_free"></use></svg></button>
+          <button class="draw-tool-btn" data-tool="camera" title="运镜方向箭头"><svg class="g-icon"><use href="#icon-videocam"></use></svg></button>
+          <button class="draw-tool-btn" data-tool="eraser" title="橡皮擦"><svg class="g-icon"><use href="#icon-delete"></use></svg></button>
+          <input type="color" id="drawColorPicker" value="#ffbf47" title="颜色选择">
+          <input type="range" id="drawSizeSlider" min="1" max="20" value="3" title="粗细">
+        </div>
+        <div class="draw-safe-group">
+          <label><input type="checkbox" id="drawActionSafeCheck" checked> Action Safe (90%)</label>
+          <label><input type="checkbox" id="drawTitleSafeCheck" checked> Title Safe (80%)</label>
+          <label><input type="checkbox" id="drawThirdsCheck" checked> 三分线</label>
+          <label><input type="checkbox" id="drawSocialCropCheck"> 9:16 社媒裁切</label>
+        </div>
+        <div class="draw-actions">
+          <button id="clearCanvasBtn" class="ghost compact-btn">清空</button>
+          <button id="saveCanvasBtn" class="primary compact-btn">完成并保存分镜</button>
+          <button class="icon-btn" data-close="drawModal"><svg class="g-icon"><use href="#icon-close"></use></svg></button>
+        </div>
+      </div>
+      <div class="draw-canvas-container">
+        <canvas id="sketchCanvas" width="1280" height="720"></canvas>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Excel Import Preview & Mapping Modal (Spec Section 114-117) -->
+  <dialog id="importModal" class="import-dialog">
+    <div class="dialog-card wide">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">SMART EXCEL IMPORT</p>
+          <h2>Excel 分镜表智能识别与导入</h2>
+        </div>
+        <button class="icon-btn" data-close="importModal"><svg class="g-icon"><use href="#icon-close"></use></svg></button>
+      </div>
+      <p class="muted">系统已自动扫描表头并根据词典执行置信度匹配。请核对映射关系后提交导入。</p>
+      <div id="mappingPreviewBox" class="mapping-preview-box"></div>
+      <div class="dialog-foot">
+        <button id="cancelImportBtn" class="ghost" data-close="importModal">取消</button>
+        <button id="commitImportBtn" class="primary">确认导入镜头</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- New Project Modal -->
+  <dialog id="newProjModal" class="standard-dialog">
+    <form id="newProjForm" class="dialog-card">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">NEW PRODUCTION</p>
+          <h2>创建新制作项目</h2>
+        </div>
+        <button type="button" class="icon-btn" data-close="newProjModal"><svg class="g-icon"><use href="#icon-close"></use></svg></button>
+      </div>
+      <label>项目名称<input name="name" required placeholder="例如：品牌年度形象宣传片"></label>
+      <div class="two-row">
+        <label>制作模板
+          <select name="production_type">
+            <option value="promo">Corporate / 宣传片模板</option>
+            <option value="tvc">TVC 广告片模板 (严格秒数)</option>
+            <option value="film">Film 电影 / 剧情片模板</option>
+            <option value="documentary">Documentary 纪录片模板</option>
+            <option value="mg">MG 扁平动画模板</option>
+            <option value="3d_vfx">3D / VFX 视效管线模板</option>
+          </select>
+        </label>
+        <label>画幅
+          <select name="aspect_ratio">
+            <option value="16:9">16:9 标准高清</option>
+            <option value="2.39:1">2.39:1 宽银幕电影</option>
+            <option value="1.85:1">1.85:1 遮幅电影</option>
+            <option value="9:16">9:16 竖版全屏</option>
+            <option value="1:1">1:1 正方形</option>
+          </select>
+        </label>
+      </div>
+      <div class="two-row">
+        <label>时码基准帧率 (FPS)
+          <select name="fps">
+            <option value="25">25 fps (PAL / 国内标准)</option>
+            <option value="24">24 fps (电影标准)</option>
+            <option value="23.976">23.976 fps (影视工业)</option>
+            <option value="29.97">29.97 fps (NTSC)</option>
+            <option value="30">30 fps</option>
+            <option value="50">50 fps</option>
+            <option value="60">60 fps</option>
+          </select>
+        </label>
+        <label>目标成片时长 (秒)
+          <input name="target_seconds" type="number" min="1" value="270" required>
+        </label>
+      </div>
+      <div class="dialog-foot">
+        <button type="submit" class="primary full">创建并进入制作工作台</button>
+      </div>
     </form>
   </dialog>
 
-  <dialog id="settingsDialog"><form method="dialog" id="settingsForm" class="dialog-form"><div class="dialog-head"><h2>项目设置</h2><button value="cancel" class="icon-btn">×</button></div><label>项目名称<input name="name" required></label><div class="two"><label>目标片长（秒）<input name="target_seconds" type="number" min="1"></label><label>起始时码<input name="start_tc" pattern="\d{2}:\d{2}:\d{2}:\d{2}"></label></div><div class="two"><label>帧率<select name="fps"><option>23.976</option><option>24</option><option>25</option><option>29.97</option><option>30</option><option>50</option><option>59.94</option><option>60</option></select></label><label>画幅<input name="aspect_ratio"></label></div><button class="primary full" value="default">保存设置</button></form></dialog>
+  <!-- Share Link Modal -->
+  <dialog id="shareDialogModal" class="standard-dialog">
+    <div class="dialog-card">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">PERMANENT REVIEW LINK</p>
+          <h2>发布只读审片与下载链接</h2>
+        </div>
+        <button class="icon-btn" data-close="shareDialogModal"><svg class="g-icon"><use href="#icon-close"></use></svg></button>
+      </div>
+      <p class="muted">客户无需账号，可直接在浏览器查看已冻结的审片快照，并可下载完整交付包。外部入口零数据驻留。</p>
+      <div id="shareLinkContainer" class="share-link-container"></div>
+      <div class="dialog-foot">
+        <button id="genShareBtn" class="primary">生成永久只读链接</button>
+        <button id="revokeShareBtn" class="danger hidden">撤销链接</button>
+      </div>
+    </div>
+  </dialog>
 
-  <dialog id="shareDialog"><div class="dialog-form"><div class="dialog-head"><div><p class="eyebrow">PERMANENT REVIEW LINK</p><h2>匿名审片与下载</h2></div><button class="icon-btn" data-close="shareDialog">×</button></div><p class="muted">链接永久有效；访问者无需账号，只能查看并可下载完整项目包。撤销后原链接立即失效。</p><div id="shareResult"></div><div class="dialog-actions"><button id="createShareBtn" class="primary">生成永久链接</button><button id="revokeShareBtn" class="danger hidden">撤销链接</button></div></div></dialog>
-
-  <dialog id="timingDialog"><div class="dialog-form wide"><div class="dialog-head"><div><p class="eyebrow">VOICEOVER TIMING</p><h2>旁白时间分配</h2></div><button class="icon-btn" data-close="timingDialog">×</button></div><p>按文字信息量、标点停顿和目标片长计算。锁定的镜头保持手动时长不变。</p><div class="timing-summary" id="timingSummary"></div><button id="applyTimingBtn" class="primary full">计算并应用</button></div></dialog>
-
-  <template id="shotCardTemplate">
-    <article class="shot-card" draggable="true">
-      <div class="shot-top"><span class="shot-no"></span><span class="tc"></span><button class="menu-btn" title="删除">×</button></div>
-      <div class="frame"><div class="frame-empty"><span>16:9</span><b>添加参考画面</b><small>图片 / 视频将在浏览器压缩</small></div><input class="media-input" type="file" accept="image/*,video/*" hidden></div>
-      <div class="shot-body"><input class="title-input" placeholder="镜头标题"><div class="meta-grid"><label>景别<input data-key="shot_size" placeholder="大全景"></label><label>焦段<input data-key="lens" placeholder="24mm"></label><label>运镜<input data-key="movement" placeholder="跟拍 / 推轨"></label><label>执行<input data-key="execution" placeholder="实拍 / MG / 3D"></label></div><label>画面描述<textarea data-key="description" rows="3"></textarea></label><label>旁白<textarea data-key="voiceover" rows="2"></textarea></label><div class="shot-foot"><label class="duration">时长<input data-key="duration" type="number" min="0.04" step="0.04">秒</label><label class="lock"><input data-key="locked" type="checkbox"> 锁定</label><span class="dept"></span></div></div>
-    </article>
-  </template>
   <script src="/app.js" defer></script>
 </body>
 </html>

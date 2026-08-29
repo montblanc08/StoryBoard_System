@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sarasa-sans: 'Sarasa UI SC', 'Sarasa Gothic SC', 'Sarasa Term SC', '更纱黑体', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+  --font-sarasa-mono: 'Sarasa Term SC', 'Sarasa Mono SC', 'SFMono-Regular', Consolas, Menlo, monospace;
+
+  /* Theme Tokens: Dark Mode Default */
+  --bg-app: #080a0d;
+  --bg-card: #0f131a;
+  --bg-card-hover: #151a24;
+  --bg-panel: #12161f;
+  --bg-topbar: #0a0d12ee;
+  --border-subtle: #1c232f;
+  --border-strong: #283243;
+  --text-main: #f1f3f5;
+  --text-muted: #8892a0;
+  --text-dim: #5a6472;
+}
+
+.light {
+  --bg-app: #f4f6f8;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f0f3f7;
+  --bg-panel: #ffffff;
+  --bg-topbar: #ffffffdd;
+  --border-subtle: #d0d7e2;
+  --border-strong: #b8c2d1;
+  --text-main: #111827;
+  --text-muted: #4b5563;
+  --text-dim: #9ca3af;
+}
+
+body {
+  background: var(--bg-app);
+  color: var(--text-main);
+  font-family: var(--font-sarasa-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+.mono, time, code {
+  font-family: var(--font-sarasa-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Offline Google Material Symbols */
+.g-icon {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+}

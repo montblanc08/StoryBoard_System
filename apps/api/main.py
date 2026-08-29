@@ -1,0 +1,118 @@
+"""FrameForge Core FastAPI Main Entrypoint."""
+from __future__ import annotations
+
+import logging
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from app.api.v1.auth import router as auth_router
+from app.api.v1.health import router as health_router
+from app.api.v1.productions import router as productions_router
+from app.api.v1.shots import router as shots_router
+from app.core.config import settings
+from app.core.database import AsyncSessionLocal, Base, async_engine
+from app.services.seed import seed_database
+
+logging.basicConfig(level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO))
+logger = logging.getLogger("frameforge")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Initialize tables and seed development database
+    logger.info("Initializing FrameForge OS database...")
+    async with async_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with AsyncSessionLocal() as session:
+        await seed_database(session)
+        await session.commit()
+    logger.info("Database initialized and development seed data confirmed.")
+
+    yield
+    # Shutdown
+    await async_engine.dispose()
+    logger.info("FrameForge server shutdown complete.")
+
+
+app = FastAPI(
+    title="FrameForge Professional Storyboard OS API",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
+    lifespan=lifespan
+)
+
+# CORS Configuration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# Standard Error Contract Interceptor (Spec Section 136-137)
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    if isinstance(exc.detail, dict) and "code" in exc.detail:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error": exc.detail}
+        )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": {"code": "HTTP_ERROR", "message": str(exc.detail), "details": {}}}
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={
+            "error": {
+                "code": "VALIDATION_ERROR",
+                "message": "请求参数校验失败",
+                "details": {"errors": exc.errors()}
+            }
+        }
+    )
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error("Unhandled Exception: %r", exc, exc_info=True)
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "error": {
+                "code": "INTERNAL_ERROR",
+                "message": "服务器内部错误，请稍后再试",
+                "details": {"error_type": type(exc).__name__}
+            }
+        }
+    )
+
+
+# Mount API Routes
+app.include_router(health_router, prefix="")
+app.include_router(health_router, prefix=settings.API_V1_PREFIX)
+app.include_router(auth_router, prefix=settings.API_V1_PREFIX)
+app.include_router(productions_router, prefix=settings.API_V1_PREFIX)
+app.include_router(shots_router, prefix=settings.API_V1_PREFIX)
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "main:app",
+        host=settings.API_HOST,
+        port=settings.API_PORT,
+        reload=(settings.ENVIRONMENT == "development")
+    )
