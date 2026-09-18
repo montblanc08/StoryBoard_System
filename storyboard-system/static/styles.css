@@ -3432,3 +3432,11 @@ html:root {
    ========================================================================== */
 .shot-table thead tr { height: 36px; }
 .shot-table thead { height: 36px; }
+
+/* ==========================================================================
+   R14 §7: Segmented 控件圆角层级
+   实测缺陷：容器 radius 6px 而内层 .ffui-segment 为 10px —— 内层大于外层，
+   视觉上圆角溢出容器。内层必须 ≤ 外层，且都落在令牌体系内。
+   ========================================================================== */
+body[data-ui-version="7.3"] .ffui-segmented { border-radius: 8px; }                 /* 8px 外层 */
+body[data-ui-version="7.3"] .ffui-segmented .ffui-segment { border-radius: 6px; }   /* 6px 内层 */

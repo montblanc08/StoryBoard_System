@@ -710,3 +710,41 @@ Toolbar Control  32 / 32   OK
    先分清"规则没生效"还是"被布局约束"，不要一律当成 CSS 优先级问题。
 2. **表格内的尺寸问题要考虑布局模式**：`table-layout: fixed` / `border-collapse` 下，
    行与单元格高度互相牵制，单纯改单元格往往无效。
+
+## 14. R14 §9 核对与 Segmented 圆角层级修复（2026-09-19）
+
+### 14.1 §9 多项核对结果
+| 检查项 | 实测 | 结论 |
+|---|---|---|
+| Search single shell | 外壳 1px / input border **0px** | **OK**（无"套中套"） |
+| View Segmented | 容器 30px / 段 26px | 尺寸 OK |
+| Segmented 圆角层级 | 容器 6px / 段 **10px** | **DIFF → 已修** |
+| 圆角采样集合 | `10px / 12px / 6px` | 均在令牌体系内 |
+| checkbox | 16×16 | OK |
+| SHOT 编号 | `SHOT 001` 单行 | **OK**（R14 要求"不要拆两行"） |
+| 关键元素 | sidebar / moduleHeader / toolbar / table / inspector / dragHandle 均存在 | OK |
+
+### 14.2 已修：Segmented 内层圆角大于外层
+**缺陷**：容器 `border-radius:6px` 而内层 `.ffui-segment` 为 `10px` —— 内层大于外层，
+圆角在视觉上溢出容器。
+
+**修复**（双管齐下，因为第一次只改 `styles.css` 未生效）：
+1. `src/workspace/theme.css:75` `.ffui-segmented` `6px → 8px`（源头，build 生效）
+2. `static/styles.css` 追加高特异性兜底：
+   `body[data-ui-version="7.3"] .ffui-segmented { border-radius:8px }`
+   `body[data-ui-version="7.3"] .ffui-segmented .ffui-segment { border-radius:6px }`
+
+**复验**：容器 8px / 段 **6px** ✓，同时 **R14 §7 布局仍 7/7 无回归**。
+
+> 教训：第一次只用 `.ffui-segmented`（特异性 0,1,0）改写无效 —— 现有规则
+> `body[data-ui-version="7.3"] .ffui-segment`（0,2,1）优先级更高。
+> 在既有 `data-ui-version` 作用域体系下，新增样式必须使用同等或更高的作用域前缀。
+
+### 14.3 发现：m3.css 与主令牌体系存在命名冲突（R14 §18 待办）
+`static/m3.css:99` 定义 `--radius-lg: var(--md-sys-shape-corner-large)` ——
+**Material 3 的 shape token 与 R11 §14 / R14 §7 建立的 `--radius-*` 令牌同名不同义**。
+加载顺序会让 m3.css 覆盖主令牌，导致"同一变量在不同页面取到不同值"。
+
+这正是 R14 §18「明确 CSS ownership、逐步整理 tokens/controls 分层」要解决的问题。
+**建议**：把 M3 的 shape token 加前缀（如 `--m3-radius-lg`）以消除命名空间冲突，
+或在 `m3.css` 中改为消费主令牌而非重新定义。
