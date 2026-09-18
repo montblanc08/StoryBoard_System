@@ -615,3 +615,36 @@ Sidebar Row 36 ✓ / Table Row 44 ✓）
   需继续定位（可能在 `styles.css` 或 `@media` 分支），不能只看 theme.css。
 
 截图：`qa-artifacts/r11-tokens/r14-layout.png`
+
+## 13.4 第二轮修正（2026-09-19 03:xx）
+- **Toolbar Control 已修正**：`src/workspace/theme.css` 主规则 `.ffui-button`
+  `height:30px; min-height:30px` → **32px**（此前实测 30px 与规格 32px 不符）
+- **表头**：`static/styles.css:886` `.shot-table thead th` `height:32px` → **36px**
+
+### 复验结果：6/7 符合
+```
+Global Header   48 / 48  OK
+Module Header   44 / 44  OK
+Toolbar         40 / 40  OK
+Sidebar Row     36 / 36  OK
+Table Header    32 / 36  DIFF   ← 仍未生效
+Table Row       44 / 44  OK
+Toolbar Control 32 / 32  OK
+```
+
+### 表头问题的排查过程与现状
+已确认：
+1. 服务端返回的 `styles.css` **确实含** `height: 36px`（curl 验证）
+2. 全项目 grep **无其他 th/thead 的 height 规则**（m3.css / workspace-v73-views.css 均无）
+3. `#mainShotTable` 由 JS 动态创建，不在 index.html 静态标记中
+
+因此**不是选择器错配或规则覆盖**，怀疑与表格布局机制有关（`position: sticky` +
+`border-collapse` 下 `th` 的 `height` 与 `row` 高度约束相互作用，`getBoundingClientRect`
+反映的是行高而非声明高）。**下一步应在页面里直接读取 `getComputedStyle(th).height`
+与 `tr` 高度做对比**，而不是只看 rect。
+
+### 测量方法教训（本轮踩到）
+上一轮我用 `.ffui-button` 泛指 "Toolbar Control"，实测 36px 并误判为 bug ——
+实际第一个匹配元素是 **`.ffui-button.ffui-ghost.ff73-nav-item`（侧栏项）**，
+36px 正是规格要求的 Sidebar Row 高度。**用通用 class 泛指某个 UI 角色会测错元素**，
+必须用限定选择器（如 `.ff73-toolbar-root .ffui-button`）。

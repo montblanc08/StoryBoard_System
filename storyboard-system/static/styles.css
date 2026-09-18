@@ -883,7 +883,7 @@ body[data-ui-mode="simplified"] .pro-only {
   min-width: 1200px;
 }
 .shot-table thead th {
-  height: 32px; padding: 0 8px;
+  height: 36px; padding: 0 8px;
   font-size: 11px; font-weight: 500;
   color: var(--text-muted);
   background: var(--bg-surface-1);
