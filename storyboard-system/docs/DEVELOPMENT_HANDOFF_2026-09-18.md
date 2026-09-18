@@ -648,3 +648,27 @@ Toolbar Control 32 / 32  OK
 实际第一个匹配元素是 **`.ffui-button.ffui-ghost.ff73-nav-item`（侧栏项）**，
 36px 正是规格要求的 Sidebar Row 高度。**用通用 class 泛指某个 UI 角色会测错元素**，
 必须用限定选择器（如 `.ff73-toolbar-root .ffui-button`）。
+
+## 13.5 表头 32px 问题的排查记录（未解决，供接手）
+**已排除的可能性**：
+1. ~~选择器错配~~ —— 页面实测 `th.closest('.shot-table')` 为 true，`table.className === 'shot-table'`，规则应匹配
+2. ~~规则被覆盖~~ —— 全项目 grep `shot-table thead th` 仅 6 处，唯一含 `height` 的是 styles.css:886
+3. ~~浏览器缓存~~ —— 已把 `index.html` 的 `styles.css?v=` 从 `20260909-r27-workspace`
+   改为 `20260919-r14-layout`，复验仍为 32px
+
+**关键实测数据**（`qa-r14` 页面）：
+```
+thComputedHeight : 32px      ← 声明是 36px，computed 却是 32px
+thRectHeight     : 32
+thPadding        : 0px/0px
+thBoxSizing      : border-box
+thBorderCollapse : separate   ← 表格边框模式
+trRectHeight     : 32         ← 行高与单元格同为 32
+table.className  : shot-table
+```
+
+**下一步建议**：既然 `thead th` 声明 36px 而 computed 为 32px，应检查
+是否由 `tr` / `thead` 高度约束或 `table-layout` 决定行高（`border-collapse: separate`
+下单元格 height 会与行高互相牵制）。可尝试直接给 `thead tr` 设 `height: 36px`，
+或在页面里用 `getMatchedCSSRules` 等价手段（遍历 `styleSheets` 并 `element.matches`）
+列出**所有**命中该 th 的规则，而不仅限于含 `height` 属性的规则。
