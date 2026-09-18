@@ -584,3 +584,34 @@ html:root {
    要么提升特异性，要么改 `src/` 后 build，不能只改手写文件。
 2. **排查正则必须写成文件执行**：bash heredoc 会把 `\s` 吞成 `/s`，导致 `re.sub` 静默不匹配
    （第一轮收敛"0 个文件"就是这个原因，改用 Node 脚本后立即成功）。
+
+---
+
+# 13. R14 §7 布局尺寸规格（2026-09-19）
+
+## 13.1 实测差异（修正前）
+| 层 | R14 §7 规格 | 修正前实测 | 差异 |
+|---|---|---|---|
+| Global Header | 48px | 44px | -4 |
+| Module Header | 44px | 48px | +4（与上一行**互换**） |
+| Toolbar | 40px | 45px | +5 |
+| Sidebar Row | 36px | 36px | — |
+| Table Header | 36px | 32px | -4 |
+| Table Row | 44px | 44px | — |
+| Toolbar Control | 32px | 36px | +4 |
+
+## 13.2 已修正（改 `src/workspace/theme.css` → `node build.mjs`）
+- `.global-header` 44 → **48**
+- `.project-context-header` 48 → **44**
+- `.workspace-toolbar` min-height 44 / padding 6px → **height 40 / min-height 40 / padding 4px**
+
+**修正后复验：5/7 符合**（Global Header 48 ✓ / Module Header 44 ✓ / Toolbar 40 ✓ /
+Sidebar Row 36 ✓ / Table Row 44 ✓）
+
+## 13.3 仍未修正（定位未完成）
+- **Table Header**：实测 32px，规格 36px
+- **Toolbar Control**（`.ffui-button`）：实测 36px，规格 32px —— 注意 `theme.css` 中该规则写作
+  `height:30px;min-height:30px`，实测却是 36px，说明存在**更高优先级的覆盖来源**，
+  需继续定位（可能在 `styles.css` 或 `@media` 分支），不能只看 theme.css。
+
+截图：`qa-artifacts/r11-tokens/r14-layout.png`

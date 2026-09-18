@@ -102,7 +102,7 @@
   body[data-ui-version="7.3"] { font:400 12.5px/18px var(--font-ui); background:var(--app-bg); color:var(--text-1); }
   body[data-ui-version="7.3"] :is(.app-shell,.main-workspace,.workspace-main) { background:var(--app-bg); }
   body[data-ui-version="7.3"] :is(.global-header,.project-context-header,.workspace-toolbar,.sidebar)::before { content:none; }
-  body[data-ui-version="7.3"] .global-header { height:44px; min-height:44px; padding:0 12px; background:var(--glass); border-bottom:1px solid var(--border); box-shadow:none; }
+  body[data-ui-version="7.3"] .global-header { height:48px; min-height:48px; padding:0 12px; background:var(--glass); border-bottom:1px solid var(--border); box-shadow:none; }
   body[data-ui-version="7.3"] .brand { padding:0 12px 0 4px; border-color:var(--border-soft); }
   body[data-ui-version="7.3"] .brand-text b { font-size:12px; font-weight:600; }
   body[data-ui-version="7.3"] .global-search { height:34px; min-height:34px; border:1px solid var(--border-soft); box-shadow:none; background:var(--surface-2); border-radius:10px; padding:0 10px; }
@@ -125,7 +125,7 @@
   .ff73-sidebar-setting .ffui-field>span { display:none; }
   body[data-ui-version="7.3"].sidebar-collapsed .ff73-nav-item { justify-content:center; padding:0; }
   body[data-ui-version="7.3"].sidebar-collapsed .ff73-nav-item>span, body[data-ui-version="7.3"].sidebar-collapsed .ff73-nav-group>span { display:none; }
-  body[data-ui-version="7.3"] .project-context-header { height:48px; min-height:48px; padding:0 16px; gap:12px; flex-wrap:nowrap; background:var(--app-bg); border-bottom:1px solid var(--border-soft); }
+  body[data-ui-version="7.3"] .project-context-header { height:44px; min-height:44px; padding:0 16px; gap:12px; flex-wrap:nowrap; background:var(--app-bg); border-bottom:1px solid var(--border-soft); }
   body[data-ui-version="7.3"] .project-context-header .proj-title-stack { display:flex; align-items:center; flex:1; gap:10px; min-width:0; }
   body[data-ui-version="7.3"] .project-context-header .current-project-name { font:600 16px/22px var(--font-ui); max-width:440px; flex:0 1 auto; padding:0; border:0; background:none; box-shadow:none; }
   body[data-ui-version="7.3"] .project-context-header .proj-meta-row { flex:0 1 auto; flex-wrap:nowrap; gap:12px; min-width:0; }
@@ -134,7 +134,7 @@
   body[data-ui-version="7.3"] .project-collaboration-bar { flex-wrap:nowrap; gap:4px; }
   body[data-ui-version="7.3"] .project-last-edited { max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; color:var(--text-3); }
   body[data-ui-version="7.3"][data-shot-workspace="true"] :is(#importExcelBtn,#pdfExportQuickBtn) { display:none; }
-  body[data-ui-version="7.3"] .workspace-toolbar { min-height:44px; padding:6px 12px; gap:0; background:var(--app-bg); border-bottom:1px solid var(--border-soft); }
+  body[data-ui-version="7.3"] .workspace-toolbar { min-height:40px; height:40px; padding:4px 12px; gap:0; background:var(--app-bg); border-bottom:1px solid var(--border-soft); }
   body[data-ui-version="7.3"] .workspace-toolbar>[hidden] { display:none!important; }
   .ff73-toolbar-root { width:100%; min-width:0; }
   .ff73-toolbar-content { display:flex; align-items:center; gap:12px; width:100%; min-width:0; }
