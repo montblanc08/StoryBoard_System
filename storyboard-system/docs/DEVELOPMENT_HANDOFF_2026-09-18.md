@@ -740,11 +740,22 @@ Toolbar Control  32 / 32   OK
 > `body[data-ui-version="7.3"] .ffui-segment`（0,2,1）优先级更高。
 > 在既有 `data-ui-version` 作用域体系下，新增样式必须使用同等或更高的作用域前缀。
 
-### 14.3 发现：m3.css 与主令牌体系存在命名冲突（R14 §18 待办）
-`static/m3.css:99` 定义 `--radius-lg: var(--md-sys-shape-corner-large)` ——
-**Material 3 的 shape token 与 R11 §14 / R14 §7 建立的 `--radius-*` 令牌同名不同义**。
-加载顺序会让 m3.css 覆盖主令牌，导致"同一变量在不同页面取到不同值"。
+### 14.3 【已更正】m3.css 命名冲突 —— 经核实不成立
+上一版本在此记录了「`static/m3.css:99` 的 `--radius-lg` 与主令牌同名冲突」的结论。
+**该结论是错的，特此更正。**
 
-这正是 R14 §18「明确 CSS ownership、逐步整理 tokens/controls 分层」要解决的问题。
-**建议**：把 M3 的 shape token 加前缀（如 `--m3-radius-lg`）以消除命名空间冲突，
-或在 `m3.css` 中改为消费主令牌而非重新定义。
+**核实过程**：页面实测已加载样式表清单中**不含 m3.css**：
+```
+workspace-ux.css / creative-boards.css / liquid-glass.css / apple-workspace.css /
+workspace-v73.css / workspace-v73-views.css / workspace-flow.css /
+workspace-flow-pages.css / workspace-assets-v75.css / workspace-editor-v75.css / inline
+→ m3.css 是否加载: false
+→ --radius-lg 实际值: 10px（主令牌生效）
+```
+
+`static/m3.css` 虽然定义了 `--radius-xs..xl`（取自 M3 shape token），但**该文件并未被
+`index.html` 引用、也未在运行时加载**，因此不构成令牌覆盖。R14 §18 的 CSS ownership
+整理仍是待办，但**不因这一项而紧急**。
+
+**方法论教训**：判断"某文件造成覆盖"之前，必须先确认**该文件是否真的被加载** ——
+仅凭文件存在于磁盘 + 内含同名令牌就推断冲突，会导致错误结论并被写进交接文档。
