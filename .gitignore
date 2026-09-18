@@ -24,3 +24,9 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# QA 临时产物（测试运行时生成，含临时数据库）
+storyboard-system/scratch/*/
+storyboard-system/scratch/**/*.db
+**/qa-artifacts/
+storyboard-system/dist/

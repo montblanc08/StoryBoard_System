@@ -81,6 +81,28 @@ class FrameForgeSystemTest(unittest.TestCase):
         # s2 has more text & punctuation than s1 -> should get more frames
         self.assertGreater(result[1]["duration_frames"], result[0]["duration_frames"])
 
+        picture_only = [
+            {"id": "p1", "voiceover": "", "locked": False, "duration_frames": 80},
+            {"id": "p2", "voiceover": "有旁白的镜头。", "locked": False, "duration_frames": 80},
+            {"id": "p3", "voiceover": "", "locked": False, "duration_frames": 80},
+        ]
+        timed_picture_only = self.app.compute_auto_timing(picture_only, 12.0, 25.0)
+        self.assertEqual(timed_picture_only[0]["duration_frames"], 80)
+        self.assertEqual(timed_picture_only[2]["duration_frames"], 80)
+        self.assertEqual(sum(s["duration_frames"] for s in timed_picture_only), 300)
+
+        # A target shorter than the per-shot minimum must still produce a
+        # self-consistent frame total; every narrated shot keeps the minimum
+        # rather than making the summary/timecode disagree with the rows.
+        short_target = [
+            {"id": "short-1", "voiceover": "一句话", "locked": False, "duration_frames": 75},
+            {"id": "short-2", "voiceover": "另一句话", "locked": False, "duration_frames": 75},
+            {"id": "short-3", "voiceover": "第三句话", "locked": False, "duration_frames": 75},
+        ]
+        short_result = self.app.compute_auto_timing(short_target, 1.0, 25.0)
+        self.assertEqual(sum(s["duration_frames"] for s in short_result), 60)
+        self.assertTrue(all(s["duration_frames"] >= 20 for s in short_result))
+
     # 3. Complete Production API Workflow
     def test_complete_production_workflow(self):
         # Login
@@ -175,6 +197,131 @@ class FrameForgeSystemTest(unittest.TestCase):
         self.assertIn("voiceover", mapping)
         self.assertIn("primary_method", mapping)
         self.assertGreaterEqual(mapping["number"]["confidence"], 0.9)
+
+    def test_v5_real_routes_and_persistence(self):
+        """Exercise the routes that were previously UI-only or memory-only."""
+        csrf = self.request("/api/session")[1]["csrf"]
+        status, bundle = self.request("/api/projects", "POST", {
+            "name": "V5 persistence QA", "production_type": "documentary", "fps": 25,
+            "target_seconds": 20, "start_tc": "01:00:00:00"
+        }, csrf)
+        self.assertEqual(status, 201)
+        pid = bundle["project"]["id"]
+        original_count = len(bundle["shots"])
+
+        status, created = self.request(f"/api/projects/{pid}/shots", "POST", {
+            "number": "006", "title": "真实新增镜头", "duration_frames": 50,
+            "description": "新增后重新读取仍存在。", "primary_method": "LIVE"
+        }, csrf)
+        self.assertEqual(status, 201)
+        self.assertEqual(len(created["shots"]), original_count + 1)
+        new_id = created["shots"][-1]["id"]
+        status, reloaded = self.request(f"/api/projects/{pid}")
+        self.assertEqual(status, 200)
+        self.assertIn(new_id, [shot["id"] for shot in reloaded["shots"]])
+
+        csv_body = "镜号,画面描述,旁白,时长\nCSV-1,CSV画面,CSV旁白,2\n".encode("utf-8-sig")
+        status, preview = self.request(f"/api/projects/{pid}/import-preview?filename=shots.csv", "POST", csv_body, csrf, "text/csv")
+        self.assertEqual(status, 200)
+        self.assertEqual(preview["total_rows"], 1)
+        self.assertEqual(len(preview["rows"]), 1)
+        status, imported = self.request(f"/api/projects/{pid}/import-commit", "POST", {
+            "preview_id": preview["preview_id"], "mapping": {key: {"col": value["col"]} for key, value in preview["mapping"].items()}
+        }, csrf)
+        self.assertEqual(status, 200)
+        self.assertGreaterEqual(imported["imported"], 1)
+
+        png = b"\x89PNG\r\n\x1a\n" + b"v5-test"
+        status, media = self.request(f"/api/projects/{pid}/media?shot_id={new_id}&filename=qa.png", "POST", png, csrf, "image/png")
+        self.assertEqual(status, 201)
+        status, media_body = self.request(f"/media/{media['id']}")
+        self.assertEqual(status, 200)
+        self.assertEqual(media_body[:8], b"\x89PNG\r\n\x1a\n")
+        replacement_png = b"\x89PNG\r\n\x1a\n" + b"v5-replacement"
+        status, replacement = self.request(
+            f"/api/projects/{pid}/media?shot_id={new_id}&asset_id={media['id']}&filename=qa-replacement.png",
+            "POST", replacement_png, csrf, "image/png"
+        )
+        self.assertEqual(status, 201)
+        self.assertNotEqual(replacement["id"], media["id"])
+        self.assertEqual(replacement["version"], "v002")
+        status, versioned_bundle = self.request(f"/api/projects/{pid}")
+        self.assertEqual(status, 200)
+        versioned_asset = next(asset for asset in versioned_bundle["assets"] if asset["id"] == media["id"])
+        self.assertEqual([v["version_number"] for v in versioned_asset["versions"]], ["v001"])
+        status, old_media_body = self.request(f"/media/{media['id']}?version=v001")
+        self.assertEqual(status, 200)
+        self.assertEqual(old_media_body, png)
+        self.assertEqual(self.request(f"/media/{replacement['id']}")[1], replacement_png)
+        replaced_shot = next(shot for shot in versioned_bundle["shots"] if shot["id"] == new_id)
+        self.assertEqual(replaced_shot["panels"][0]["media_id"], replacement["id"])
+        restored_panel = {**replaced_shot["panels"][0], "media_id": media["id"]}
+        self.request(f"/api/projects/{pid}/shots", "PUT", {"shots": [{"id": new_id,
+            "base_revision": replaced_shot["revision"], "changed_fields": ["panels"], "panels": [restored_panel]}]}, csrf)
+        restored = next(shot for shot in self.request(f"/api/projects/{pid}")[1]["shots"] if shot["id"] == new_id)
+        self.assertEqual(restored["panels"][0]["media_id"], media["id"])
+        self.assertEqual(self.request(f"/media/{restored['panels'][0]['media_id']}")[1], png)
+
+        status, share = self.request(f"/api/projects/{pid}/share", "POST", {
+            "is_permanent": True, "allow_download": True, "password": "Share-QA-2026"
+        }, csrf)
+        self.assertEqual(status, 200)
+        self.assertTrue(share["password_required"])
+        public = urllib.request.build_opener()
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            public.open(urllib.request.Request(f"{self.base}/api/shares/{share['token']}"))
+        self.assertEqual(ctx.exception.code, 401)
+        access_data = json.dumps({"password": "Share-QA-2026"}).encode("utf-8")
+        access_req = urllib.request.Request(f"{self.base}/api/shares/{share['token']}/access", access_data, {"Content-Type": "application/json"}, method="POST")
+        with public.open(access_req) as response:
+            self.assertEqual(response.status, 200)
+
+        status, deleted = self.request(f"/api/shots/{new_id}", "DELETE", None, csrf)
+        self.assertEqual(status, 204)
+        status, after_delete = self.request(f"/api/projects/{pid}")
+        self.assertEqual(status, 200)
+        self.assertNotIn(new_id, [shot["id"] for shot in after_delete["shots"]])
+
+        status, ai = self.request("/api/ai/capabilities")
+        self.assertEqual(status, 200)
+        self.assertFalse(ai["enabled"])
+
+    def test_viewer_cannot_mutate(self):
+        """Read-only roles may inspect projects but cannot mutate them."""
+        viewer_id = "qa-viewer-user"
+        with self.app.connect() as db:
+            db.execute(
+                "INSERT OR REPLACE INTO users (id, username, password_hash, role, display_name, created_at) VALUES (?,?,?,?,?,?)",
+                (viewer_id, "qa-viewer", self.app.password_hash("Viewer-QA-2026"), "viewer", "只读审片人", self.app.now_iso())
+            )
+        viewer_cj = http.cookiejar.CookieJar()
+        viewer = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(viewer_cj))
+        login_req = urllib.request.Request(
+            f"{self.base}/api/login", json.dumps({"username": "qa-viewer", "password": "Viewer-QA-2026"}).encode(),
+            {"Content-Type": "application/json"}, method="POST"
+        )
+        with viewer.open(login_req) as response:
+            session = json.loads(response.read().decode())
+        create_req = urllib.request.Request(
+            f"{self.base}/api/projects", json.dumps({"name": "should-not-create"}).encode(),
+            {"Content-Type": "application/json", "X-CSRF-Token": session["csrf"]}, method="POST"
+        )
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            viewer.open(create_req)
+        self.assertEqual(ctx.exception.code, 403)
+
+    def test_login_rate_limit_has_30_second_countdown_payload(self):
+        """The server keeps throttling and exposes the requested countdown."""
+        username = "rate-limit-qa"
+        for _ in range(5):
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                self.request("/api/login", "POST", {"username": username, "password": "wrong"})
+            self.assertEqual(ctx.exception.code, 401)
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self.request("/api/login", "POST", {"username": username, "password": "wrong"})
+        self.assertEqual(ctx.exception.code, 429)
+        payload = json.loads(ctx.exception.read())
+        self.assertEqual(payload, {"error": "错误次数过多", "retry_after": 30})
 
 
 if __name__ == "__main__":
