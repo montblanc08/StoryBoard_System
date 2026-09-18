@@ -3440,3 +3440,38 @@ html:root {
    ========================================================================== */
 body[data-ui-version="7.3"] .ffui-segmented { border-radius: 8px; }                 /* 8px 外层 */
 body[data-ui-version="7.3"] .ffui-segmented .ffui-segment { border-radius: 6px; }   /* 6px 内层 */
+
+/* ==========================================================================
+   R14 §8 Project Cover System
+   项目封面：左侧渐变分镜封面 + Monogram fallback。
+   约束（R14 §8）：封面只用于项目识别；Project Name 保持第一信息层级；
+   不做大海报 / 大面积彩色卡片 / 动画放大 / Glow；
+   封面与 Surface 之间用渐变遮罩过渡，不得硬切。
+   ========================================================================== */
+.project-cover {
+  width: 96px;
+  height: 56px;
+  flex: none;
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(135deg,
+      hsl(var(--cover-h, 215) 30% 25%),
+      hsl(calc(var(--cover-h, 215) + 26) 36% 15%));
+  display: grid;
+  place-items: center;
+  position: relative;
+  overflow: hidden;
+}
+/* 遮罩：由封面渐变过渡到 Panel Surface，避免出现生硬的色块边缘 */
+.project-cover::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, rgba(0,0,0,0) 62%, var(--surface-1, #fff) 128%);
+}
+.project-cover-monogram {
+  font: 600 16px/1 var(--font-ui, sans-serif);
+  color: rgba(255, 255, 255, .80);
+  letter-spacing: .04em;
+}

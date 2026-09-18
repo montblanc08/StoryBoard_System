@@ -759,3 +759,33 @@ workspace-flow-pages.css / workspace-assets-v75.css / workspace-editor-v75.css /
 
 **方法论教训**：判断"某文件造成覆盖"之前，必须先确认**该文件是否真的被加载** ——
 仅凭文件存在于磁盘 + 内含同名令牌就推断冲突，会导致错误结论并被写进交接文档。
+
+---
+
+# 15. R14 §8 Project Cover System（2026-09-19，部分完成）
+
+## 15.1 已实现：默认左侧渐变封面 + Monogram fallback
+`static/app.js` 新增 `projectCoverMarkup(p)`，接入 `renderProjectsGrid()` 的项目卡首位；
+`static/styles.css` 追加 `.project-cover` / `.project-cover-monogram` 样式。
+
+要点与 §8 约束的对应：
+| §8 要求 | 实现 |
+|---|---|
+| 封面只用于项目识别 | `aria-hidden="true"`，不承载语义 |
+| **左侧**渐变分镜封面（默认） | 卡片首位 96×56 渐变块 |
+| 色相稳定（不随刷新跳色） | 由项目名哈希决定 `--cover-h`，同一项目恒定 |
+| **不得硬切** | `::after` 渐变遮罩由封面过渡到 `--surface-1` |
+| Project Name 第一信息层级 | 标题保持加粗，封面不抢层级 |
+| 不做大海报 / 大面积彩色卡片 / 动画放大 / Glow | 96×56 小尺寸、无动画、无 glow |
+| 圆角统一 | 使用 `--radius-lg`（10px，符合 §7 Project Row 规格） |
+
+**实测**：`.project-cover` 96×56 / radius 10px / 含渐变 / Monogram 取项目名（中文取首字，
+英文取前 2 字母大写）；两个真实项目各渲染一个封面且色相不同。
+截图：`qa-artifacts/r14-layout/hub-cover.png`
+
+## 15.2 §8 尚未实现的部分（不声明完成）
+- **Storyboard Generated Cover**：从有 thumbnail 的 Shot 中取 Start / Middle / End 三张
+  合成封面 —— 需要后端提供 shot thumbnail 列表（当前 API 未返回该字段）
+- **Custom Icon / Custom Image**：需要项目级封面配置的存储字段与上传通道
+- **只加载小尺寸 WebP thumbnail**：需要服务端图片处理链路（缩略图生成 + WebP 转码）
+- 右侧渐变封面变体（§8 允许但非默认）

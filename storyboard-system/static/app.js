@@ -2491,6 +2491,24 @@ function qaProjectsVisible() {
   try { return localStorage.getItem('frameforge-show-qa-projects') === '1'; } catch (_) { return false; }
 }
 
+/**
+ * R14 §8 Project Cover System —— 项目封面。
+ * 默认形态：左侧渐变分镜封面 + Monogram fallback。
+ *   色相由项目名哈希决定，同一项目恒定，不会每次刷新跳色。
+ * 后续可扩展：Custom Icon / Custom Image / 由 Shot thumbnail 生成的分镜封面。
+ * 封面只用于项目识别 —— Project Name 始终是第一信息层级（见 CSS 中 title 的权重）。
+ */
+function projectCoverMarkup(p) {
+  const name = String((p && p.name) || '');
+  const isCJK = /[\u4e00-\u9fff]/.test(name);
+  const mono = name ? (isCJK ? name.slice(0, 1) : name.slice(0, 2).toUpperCase()) : '#';
+  let hue = 0;
+  for (let i = 0; i < name.length; i++) hue = (hue * 31 + name.charCodeAt(i)) % 360;
+  return '<div class="project-cover" aria-hidden="true" style="--cover-h:' + hue + '">'
+       + '<span class="project-cover-monogram">' + escapeHtml(mono) + '</span>'
+       + '</div>';
+}
+
 function renderProjectsGrid() {
   const showQA = qaProjectsVisible();
   const visibleAll = state.projects.filter(p => showQA || !isQaProject(p));
@@ -2517,6 +2535,7 @@ function renderProjectsGrid() {
     const row = document.createElement('div');
     row.className = 'project-row';
     row.innerHTML = `
+      ${projectCoverMarkup(p)}
       <div class="project-row-main">
         <div class="project-row-title">${escapeHtml(p.name)}</div>
         <div class="project-row-meta">
