@@ -3423,3 +3423,12 @@ html:root {
   --control-h-large:   var(--control-h-lg);
   --control-radius:    var(--radius-sm);
 }
+
+/* ==========================================================================
+   R14 §7: Table Header 36px
+   仅给 th 设 height 不够 —— 在 table-layout:fixed 下单元格高度受行高约束，
+   渲染值会被压回原高度（实测声明 36px 但 used value 32px）。
+   必须同时给 thead 的行设高。
+   ========================================================================== */
+.shot-table thead tr { height: 36px; }
+.shot-table thead { height: 36px; }

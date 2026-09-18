@@ -672,3 +672,41 @@ table.className  : shot-table
 下单元格 height 会与行高互相牵制）。可尝试直接给 `thead tr` 设 `height: 36px`，
 或在页面里用 `getMatchedCSSRules` 等价手段（遍历 `styleSheets` 并 `element.matches`）
 列出**所有**命中该 th 的规则，而不仅限于含 `height` 属性的规则。
+
+## 13.6 【已解决】表头 36px —— 根因：fixed 表格布局下行高约束
+上一轮记录为"未解决"，本轮查明并修复。
+
+**根因**：`#mainShotTable` 使用 `table-layout: fixed`。在该模式下，
+只给 `th` 设 `height:36px` **不足以改变渲染高度** —— 单元格高度受**行高**约束，
+`getComputedStyle(th).height` 返回的是 **used value**（Chrome 对非 auto 的 height
+返回实际渲染值），因此声明 36px 却始终读到 32px。
+
+排查关键：遍历 `styleSheets` 列出**所有命中该 th 的规则**（不只含 height 的），
+确认 `.shot-table thead th { height: 36px }` 确实存在且匹配，且**无任何 height 竞争规则**
+—— 从而排除"规则冲突"，把方向从 CSS 优先级转向**表格布局机制**。
+
+**修复**（`static/styles.css` 追加）：
+```css
+.shot-table thead tr { height: 36px; }
+.shot-table thead    { height: 36px; }
+```
+
+## 13.7 R14 §7 最终复验：7/7 全部符合
+```
+Global Header    48 / 48   OK
+Module Header    44 / 44   OK
+Toolbar          40 / 40   OK
+Sidebar Row      36 / 36   OK
+Table Header     36 / 36   OK
+Table Row        44 / 44   OK
+Toolbar Control  32 / 32   OK
+--------------------------------
+符合 7/7
+```
+截图：`qa-artifacts/r14-layout/r14-layout-verified.png`
+
+### 方法论沉淀（两条）
+1. **`getComputedStyle().height` 在 Chrome 返回 used value**，不是声明值。声明与实测不符时，
+   先分清"规则没生效"还是"被布局约束"，不要一律当成 CSS 优先级问题。
+2. **表格内的尺寸问题要考虑布局模式**：`table-layout: fixed` / `border-collapse` 下，
+   行与单元格高度互相牵制，单纯改单元格往往无效。
