@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import '@frameforge/ui/primitives.css';
 import { Providers } from '@/components/app-shell/Providers';
 
 export const metadata: Metadata = {

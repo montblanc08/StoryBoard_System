@@ -8,6 +8,7 @@ import { useProduction, useShots, useUpdateShot } from '@/lib/hooks/useProductio
 import { MethodBadge } from '@/components/shot/MethodBadge';
 import { StatusBadge } from '@/components/shot/StatusBadge';
 import { ShotInspector } from '@/components/shot/ShotInspector';
+import { shotMovementLabel } from '@/lib/shot-display';
 
 export default function ShotListPage() {
   const params = useParams();
@@ -31,7 +32,7 @@ export default function ShotListPage() {
       (s.display_number || '').toLowerCase().includes(q) ||
       (s.name || '').toLowerCase().includes(q) ||
       (s.description || '').toLowerCase().includes(q) ||
-      (s.voiceover || '').toLowerCase().includes(q) ||
+      (s.voice_over || '').toLowerCase().includes(q) ||
       (s.owner_id || '').toLowerCase().includes(q)
     );
   });
@@ -123,13 +124,13 @@ export default function ShotListPage() {
                         {shot.lens_mm ? `${shot.lens_mm}mm` : '—'}
                       </td>
                       <td className="py-2 px-3 text-slate-300 truncate max-w-[120px]">
-                        {shot.movement || '固定'}
+                        {shotMovementLabel(shot)}
                       </td>
                       <td className="py-2 px-3 text-slate-200">
                         <div className="line-clamp-1">{shot.description || '—'}</div>
                       </td>
                       <td className="py-2 px-3 text-amber-200/90">
-                        <div className="line-clamp-1">{shot.voiceover || <span className="text-slate-600 italic">无旁白</span>}</div>
+                        <div className="line-clamp-1">{shot.voice_over || <span className="text-slate-600 italic">无旁白</span>}</div>
                       </td>
                       <td className="py-2 px-3 text-right font-mono">
                         <div className="flex items-center justify-end gap-1.5">

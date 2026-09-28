@@ -31,7 +31,7 @@ export function VOTimingModal({ production, shots }: VOTimingModalProps) {
   const computedShots = useMemo(() => {
     const timingInputs = shots.map(s => ({
       id: s.id,
-      voiceover: s.voiceover || '',
+      voiceover: s.voice_over || '',
       locked: Boolean(s.timing_locked),
       duration_frames: s.duration_frames
     }));
@@ -147,7 +147,7 @@ export function VOTimingModal({ production, shots }: VOTimingModalProps) {
             </thead>
             <tbody className="divide-y divide-studio-800">
               {computedShots.map(s => {
-                const voClean = (s.voiceover || '').trim();
+                const voClean = (s.voice_over || '').trim();
                 const charCount = voClean.replace(/\s+/g, '').length;
                 const oldSec = framesToSeconds(s.duration_frames, fps).toFixed(1);
                 const newSec = framesToSeconds(s.proposed_frames, fps).toFixed(1);
@@ -161,7 +161,7 @@ export function VOTimingModal({ production, shots }: VOTimingModalProps) {
                       )}
                     </td>
                     <td className="py-2 px-3 font-sans text-slate-300 max-w-xs truncate">
-                      {s.voiceover || <span className="text-slate-600 italic">无旁白</span>}
+                      {s.voice_over || <span className="text-slate-600 italic">无旁白</span>}
                     </td>
                     <td className="py-2 px-3 text-right text-slate-400">
                       {charCount}

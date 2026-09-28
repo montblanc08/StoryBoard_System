@@ -41,7 +41,7 @@ export function NewShotModal({ production, sequences, nextNumber }: NewShotModal
         sequence_id: sequenceId || null,
         name: name || `镜头 ${displayNumber}`,
         description,
-        voiceover,
+        voice_over: voiceover,
         primary_method: primaryMethod as any,
         department: department as any,
         duration_frames: durationFrames,

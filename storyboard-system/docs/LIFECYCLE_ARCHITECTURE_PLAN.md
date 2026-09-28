@@ -1,10 +1,10 @@
 # FrameForge 全生命周期架构实施方案
 
-状态：2026-09-24，本地实施中；生产环境保持现状，用户已明确暂停部署。本方案以当前代码和用户提交的 UI 审查为输入，阶段完成以代码与验收证据为准。
+状态：2026-09-29，目标栈已有并行实现，运行权尚未完成切换；生产部署仍暂停。本方案的阶段条目是生命周期门槛，不代表其目标 owner 已接管。当前 owner 与缺口见 [CANONICAL_OWNER_MATRIX.md](CANONICAL_OWNER_MATRIX.md)。
 
 两份后续架构要求所提出的模块化单体、FastAPI/PostgreSQL/React 演进、Command/Event、AI Proposal、i18n 和可观测性已细化为 [架构迁移契约](ARCHITECTURE_MIGRATION.md)。该文档区分现有运行事实与目标技术栈，并定义每条迁移的测试、删除旧实现及回滚门槛。
 
-截至本轮，后端已有字段生命周期、素材清理、旁白计时、交付格式、单镜头与批量镜头更新、导入解析与暂存、SQLite 旧列基线迁移等独立模块；共享 UI 包建立浮层与动效状态契约，搜索结果的选中/详情状态已归一，PDF 页面模板及 PDF/Word 图片预检已从 `static/app.js` 移到单独模块。只读结构清点工具可对比离线数据库副本；SQLite backup→恢复工具已在合成库验证，但尚未完成实际业务数据、媒体和存储键的备份恢复演练。`server.py` 和 `static/app.js` 仍是大文件，路由和多数业务视图尚未拆完。目标 FastAPI/PostgreSQL/完整 React 迁移尚未开始，不能把这些切片视为重构完成。新增可编辑 Word 分镜表导出已接入现有导出弹窗并通过本地文件与浏览器验收。
+Legacy 已抽出字段、Shot、导入导出等模块，`server.py` 与 `static/app.js` 仍承载真实服务和视图。根 `apps/api` 已有 FastAPI、SQLAlchemy、Alembic、asyncpg，`apps/web` 已有 Next/React 页面；Legacy 子树还存在独立 FastAPI、仓储、AI、Presence 和 UI 包。这些实现的路由对等、事务语义、真实消费者、PostgreSQL/Redis 集成及旧 owner 退出尚未证明，不能写成完成迁移。真实 Excel、PDF、Word 工作流仍须保护。
 
 ## 目标和不可变约束
 
@@ -17,7 +17,7 @@
 | Domain | 服务端 SQLite/API；客户端规范化 Shot/Field/Asset/Revision/Board 数据 | 实体 ID、版本号、内容、生命周期 | 视图 CSS、抽屉开关、浏览器焦点决定数据内容 |
 | Workspace UI | 单一 `selectionStore`、`inspectorStore`、`viewStore`、`modalStore`、`layoutStore` | 选中 ID、面板开合/模式、当前视图、最顶层弹窗、面板尺寸 | 选中镜头自动等于打开详情；跨 feature 复用临时面板状态 |
 | Feature UI | Table/Card/Timeline/Review/Narration/Moodboard/Lighting 自己的 adapter | 排序、过滤、局部编辑、当前 revision 或画布相机 | feature 再造全局 Shot、独立改写其他视图数据 |
-| Design system | `packages/ui` 和统一 shell/token/motion | 控件语义、键盘焦点、浮层、间距、状态动效 | 同一语义控件在页面里各写一套高度/描边/关闭/动画规则 |
+| Design system | 目标为仓库根 `packages/ui`；Legacy `storyboard-system/packages/ui` 是迁移源 | 控件语义、键盘焦点、浮层、间距、状态动效 | 同名 `@frameforge/ui` 两套包长期并列 |
 | Service | API、保存队列、导入、交付导出和默认关闭的 AI provider registry | 请求、冲突、重试、取消和结果 | UI 层直接访问数据库/文件或未经确认自动写回 AI 输出 |
 
 当前 `static/app.js` 仍有大的共享 `state`，`src/workspace` 与手写静态模块并存。本轮已开始把选中与 `inspectorOpen` 的触发分开，但还没有完成上述 store 迁移；迁移一个调用方后要删除被替代的旧路径，避免双写和永久转接层。
@@ -45,13 +45,13 @@
 
 ## Motion System 与组件生命周期（随架构同步建立）
 
-Motion 是状态变化的反馈协议，不是末尾补上的页面装饰。`packages/ui` 维护唯一的时间、缓动、距离 token 和 `MotionIcon`/`Presence`/`Slide` 等组件接口；业务 feature 只提供 `idle/hover/active/loading/success/error/disabled` 等状态，不直接设置零散的 `element.style.transition`。旧 CSS 中的 `transition: all` 和重复时长应按迁移的组件逐项删除，不能再叠一层覆盖规则。
+Motion 是状态变化的反馈协议，不是末尾补上的页面装饰。目标由仓库根 `packages/ui` 维护唯一的时间、缓动、距离 token 和 Motion 组件接口；目前成熟 `MotionIcon` 仍在 Legacy UI 包，尚未迁入根包。业务 feature 只提供 `idle/hover/active/loading/success/error/disabled` 等状态，不直接设置零散的 `element.style.transition`。旧 CSS 中的 `transition: all` 和重复时长应按迁移的组件逐项删除。
 
 Shared Workspace Transition 只替换 View Toolbar、Main Content 和 Inspector；Global/Project Header 保持挂载。实体 DOM 使用稳定 `shot:<id>` key 为日后跨 Table/Card/Timeline 的共享元素变化留接口，但第一批只实现有明确状态所有权的转场。Inspector 的主舞台重排与内容进入要同一状态驱动；切换镜头时保持 shell，仅更新内容。浮层按 Menu、Popover、Dialog 各自的层级和时长处理，加载按页面局部上下文反馈。
 
 动画验收除截图外还要检查：状态结束后不残留透明可点击层；Esc/取消时焦点归还；保存/错误结果与真实请求一致；1440/1024 和 320/375 不因动画产生横向溢出；快速切视图或销毁画布时无旧定时器/帧循环继续运行。性能优先 `transform`/`opacity`，画布数值插值只在展示层，持久数据保留准确值。用户此前已撤销低动效要求；本方案不引入全局降低或关闭动效的产品规则。
 
-AI 的既有代码仅有受登录保护的 `GET /api/ai/capabilities` 静态占位响应；它不提供实际生成能力。架构稳定前不新增 AI 调用路径或页面入口。未来 provider 输入只接受权限校验后构造的白名单 DTO，输出为带 capability/schema/source 的待审提案，经人工确认后通过现有领域服务写入，禁止直接取得 DB/session 或整个项目 bundle。
+AI 已有 Legacy `ai_system` 与 `apps/api` mock/provider/proposal 两套局部实现，后者没有 V-Web 客户端、持久 Job 与完整门禁/标准 Command 接入。当前产品应保持默认关闭和无可见入口；推进时先收敛到 `apps/api`，配置缺失必须零外发。provider 输入只接受权限校验后的白名单 DTO；输出先成为持久提案，人工确认后走普通 Command，不能由 provider 直接取得 DB/session 或整个项目 bundle。
 
 ## 分阶段实施与完成门槛
 

@@ -8,6 +8,7 @@ import { StatusBadge } from '../shot/StatusBadge';
 import { getMethodStyle } from '@/lib/media-resolver';
 import { useWorkspaceStore } from '@/stores/useWorkspaceStore';
 import { useUpdateShot } from '@/lib/hooks/useProduction';
+import { shotMovementLabel } from '@/lib/shot-display';
 
 interface ShotCardProps {
   shot: Shot;
@@ -145,17 +146,17 @@ export function ShotCard({
         </div>
 
         {/* Voiceover Strip */}
-        {shot.voiceover && (
+        {shot.voice_over && (
           <div className="rounded border border-studio-700/60 bg-studio-950/60 p-2 text-[11px] text-amber-200/90 leading-normal line-clamp-2">
             <span className="font-bold text-amber mr-1">VO:</span>
-            {shot.voiceover}
+            {shot.voice_over}
           </div>
         )}
 
         {/* Card Footer info */}
         <div className="flex items-center justify-between border-t border-studio-800 pt-2 text-[10px] text-slate-500 font-mono">
           <span className="truncate max-w-[120px]">
-            {shot.movement || '固定机位'}
+            {shotMovementLabel(shot, '固定机位')}
           </span>
           <span>{shot.owner_id || shot.department || '摄影组'}</span>
         </div>

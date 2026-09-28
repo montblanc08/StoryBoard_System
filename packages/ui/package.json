@@ -3,14 +3,23 @@
   "version": "1.0.0",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./primitives.css": "./src/primitives.css"
+  },
   "scripts": {
     "build": "tsc"
   },
   "dependencies": {
     "clsx": "^2.1.1",
+    "radix-ui": "1.6.7",
     "tailwind-merge": "^2.6.0"
   },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
   "devDependencies": {
+    "@types/react": "^19.0.0",
     "typescript": "^5.7.3"
   }
 }

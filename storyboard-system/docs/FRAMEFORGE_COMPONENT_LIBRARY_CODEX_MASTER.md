@@ -91,12 +91,12 @@ Python server.py 单体 HTTP 入口 (SQLite)
   import_staging.py, schema_migrations.py
 ```
 
-## packages/ui 当前真实内容
+## Legacy `storyboard-system/packages/ui` 当前真实内容
 
-CURRENT / VERIFIED — `packages/ui/src/` 只有两个文件：
+CURRENT / VERIFIED — `storyboard-system/packages/ui/src/` 有以下两个主要文件；仓库根 `packages/ui` 是另一套同名 package，现有 token/词典与首批基础控件，尚未达到全套 parity：
 
 ```text
-packages/ui/src/index.tsx   — 10 KB
+storyboard-system/packages/ui/src/index.tsx   — 10 KB
   已导出: Button, ToggleButton, IconButton, Input, TextArea,
           Field, Select, Segmented, Checkbox, Popover, Menu,
           Modal, SortableList, UIProvider, Icons, OverlayOpenState
@@ -104,13 +104,13 @@ packages/ui/src/index.tsx   — 10 KB
         ToggleGroup, Tooltip), lucide-react, @dnd-kit/core+sortable,
         sonner (Toaster/toast), cmdk (Command), motion/react
 
-packages/ui/src/motion.tsx  — 3.4 KB
+storyboard-system/packages/ui/src/motion.tsx  — 3.4 KB
   已导出: motionTokens, MotionIcon, WorkspaceTransition, MotionState
   Motion Tokens: feedback 0.16s, viewEnter 0.22s, viewExit 0.16s
   MotionState 类型: 'idle'|'hover'|'active'|'loading'|'success'|'error'|'disabled'
 ```
 
-## React Workspace 当前真实文件
+## Legacy React Workspace 当前真实文件（`storyboard-system/src/workspace`）
 
 ```text
 src/workspace/
@@ -163,10 +163,10 @@ ERRORS (环境依赖，非代码缺陷):
 
 ## 1.1 不再建立第二套共享 UI 目录
 
-当前仓库已经存在 `packages/ui/`，React / TypeScript Workspace 已使用该 package。
+仓库根与 Legacy 子树各有一个名为 `@frameforge/ui` 的包。过渡 React Workspace 通过 Legacy tsconfig alias 使用 `storyboard-system/packages/ui`；`apps/web` 登录页已消费根包 Button/Input/Field，其他 UI 尚未完成切换。
 
 ```text
-packages/ui → FRAMEFORGE 唯一共享 UI 基础
+repo-root/packages/ui → FRAMEFORGE 目标唯一共享 UI 基础
 ```
 
 不再另建一套 `src/components/ui` 与之竞争。
@@ -174,7 +174,7 @@ packages/ui → FRAMEFORGE 唯一共享 UI 基础
 目标结构（按需渐进创建，不一次建全部空目录）：
 
 ```text
-packages/ui/src/
+repo-root/packages/ui/src/
 ├── primitives/
 ├── layout/
 ├── patterns/
@@ -187,9 +187,9 @@ packages/ui/src/
 
 ## 1.2 shadcn 不是第二个 UI 系统
 
-shadcn/ui 应逐渐进入 `packages/ui`，而不是形成第三套系统。
+shadcn/ui 应逐渐进入仓库根 `packages/ui`，而不是形成第三套系统。
 
-> shadcn 是 `packages/ui` 的基础实现来源，而不是平行依赖层。
+> shadcn 是仓库根 `packages/ui` 的基础实现来源，而不是平行依赖层。
 
 ## 1.3 当前系统不是 React-only
 
@@ -197,7 +197,7 @@ shadcn/ui 应逐渐进入 `packages/ui`，而不是形成第三套系统。
 
 ## 1.4 生成文件不是正式修改入口
 
-正式修复优先修改 `src/workspace/*.tsx`、`src/workspace/theme.css`、`packages/ui/src/*`。
+最终 Web 功能优先在 `apps/web` 实施，通用 primitive 迁入仓库根 `packages/ui/src/*`；`storyboard-system/src/workspace` 和 Legacy UI 包仅保留迁移参考、必要修复与兼容适配。
 
 `workspace-v73.js` / `workspace-v73.css` 是构建输出，只用于 debug / inspection / build verification。
 
@@ -337,10 +337,10 @@ FRAMEFORGE 的专业感来源：层级、准确、稳定、一致、媒体表现
 
 ---
 
-# 17. `packages/ui` 最终目标结构
+# 17. 仓库根 `packages/ui` 最终目标结构
 
 ```text
-packages/ui/src/
+repo-root/packages/ui/src/
 ├── primitives/    button, icon-button, input, textarea, select, checkbox, switch,
 │                  dialog, alert-dialog, dropdown-menu, context-menu, popover,
 │                  tooltip, card, badge, separator, scroll-area, skeleton, progress
@@ -465,15 +465,15 @@ Selected 不使用 Focus Ring，推荐 subtle surface + slightly stronger border
 
 **Button**: 直接从 shadcn variant 开始 (default, secondary, outline, ghost, destructive, link)。禁止建立 cinema / pro / compact / lightingBlue 等自定义 variant。
 
-**IconButton**: 所有纯图标按钮必须有 aria-label + tooltip。当前 `packages/ui` 已有 `IconButton` 组件 — CURRENT / VERIFIED。
+**IconButton**: 所有纯图标按钮必须有 aria-label + tooltip。Legacy `storyboard-system/packages/ui` 有成熟实现；根包已移入首批实现，仍需两端真实消费者的 tooltip/focus 验收 — INTEGRATED_NOT_CUT_OVER。
 
-**Input / Textarea / Select**: 统一 radius, height, border, focus, placeholder, disabled, error。当前 `packages/ui` 已有 `Input`, `TextArea`, `Select` — CURRENT / VERIFIED。优先复用已有 Radix Select，禁止并存多套。
+**Input / Textarea / Select**: 统一 radius, height, border, focus, placeholder, disabled, error。Legacy `storyboard-system/packages/ui` 已有这些控件；根包的 Input/TextArea/Field 已进入首批，Select 尚未迁入。仍需逐个验证 API/视觉/焦点。优先复用已有 Radix Select，禁止并存多套。
 
 **Textarea**: `Enter = 换行`。具体保存快捷键沿用当前业务。
 
-**Popover**: 必须解决 flip / shift / collision / portal / viewport clamp。当前 `packages/ui` 的 `Popover` 已使用 `collisionPadding: 12` — CURRENT / VERIFIED。
+**Popover**: 必须解决 flip / shift / collision / portal / viewport clamp。当前 Legacy `storyboard-system/packages/ui` 的 `Popover` 已使用 `collisionPadding: 12`；根包迁移前须核对真实 consumer — CURRENT / VERIFIED。
 
-**Dialog**: 适用于确认 / 删除 / 导出配置 / 创建配置。不能把普通编辑流程全部 Modal 化。当前 `packages/ui` 已有 `Modal` 组件 — CURRENT / VERIFIED。
+**Dialog**: 适用于确认 / 删除 / 导出配置 / 创建配置。不能把普通编辑流程全部 Modal 化。当前 Legacy `storyboard-system/packages/ui` 已有 `Modal`，根包尚待迁移 — CURRENT / VERIFIED。
 
 ---
 
@@ -590,16 +590,16 @@ FRAMEFORGE Motion：Quiet, Continuous, Functional, Spatial。
 
 目的：告诉用户发生了什么、内容去了哪里、当前状态、操作是否完成。
 
-**Motion Token（与 packages/ui 已有 token 对齐）：**
+**Motion Token（当前 Legacy `storyboard-system/packages/ui` 的基线；目标迁入根包）：**
 
 | Token | 时长 | 备注 |
 |---|---|---|
 | micro | 100–120ms | |
-| quick / feedback | 120–160ms | packages/ui 当前 `motionTokens.duration.feedback = 0.16s` |
+| quick / feedback | 120–160ms | Legacy `storyboard-system/packages/ui` 当前 `motionTokens.duration.feedback = 0.16s` |
 | control | 160–200ms | |
 | panel | 180–240ms | |
 | dialog | 180–240ms | |
-| layout / viewEnter | 220–320ms | packages/ui 当前 `motionTokens.duration.viewEnter = 0.22s` |
+| layout / viewEnter | 220–320ms | Legacy `storyboard-system/packages/ui` 当前 `motionTokens.duration.viewEnter = 0.22s` |
 
 禁止 Motion：Card hover 上浮 10px、Scale 1.05、大量 bounce、整页 blur、一直流动的背景、持续呼吸高亮、空闲 icon 一直转。
 
@@ -627,7 +627,7 @@ FRAMEFORGE Motion：Quiet, Continuous, Functional, Spatial。
 
 ```tsx
 <Icon name="search" size="md" />           // 通用
-<MotionIcon name="sync" state="loading" /> // 动态 — packages/ui 已有 MotionIcon
+<MotionIcon name="sync" state="loading" /> // Legacy UI 包已有；根包尚待迁移
 ```
 
 Feature 不应到处直接 `import { Search } from "lucide-react"`。
@@ -638,7 +638,7 @@ Feature 不应到处直接 `import { Search } from "lucide-react"`。
 
 **Optical Alignment**: 允许 wrapper 做 0.5–1px correction。不要修改整行 padding 补一个 icon。
 
-**MotionIcon 状态**: idle, hover, pressed, active, loading, success, error, disabled — 当前 `packages/ui/src/motion.tsx` 已定义完整 variants，CURRENT / VERIFIED。只实现当前真实需要的状态。
+**MotionIcon 状态**: idle, hover, pressed, active, loading, success, error, disabled — 当前 `storyboard-system/packages/ui/src/motion.tsx` 已定义 variants，CURRENT / VERIFIED；根包尚待迁移。只实现当前真实需要的状态。
 
 各图标状态规范：
 
@@ -781,7 +781,7 @@ Domain Icon 设计规则：Technical, Recognisable, Consistent, Low-detail, Neut
 READ ARCHITECTURE
 ↓ 确认真实 Runtime
 ↓ 确认 Legacy / React Owner
-↓ 搜索 packages/ui
+↓ 分别搜索根 packages/ui 与 Legacy storyboard-system/packages/ui 的 consumer
 ↓ 搜索已有 Feature Component
 ↓ 检查 CSS Ownership
 ↓ 检查用户已删除功能
@@ -792,9 +792,9 @@ READ ARCHITECTURE
 ↓ Visual QA
 ```
 
-**创建新组件前必须回答**：shadcn 是否已有？packages/ui 是否已有？Feature 是否已有？是否只需要 Variant / Slot？是否会产生新业务语义？是否恢复 REMOVED 功能？
+**创建新组件前必须回答**：shadcn 是否已有？仓库根 `packages/ui` 是否已有？Legacy `storyboard-system/packages/ui` 是否有可迁移实现？Feature 是否已有？是否只需要 Variant / Slot？是否会产生新业务语义？是否恢复 REMOVED 功能？
 
-**禁止重复组件**：不要 FFButton / LightingButton / ReviewButton / NewDialog / DialogV2 / InspectorNew / FinalInspector / CardFinal。基础视觉问题修 packages/ui。
+**禁止重复组件**：不要 FFButton / LightingButton / ReviewButton / NewDialog / DialogV2 / InspectorNew / FinalInspector / CardFinal。基础视觉问题最终修仓库根 `packages/ui`，迁移前保护 Legacy consumer。
 
 ---
 
@@ -855,7 +855,7 @@ UI 迁移必须保持真实字段、保持错误、保持 reload test。
 
 ```text
 Phase 1 (P0) — 不改业务:
-  packages/ui audit → shadcn theme → Button → Input → Textarea →
+  root/Legacy packages/ui consumer audit → shadcn theme → Button → Input → Textarea →
   Select → Dialog → Popover → Tooltip → Dropdown → Icon → MotionIcon
 
 Phase 2 (P0) — 解决详情自己出现 / UI 错位 / 蓝框 / 浮层越界:
@@ -931,7 +931,7 @@ shadcn Card proportions preserved.
 | **视觉** | Shadcn 基线明确、Card 比例稳定、圆角稳定、留白自然、无内部奇怪蓝框、无拟物残留、无脏金主视觉 |
 | **交互** | Selection 正确、Inspector 正确、Focus 正确、Popover 正确、Dialog 正确、Drag 正确 |
 | **业务** | 无新增功能、无丢功能、无恢复已删除功能、Review 不变审批、保存链不变、Import/Export 不变 |
-| **工程** | packages/ui 成为唯一共享 UI 基础、Legacy ownership 逐步减少、React ownership 明确、CSS Ownership 明确、Generated files 不作为主源码 |
+| **工程** | 仓库根 `packages/ui` 成为唯一共享 UI 基础、Legacy ownership 逐步减少、React ownership 明确、CSS Ownership 明确、Generated files 不作为主源码 |
 | **动效** | 短、轻、连续、有意义、不掉帧 |
 | **图标** | 统一、可识别、状态正确、动态克制 |
 | **图形** | 技术准确、服务内容、媒体优先、不装饰化 |
@@ -946,7 +946,7 @@ FRAMEFORGE UI / COMPONENT RULES
 CURRENT ARCHITECTURE
 - The app is currently Hybrid Legacy + React/TypeScript.
 - static/app.js is still runtime source.
-- packages/ui is the existing shared UI package.
+- The repo-root `packages/ui` is the target shared UI package; `storyboard-system/packages/ui` is the current mature Legacy implementation.
 - Do not create a parallel shared component library.
 - Do not edit generated workspace-v73 files as the primary source.
 
@@ -966,7 +966,7 @@ SHADCN
 - Preserve shadcn radius.
 - Preserve shadcn Card proportions and base spacing.
 - Do not compress spacing to simulate professionalism.
-- Reuse packages/ui before creating primitives.
+- Inspect both UI packages and migrate reusable Legacy primitives into the repo-root `packages/ui` before creating new ones.
 - Prefer existing Radix/shadcn overlay behavior.
 
 STATE

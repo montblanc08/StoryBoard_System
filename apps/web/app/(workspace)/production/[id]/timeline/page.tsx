@@ -92,10 +92,10 @@ export default function TimelinePage() {
               <p className="text-xs text-slate-400 line-clamp-2 max-w-md mx-auto">
                 {activeShot?.description || '暂无画面描述'}
               </p>
-              {activeShot?.voiceover && (
+              {activeShot?.voice_over && (
                 <div className="text-xs text-amber-300/90 font-medium bg-studio-950/70 p-2 rounded max-w-md mx-auto line-clamp-2 border border-amber/20">
                   <span className="font-bold text-amber mr-1">VO:</span>
-                  {activeShot.voiceover}
+                  {activeShot.voice_over}
                 </div>
               )}
             </div>
@@ -233,9 +233,9 @@ export default function TimelinePage() {
                 key={s.id}
                 style={{ width: `${s.duration_frames * zoomScale}px` }}
                 className="h-full rounded border border-studio-800 bg-studio-900/80 p-1 text-[10px] text-amber-200/90 truncate flex items-center"
-                title={s.voiceover}
+                title={s.voice_over}
               >
-                {s.voiceover ? `VO: ${s.voiceover}` : <span className="text-slate-600">—</span>}
+                {s.voice_over ? `VO: ${s.voice_over}` : <span className="text-slate-600">—</span>}
               </div>
             ))}
           </div>

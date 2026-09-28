@@ -1,9 +1,19 @@
 # FRAMEFORGE V-NEXT PROGRESS WORKLOG
 
 ## Current Phase
-ALL PHASES COMPLETE (P0, P1, P2, P3) - VERIFIED & READY FOR RELEASE
+CONVERGENCE & CUTOVER — 2026-09-29，`7b3a24c` 基线。本文件下方旧里程碑保留为历史实施记录；其“完成”“可发布”措辞不代表当前 monorepo 架构已切换。当前 owner 与门槛见 [CANONICAL_OWNER_MATRIX.md](../CANONICAL_OWNER_MATRIX.md) 和 [ACTIVE_WORKSTREAMS.md](../ACTIVE_WORKSTREAMS.md)。
 
-## Verified Findings
+当前事实：`apps/api`、`apps/web` 和根 `packages/*` 已有目标实现；仓库服务配置仍以 Legacy `server.py` 为入口。根/Legacy 两个 `@frameforge/ui` 同名包并存。`apps/api` 与 Legacy FastAPI 路由、Shot 版本及事务语义不同；VNext AI/Presence 尚无真实 Web 消费、持久 Job/Redis 多 worker 证据；PostgreSQL 尚无本轮真实集成/数据副本演练。状态是 `IMPLEMENTED_NOT_INTEGRATED` 或 `INTEGRATED_NOT_CUT_OVER`，逐项以 owner matrix 为准。不得据历史测试或文件存在宣称完整迁移或发布就绪。
+
+### 2026-09-29 首批收敛切片
+
+- 根 `AGENTS.md` 与 `CANONICAL_OWNER_MATRIX.md` 已建立；六份现况文档区分现有实现、当前运行 owner 与 cutover 门槛。
+- 根 `packages/ui` 接入 Button、IconButton、Input、TextArea、Field 和 Radix tooltip；`apps/web` 登录页真实消费 Button/Input/Field。Legacy 同名包仍为旧工作区 owner，首批状态 `INTEGRATED_NOT_CUT_OVER`，Select/overlay/motion 及双消费者切换待继续。
+- 补齐根共享包 TypeScript build 配置及 npm 锁文件；`apps/web` 的 Shot 展示字段与共享类型对齐。登录页不再预填开发管理员凭据。
+- `apps/api` SRT 路由对齐 Legacy 字节/时间码合同；分享快照映射现有 ORM `voice_over`/`camera_movement`；注册响应预加载 role，避免异步序列化错误。这些是局部对等修复，不代表 API owner cutover。
+- 验证：根 UI build、`apps/web` production build、Legacy `npm run check` 均通过；隔离 SQLite 的 export/share/Shot/auth 四组后端测试 7/7；登录页 320/375/1440 实际浏览器宽度无横向溢出，空凭据、标签与焦点可见。测试数据没有写入生产。
+
+## Historical Verified Findings（旧切片，不代表当前 cutover）
 - [VERIFIED] Working tree baseline SHA: `4986ac0d4af3a4829ba07cd24f95b1c5b1df6aa7`.
 - [VERIFIED] Pre-change patch saved to `docs/audits/prechange-working-tree.patch`.
 - [VERIFIED] `python -m py_compile server.py creative_boards.py text_format.py` succeeds without errors.

@@ -73,7 +73,7 @@ export default function StoryboardPage() {
         const matchNum = (s.display_number || '').toLowerCase().includes(q);
         const matchName = (s.name || '').toLowerCase().includes(q);
         const matchDesc = (s.description || '').toLowerCase().includes(q);
-        const matchVo = (s.voiceover || '').toLowerCase().includes(q);
+        const matchVo = (s.voice_over || '').toLowerCase().includes(q);
         const matchOwner = (s.owner_id || '').toLowerCase().includes(q);
         if (!matchNum && !matchName && !matchDesc && !matchVo && !matchOwner) {
           return false;

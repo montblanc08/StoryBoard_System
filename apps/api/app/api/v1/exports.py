@@ -1,6 +1,7 @@
 """Export API Routes for CMX 3600 EDL, OpenTimelineIO, SubRip SRT, and CSV."""
 from __future__ import annotations
 
+import re
 import urllib.parse
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import select
@@ -85,17 +86,23 @@ async def export_srt(
         raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "项目不存在"})
 
     s_res = await db.execute(
-        select(Shot).where(Shot.production_id == production_id, Shot.deleted_at.is_(None)).order_by(Shot.sort_index.asc())
+        select(Shot).where(Shot.production_id == production_id, Shot.deleted_at.is_(None)).order_by(Shot.sort_index.asc(), Shot.id.asc())
     )
     shots = s_res.scalars().all()
 
     fps = prod.fps_num / (prod.fps_den or 1)
-    srt_content = generate_srt(shots, fps=fps)
+    srt_content = generate_srt(
+        shots,
+        fps=fps,
+        start_timecode_frames=prod.start_timecode_frames,
+        is_drop_frame=prod.drop_frame,
+    )
 
-    filename = f"{prod.code or 'PROD'}_Voiceover.srt"
+    safe_name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", prod.name).strip(" .")[:160] or "file"
+    filename = f"{safe_name}.srt"
     encoded_filename = urllib.parse.quote(filename)
     return Response(
-        content=srt_content,
+        content=srt_content.encode("utf-8-sig"),
         media_type="text/plain; charset=utf-8",
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
     )

@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import { useProduction, useShots, useUpdateShot } from '@/lib/hooks/useProduction';
 import { StatusBadge } from '@/components/shot/StatusBadge';
 import { MethodBadge } from '@/components/shot/MethodBadge';
+import { shotMovementLabel } from '@/lib/shot-display';
 
 export default function ReviewPage() {
   const params = useParams();
@@ -109,16 +110,16 @@ export default function ReviewPage() {
           <div className="text-center space-y-3 z-10">
             <h2 className="text-lg font-bold text-white">{currentShot.name}</h2>
             <p className="text-xs text-slate-300 max-w-lg mx-auto leading-relaxed">{currentShot.description}</p>
-            {currentShot.voiceover && (
+            {currentShot.voice_over && (
               <div className="bg-studio-950/80 border border-amber/30 p-3 rounded text-xs text-amber-200/90 max-w-lg mx-auto">
                 <span className="font-bold text-amber mr-2">旁白:</span>
-                {currentShot.voiceover}
+                {currentShot.voice_over}
               </div>
             )}
           </div>
 
           <div className="flex items-center justify-between text-xs font-mono text-slate-400 z-10">
-            <span>{currentShot.shot_size} · {currentShot.lens_mm}mm · {currentShot.movement}</span>
+            <span>{currentShot.shot_size} · {currentShot.lens_mm}mm · {shotMovementLabel(currentShot)}</span>
             <span className="font-bold text-amber">{currentShot.duration_frames} 帧</span>
           </div>
         </div>

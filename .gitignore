@@ -22,6 +22,7 @@ storyboard-system/__pycache__/
 node_modules/
 dist/
 .next/
+*.tsbuildinfo
 
 # OS
 .DS_Store

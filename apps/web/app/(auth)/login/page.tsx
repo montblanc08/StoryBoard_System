@@ -4,14 +4,15 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/authStore';
+import { Button, Field, Input } from '@frameforge/ui';
 
 export default function LoginPage() {
   const router = useRouter();
   const { setAuth, locale, setLocale, theme, setTheme, t } = useAuthStore();
 
   const [mode, setMode] = useState<'login' | 'register'>('login');
-  const [email, setEmail] = useState('admin@company.internal');
-  const [password, setPassword] = useState('FrameForge2026!Admin');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [roleName, setRoleName] = useState('producer');
   const [loading, setLoading] = useState(false);
@@ -48,20 +49,24 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen w-full items-center justify-center bg-studio-950 p-6">
       {/* Top right utility controls */}
-      <div className="absolute top-6 right-6 flex items-center gap-3 text-xs font-mono text-studio-600">
+      <div className="absolute top-3 right-3 flex items-center gap-2 text-xs font-mono text-studio-600 sm:top-6 sm:right-6 sm:gap-3">
         <button
           onClick={() => setLocale(locale === 'zh-CN' ? 'en-US' : 'zh-CN')}
+          aria-label={locale === 'zh-CN' ? 'Switch to English' : '切换为中文'}
           className="rounded border border-studio-700 bg-studio-900 px-2.5 py-1 text-slate-300 hover:border-amber hover:text-amber"
         >
-          {locale === 'zh-CN' ? 'EN / English' : '中 / 简体中文'}
+          <span className="sm:hidden">{locale === 'zh-CN' ? 'EN' : '中'}</span>
+          <span className="hidden sm:inline">{locale === 'zh-CN' ? 'EN / English' : '中 / 简体中文'}</span>
         </button>
         <button
           onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+          aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
           className="rounded border border-studio-700 bg-studio-900 px-2.5 py-1 text-slate-300 hover:border-amber hover:text-amber"
         >
-          {theme === 'dark' ? '☀ Light' : '☾ Dark'}
+          <span className="sm:hidden">{theme === 'dark' ? '☀' : '☾'}</span>
+          <span className="hidden sm:inline">{theme === 'dark' ? '☀ Light' : '☾ Dark'}</span>
         </button>
-        <span className="flex items-center gap-1.5 text-film-green">
+        <span className="hidden items-center gap-1.5 text-film-green sm:flex">
           <span className="h-2 w-2 rounded-full bg-film-green animate-pulse" />
           ● Internal Node
         </span>
@@ -107,31 +112,31 @@ export default function LoginPage() {
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-          <div>
-            <label className="block text-slate-400 mb-1">{t('email')}</label>
-            <input
+          <Field label={t('email')}>
+            <Input
               type="email"
+              autoComplete="email"
               required
               value={email}
               onChange={e => setEmail(e.target.value)}
               className="w-full rounded border border-studio-700 bg-studio-950 px-3 py-2 text-white outline-none focus:border-amber"
               placeholder="user@company.internal"
             />
-          </div>
+          </Field>
 
           {mode === 'register' && (
             <>
-              <div>
-                <label className="block text-slate-400 mb-1">姓名 / 制作代号</label>
-                <input
+              <Field label="姓名 / 制作代号">
+                <Input
                   type="text"
+                  autoComplete="name"
                   required
                   value={displayName}
                   onChange={e => setDisplayName(e.target.value)}
                   className="w-full rounded border border-studio-700 bg-studio-950 px-3 py-2 text-white outline-none focus:border-amber"
                   placeholder="例如：王摄影 / 李剪辑"
                 />
-              </div>
+              </Field>
               <div>
                 <label className="block text-slate-400 mb-1">管线职责角色</label>
                 <select
@@ -152,24 +157,25 @@ export default function LoginPage() {
             </>
           )}
 
-          <div>
-            <label className="block text-slate-400 mb-1">{t('password')}</label>
-            <input
+          <Field label={t('password')}>
+            <Input
               type="password"
+              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
               required
               value={password}
               onChange={e => setPassword(e.target.value)}
               className="w-full rounded border border-studio-700 bg-studio-950 px-3 py-2 text-white outline-none focus:border-amber"
             />
-          </div>
+          </Field>
 
-          <button
+          <Button
             type="submit"
+            variant="primary"
             disabled={loading}
             className="w-full mt-4 flex items-center justify-center gap-2 rounded bg-amber py-2.5 font-bold text-studio-950 transition hover:bg-amber-hover disabled:opacity-50"
           >
             {loading ? '处理中...' : mode === 'login' ? t('loginBtn') : t('registerBtn')}
-          </button>
+          </Button>
         </form>
 
         <div className="mt-6 border-t border-studio-800 pt-4 text-center text-[11px] text-studio-600 font-mono">

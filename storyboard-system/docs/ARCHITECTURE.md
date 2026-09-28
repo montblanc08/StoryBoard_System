@@ -1,11 +1,11 @@
 # FrameForge 架构与开发入口（审计增强版）
 
-> 审计日期：2026-09-27  
+> 审计日期：2026-09-29（基于本地 `7b3a24c` 与入口/导入盘点）
 > 原始基线：`ARCHITECTURE.md`（2026-09-24 之后持续维护版本）  
 > 文档定位：**当前仓库事实文档 / 开发入口 / 架构边界说明 / 维护约束**  
 > 当前状态：本地重构进行中；生产环境保持现状；用户已暂停部署。  
-> 关联文档：`ARCHITECTURE_MIGRATION.md`、`LIFECYCLE_ARCHITECTURE_PLAN.md`  
-> 重要说明：本文件记录的是“当前真实系统如何运行”，不是“理想架构已经完成到哪里”。任何目标技术栈、未来包结构、AI、PostgreSQL、FastAPI、Electron 等内容，除非已有实际代码和真实入口，否则只能作为迁移目标引用，不能写成当前事实。
+> 关联文档：`ARCHITECTURE_MIGRATION.md`、`LIFECYCLE_ARCHITECTURE_PLAN.md`、[CANONICAL_OWNER_MATRIX.md](CANONICAL_OWNER_MATRIX.md)
+> 重要说明：本文件区分当前已配置的 Legacy 服务入口与仓库中已有的 VNext 实现。目标代码存在、被局部测试或在开发入口挂载，都不等于生产运行权已经切换。本轮未探测生产服务。
 
 ---
 
@@ -25,17 +25,18 @@ Python 单体 HTTP 入口
 SQLite 当前持久化
 +
 独立的导入 / 导出 / schema migration 辅助模块
++
+monorepo 中并行存在 apps/api、apps/web、根 packages/*
 ```
 
-它不是：
+当前还不能描述为：
 
 ```text
-完整 React 应用
-完整模块化后端
-FastAPI 应用
-PostgreSQL 应用
+Legacy 已由完整 React 应用替换
+FastAPI 已成为唯一生产 API
+PostgreSQL 已成为真实持久化 owner
 CRDT 协作系统
-AI 工作流系统
+AI/Presence 已接通完整产品工作流
 Electron 完成版
 ```
 
@@ -46,14 +47,14 @@ Electron 完成版
 3. `src/workspace/index.tsx` 是新的工作区构建入口，但尚未独占所有页面逻辑；
 4. `server.py` 仍是 HTTP/API、认证、静态资源、数据库访问与部分业务流程的中心；
 5. 多个业务块已经从 `server.py` 提取，但这只是局部拆分；
-6. `packages/ui` 是目前唯一已经确认的 npm workspace package；
+6. 根 `packages/ui` 与 `storyboard-system/packages/ui` 都命名为 `@frameforge/ui`；前者目前仅有 token/词典，后者拥有成熟控件，尚未收敛；
 7. `npm run check` 不是只读检查，会重新构建并写入静态输出；
 8. SQLite 仍是当前运行数据库；
 9. `schema_migrations.py` 已建立版本 1 基线；
 10. PDF / 横版 PDF / Word `.docx` / 文档媒体预检已有真实实现；
 11. `architecture_boundary_gate.py` 当前明确验证的是 `packages/ui/src` 的前端共享包边界；
 12. 不能扩大解释为“全部后端架构已经机器验证”；
-13. FastAPI、PostgreSQL、完整 AI 调用、完整 Presence、完整 React 替换仍属于迁移目标或后续阶段；
+13. `apps/api` 已有 FastAPI/SQLAlchemy/Alembic/asyncpg 代码，`apps/web` 已有 Next/React 页面；AI 和 Presence 亦有并行实现，但路由/业务对等、真实消费者与旧 owner 退出均未完成；
 14. 当前未授权生产部署，因此任何架构修改都只能停留在本地/隔离验证阶段。
 
 ---
@@ -288,10 +289,11 @@ theme.css
 
 # 7. `packages/ui` 当前定位
 
-当前唯一已经确认的 npm workspace package：
+仓库里有两个同名 npm package，不能再以相对路径混称：
 
 ```text
-packages/ui/
+repo-root/packages/ui/                 （目标 owner；当前以 tokens/i18n 为主）
+storyboard-system/packages/ui/         （成熟 Legacy primitive 的迁移源）
 ```
 
 其职责：
@@ -302,13 +304,13 @@ packages/ui/
 通用交互能力
 ```
 
-现有 TypeScript 配置会检查：
+Legacy TypeScript 配置会检查：
 
 ```text
-packages/ui/src
+storyboard-system/packages/ui/src
 ```
 
-`src/workspace/index.tsx` 通过 path alias 使用该包。
+`storyboard-system/src/workspace/index.tsx` 通过 path alias 使用 Legacy 包；`apps/web` 目前只从根包使用 token/词典，没有消费其 Button/Input 等 primitive。迁移时必须逐组件证明两端消费与视觉、焦点对等。
 
 ### 当前不能声称
 
@@ -1629,7 +1631,7 @@ Presence / 协作状态在原文中被提到分布于：
 workspace state
 ```
 
-当前尚不能声称：
+当前已有 Legacy CollaborationManager、独立 `presence_system` 和 `apps/api` 的进程内 Presence；`apps/web` 尚无真实 Presence client。当前尚不能声称：
 
 ```text
 Presence 已是独立 realtime layer
@@ -1646,7 +1648,7 @@ Presence 已是独立 realtime layer
 - cursor；
 - reconnect。
 
-状态：**PARTIAL / TO AUDIT**
+状态：**IMPLEMENTED_NOT_INTEGRATED**（多 worker、Redis、客户端接入待验）
 
 ---
 
@@ -1765,57 +1767,53 @@ i18n 为目标架构约束
 
 # 52. 当前 AI 状态
 
-目前只应描述为：
+仓库中已有以下并行实现：
 
 ```text
-GET /api/ai/capabilities
+Legacy GET /api/ai/capabilities 占位
+storyboard-system/ai_system（提案/人工接受参考实现）
+apps/api/app/services/ai_provider.py + ai_proposal.py（VNext mock/进程内提案）
 ```
 
-受身份保护的静态占位。
+VNext AI 尚无 V-Web 消费链；提案未持久化，generate 路径未证明受 enabled 门禁约束，accept 直接改 Shot ORM。
 
 不能声称：
 
-- 已有模型 provider；
-- 已有 job；
-- 已有 proposal；
-- 已有 AI 编辑；
-- 已有自动拆镜。
+- 已有真实外部模型 provider 和持久 Job；
+- Proposal 已接通真实客户端并经过普通 Command；
+- 已有可发布的 AI 编辑或自动拆镜。
 
-AI 的 Proposal + Diff + Human Accept 属于迁移目标。
+AI 的 Proposal + Human Accept 已有局部代码；完整权限、Job、持久化和标准命令接入仍是迁移门槛。
 
-状态：**PLANNED**
+状态：**IMPLEMENTED_NOT_INTEGRATED / BLOCKED**
 
 ---
 
 # 53. 当前 FastAPI 状态
 
-当前运行：
+仓库服务配置仍指向 Legacy `server.py`；本轮未探测生产实例。并行 FastAPI 树已存在：
 
 ```text
-Python 标准库 HTTP / server.py
+apps/api/main.py                   （目标 API，/api/v1）
+storyboard-system/fastapi_app     （迁移参考/兼容实现）
+storyboard-system/server.py       （现有服务配置入口）
 ```
 
-不能写：
+不能把代码或局部测试等同于 API 对等与生产切换。VNext 缺部分 Legacy 路由，Shot/bulk 版本及事件语义也不同。
 
-```text
-FastAPI backend
-```
-
-FastAPI 只是目标技术栈之一。
-
-状态：**PLANNED**
+状态：**IMPLEMENTED_NOT_INTEGRATED**
 
 ---
 
 # 54. 当前 PostgreSQL 状态
 
-当前运行：
+现有服务配置和 Legacy 应用仍使用：
 
 ```text
 SQLite
 ```
 
-PostgreSQL 仍属于迁移目标。
+VNext 已有 SQLAlchemy、Alembic 和 asyncpg 配置；Legacy `repositories/postgres_repo.py` 是另一套 DB-API 风格实现。尚无本轮真实 PostgreSQL 升级/集成、SQLite 数据副本迁移或回滚验证，因此 PostgreSQL 仍是目标持久化 owner，未 cut over。
 
 在：
 
@@ -1826,7 +1824,7 @@ PostgreSQL 仍属于迁移目标。
 
 完成前，不应切换。
 
-状态：**PLANNED**
+状态：**IMPLEMENTED_NOT_INTEGRATED / BLOCKED**
 
 ---
 

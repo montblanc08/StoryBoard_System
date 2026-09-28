@@ -62,6 +62,9 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
     )
     db.add(new_user)
     await db.flush()
+    # Response validation reads the relationship synchronously; load it while
+    # the async session can perform IO rather than triggering a lazy load there.
+    await db.refresh(new_user, attribute_names=["role"])
 
     token = create_access_token({"sub": new_user.id, "email": new_user.email})
     return {

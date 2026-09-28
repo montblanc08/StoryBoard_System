@@ -42,7 +42,7 @@ export function WallView({
             key={shot.id}
             onClick={e => onSelectShot(shot.id, e)}
             onDoubleClick={() => onInspectShot(shot.id)}
-            title={`[${shot.display_number}] ${shot.name || ''}\n${shot.description || ''}\nVO: ${shot.voiceover || '无'}`}
+            title={`[${shot.display_number}] ${shot.name || ''}\n${shot.description || ''}\nVO: ${shot.voice_over || '无'}`}
             className={`group relative flex flex-col rounded-md border bg-studio-900 overflow-hidden cursor-pointer transition-all duration-150 ${
               isSelected
                 ? 'border-amber ring-2 ring-amber shadow-lg shadow-amber/20 scale-[1.02] z-10'

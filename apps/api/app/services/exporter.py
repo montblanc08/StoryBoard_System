@@ -73,25 +73,65 @@ def generate_cmx3600_edl(shots: list[Any], fps: float = 25.0, is_drop_frame: boo
     return "\r\n".join(lines)
 
 
-def generate_srt(shots: list[Any], fps: float = 25.0) -> str:
-    """Generate SubRip (.srt) subtitle cues aligned with shot timecodes."""
+def _legacy_srt_time(frames: int, fps: float, is_drop_frame: bool) -> str:
+    """Match the Legacy bundle timecode and frame-fraction conversion."""
+    nominal_fps = int(round(fps))
+    total_frames = max(0, int(round(frames)))
+    if is_drop_frame and abs(fps - 29.97) < 0.05:
+        drop_frames = 2
+        frames_per_minute = 1800 - drop_frames
+        frames_per_10minutes = 1800 * 10 - drop_frames * 9
+        d = total_frames // frames_per_10minutes
+        m = total_frames % frames_per_10minutes
+        if m > drop_frames:
+            total_frames += drop_frames * 9 * d + drop_frames * ((m - drop_frames) // frames_per_minute)
+        else:
+            total_frames += drop_frames * 9 * d
+        ss = (total_frames // 30) % 60
+        mm = (total_frames // 1800) % 60
+        hh = total_frames // 108000
+    else:
+        total_seconds = total_frames // nominal_fps
+        ss = total_seconds % 60
+        mm = (total_seconds // 60) % 60
+        hh = total_seconds // 3600
+    milliseconds = int(((frames % nominal_fps) / fps) * 1000)
+    return f"{hh:02d}:{mm:02d}:{ss:02d},{milliseconds:03d}"
+
+
+def generate_srt(
+    shots: list[Any],
+    fps: float = 25.0,
+    *,
+    start_timecode_frames: int | None = None,
+    is_drop_frame: bool = False,
+) -> str:
+    """Generate SRT; a starting timecode selects the Legacy export contract."""
     cues: list[str] = []
-    current_frame = 0
+    current_frame = start_timecode_frames if start_timecode_frames is not None else 0
     cue_idx = 1
 
     for s in shots:
         dur = getattr(s, "duration_frames", 75)
-        vo = getattr(s, "voiceover", "") or getattr(s, "dialogue", "")
+        if start_timecode_frames is not None:
+            vo = getattr(s, "voice_over", "")
+        else:
+            vo = getattr(s, "voiceover", "") or getattr(s, "dialogue", "")
 
         if vo and vo.strip():
-            start_time = frames_to_srt_time(current_frame, fps)
-            end_time = frames_to_srt_time(current_frame + dur, fps)
-            cues.append(f"{cue_idx}\n{start_time} --> {end_time}\n{vo.strip()}\n")
+            if start_timecode_frames is not None:
+                start_time = _legacy_srt_time(current_frame, fps, is_drop_frame)
+                end_time = _legacy_srt_time(current_frame + dur, fps, is_drop_frame)
+                cues.extend((str(cue_idx), f"{start_time} --> {end_time}", vo.strip(), ""))
+            else:
+                start_time = frames_to_srt_time(current_frame, fps)
+                end_time = frames_to_srt_time(current_frame + dur, fps)
+                cues.append(f"{cue_idx}\n{start_time} --> {end_time}\n{vo.strip()}\n")
             cue_idx += 1
 
         current_frame += dur
 
-    return "\n".join(cues)
+    return "\r\n".join(cues) if start_timecode_frames is not None else "\n".join(cues)
 
 
 def generate_otio(shots: list[Any], fps: float = 25.0, title: str = "FrameForge Timeline") -> dict:

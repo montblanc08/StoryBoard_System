@@ -2,6 +2,9 @@
  * FrameForge UI Design Tokens & Atomic Primitives
  */
 
+export { Button, IconButton, Input, TextArea, Field, UIProvider } from './primitives';
+export type { ButtonProps, IconButtonProps, FieldProps } from './primitives';
+
 export const DESIGN_TOKENS = {
   spacing: {
     4: '4px',

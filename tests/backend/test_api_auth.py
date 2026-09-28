@@ -67,3 +67,4 @@ async def test_user_registration():
         assert res.status_code == 201
         data = res.json()
         assert data["user"]["display_name"] == "张总导演"
+        assert data["user"]["role"]["name"] == "director"

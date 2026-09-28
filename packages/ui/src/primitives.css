@@ -1,0 +1,93 @@
+/* Root UI controls use the host theme, with VNext defaults where tokens are absent. */
+:where(.ffui-button, .ffui-input, .ffui-textarea) {
+  box-sizing: border-box;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: normal;
+  text-shadow: none;
+}
+
+:where(.ffui-button) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-1, var(--text-main, #f1f3f5));
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+:where(.ffui-button:hover:not(:disabled)) {
+  background: var(--surface-3, var(--bg-card-hover, #151a24));
+}
+:where(.ffui-button:active:not(:disabled)) {
+  background: var(--nav-active, var(--bg-card-hover, #151a24));
+}
+:where(.ffui-secondary) {
+  background: var(--surface-2, var(--bg-panel, #12161f));
+  border-color: var(--border, var(--border-strong, #283243));
+}
+:where(.ffui-primary) {
+  padding-inline: 12px;
+  background: var(--primary, #ffbf47);
+  color: var(--primary-text, #10141d);
+}
+:where(.ffui-primary:hover:not(:disabled), .ffui-primary:active:not(:disabled)) {
+  background: var(--primary-hover, #ffd27d);
+}
+:where(.ffui-danger) { color: var(--danger, #f87171); }
+:where(.ffui-icon-button) { width: 30px; padding: 0; }
+:where(.ffui-button:disabled) { opacity: 0.45; cursor: not-allowed; }
+
+:where(.ffui-input, .ffui-textarea) {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  padding: 7px 10px;
+  border: 1px solid var(--border, var(--border-strong, #283243));
+  border-radius: 6px;
+  background: var(--surface-1, var(--bg-card, #0f131a));
+  color: var(--text-1, var(--text-main, #f1f3f5));
+}
+:where(.ffui-input) { min-height: 32px; }
+:where(.ffui-textarea) { min-height: 80px; resize: vertical; }
+:where(.ffui-input::placeholder, .ffui-textarea::placeholder) {
+  color: var(--text-3, var(--text-dim, #5a6472));
+}
+:where(.ffui-input:disabled, .ffui-textarea:disabled) {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+:is(.ffui-input, .ffui-textarea)[aria-invalid="true"] {
+  border-color: var(--border-error, var(--danger, #f87171));
+}
+:where(.ffui-button:focus-visible, .ffui-input:focus-visible, .ffui-textarea:focus-visible) {
+  outline: 2px solid var(--focus-ring, #ffbf47);
+  outline-offset: 2px;
+}
+
+:where(.ffui-field) {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-2, var(--text-muted, #94a3b8));
+}
+
+.ffui-tooltip {
+  z-index: var(--z-toast, 120);
+  max-width: min(240px, calc(100vw - 24px));
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: var(--surface-3, var(--bg-card-hover, #151a24));
+  color: var(--text-1, var(--text-main, #f1f3f5));
+  box-shadow: 0 2px 10px #0003;
+  font: 400 11px/16px var(--font-ui, var(--font-sarasa-sans, system-ui, sans-serif));
+  overflow-wrap: anywhere;
+}

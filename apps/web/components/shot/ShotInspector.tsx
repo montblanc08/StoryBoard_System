@@ -27,7 +27,7 @@ export function ShotInspector({ shot, production, onClose }: ShotInspectorProps)
         name: shot.name || '',
         display_number: shot.display_number,
         description: shot.description || '',
-        voiceover: shot.voiceover || '',
+        voice_over: shot.voice_over || '',
         dialogue: shot.dialogue || '',
         subtitle: shot.subtitle || '',
         director_notes: shot.director_notes || '',
@@ -178,8 +178,8 @@ export function ShotInspector({ shot, production, onClose }: ShotInspectorProps)
               <label className="block text-slate-400 mb-1 font-medium">对应解说词旁白 (Voice Over)</label>
               <textarea
                 rows={4}
-                value={formData.voiceover || ''}
-                onChange={e => handleFieldChange('voiceover', e.target.value)}
+                value={formData.voice_over || ''}
+                onChange={e => handleFieldChange('voice_over', e.target.value)}
                 placeholder="输入本镜对应的解说词或台词旁白..."
                 className="w-full rounded border border-studio-700 bg-studio-950 p-2.5 text-white outline-none focus:border-amber leading-relaxed"
               />

@@ -1,11 +1,12 @@
 # FrameForge 架构迁移契约（审计修正版）
 
-> 审计/重写日期：2026-09-27  
+> 审计/重写日期：2026-09-29（Convergence & Cutover 补核）
 > 文档类型：执行级迁移契约  
 > 当前状态：本地迁移实施中；生产环境保持现状；用户已暂停部署  
-> 当前运行基线：Python 标准库 HTTP + SQLite + Legacy 静态前端 + React/TypeScript Workspace 双轨  
+> 当前已配置的 Legacy 服务基线：Python 标准库 HTTP + SQLite + 静态前端/过渡 React；仓库同时已有 `apps/api`、`apps/web`、根 `packages/*` 的 VNext 实现，尚未统一运行 owner
 > 关联文档：`ARCHITECTURE.md`、`LIFECYCLE_ARCHITECTURE_PLAN.md`  
 > 文档职责：本文件只负责**从当前事实迁移到目标边界的方法、不可变规则、候选技术契约、切换条件、验证与回滚**。当前仓库事实以 `ARCHITECTURE.md` 为准；产品/实体生命周期阶段编号以 `LIFECYCLE_ARCHITECTURE_PLAN.md` 为准。
+> 统一 owner、并行实现和切换门槛见 [CANONICAL_OWNER_MATRIX.md](CANONICAL_OWNER_MATRIX.md)。下文 2026-09-27 的“当前/尚未开始/占位”审计表述，以该矩阵和本轮状态补核为准，不可读作 2026-09-29 的最新事实。
 
 ---
 
@@ -438,7 +439,7 @@ RELEASED
 
 ## 3.9 AI
 
-当前真实 AI 代码只明确包括：
+原 2026-09-27 的 Legacy 审计只明确包括：
 
 ```text
 GET /api/ai/capabilities
@@ -450,11 +451,11 @@ GET /api/ai/capabilities
 受身份保护的静态能力占位
 ```
 
-当前不存在已核实的：
+截至 2026-09-29，`storyboard-system/ai_system` 与 `apps/api/app/services/ai_*` 已有局部代码，但未形成真实 V-Web 消费、持久 Job 或标准 Command 接受链。当前仍不存在已核实的：
 
 - AI provider 正式调用；
 - AI Job；
-- Proposal Store；
+- 持久化 Proposal Store；
 - 自动拆镜；
 - AI 直接写 Project。
 
@@ -2210,7 +2211,7 @@ new path implemented
 
 ## 35.1 Repository
 
-PostgreSQL 之前应先把：
+已有 `apps/api` SQLAlchemy/AsyncSession/Alembic 与 Legacy raw DB-API 仓储两套 persistence 语义。切换前应先把：
 
 ```text
 Application / Domain
@@ -2223,9 +2224,11 @@ Application / Domain
 ```text
 Application
    ↓
-Repository Contract
+Repository Protocol
+   ↓
+SQLAlchemy Repository + AsyncSession/Unit of Work
    ↙        ↘
-SQLite     PostgreSQL
+SQLite dev/test     PostgreSQL target
 ```
 
 ### 审计要求
@@ -2307,7 +2310,7 @@ Platform 层只解决：
 
 ## 35.5 AI
 
-当前 AI = 占位。
+当前 VNext AI = mock/provider/proposal 局部实现；Legacy 还有独立 `ai_system`。没有真实 V-Web 消费、持久 Job 或经过普通 Shot Command 的人工接受链，不得标成 AI 完成。
 
 目标 AI：
 
