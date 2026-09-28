@@ -1,5 +1,7 @@
 # FRAMEFORGE 私有电影分镜制作系统
 
+维护与结构说明：[架构和构建入口](docs/ARCHITECTURE.md) · [全生命周期架构实施方案](docs/LIFECYCLE_ARCHITECTURE_PLAN.md) · [工作区文件与清理约定](docs/WORKSPACE_HYGIENE.md) · [协作规则](AGENTS.md)
+
 首个可用版本支持电影、TVC、MG、3D 与纪录片项目；所有业务数据、媒体代理、日志与下载包保存在公司内网服务器，外网 VPS 仅承担 HTTPS 入口与无缓存转发。
 
 ## 许可与版权

@@ -6,17 +6,20 @@
   <title>FRAMEFORGE · 分镜制作系统</title>
   <meta name="description" content="Notion-first 影视分镜与制作协作平台。">
   <link rel="preload" href="/fonts/satoshi-regular.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/styles.css?v=20260919-r14-layout">
-  <link rel="stylesheet" href="/workspace-ux.css?v=20260912-r35">
-  <link rel="stylesheet" href="/creative-boards.css?v=20260911-r33">
+  <link rel="stylesheet" href="/styles.css?v=20260923-release1">
+  <link rel="stylesheet" href="/workspace-ux.css?v=20260923-release1">
+  <link rel="stylesheet" href="/creative-boards.css?v=20260923-release1">
   <link rel="stylesheet" href="/vendor/liquid-glass.css?v=20260912-r34">
-  <link rel="stylesheet" href="/apple-workspace.css?v=20260912-r35">
-  <link rel="stylesheet" href="/workspace-v73.css?v=20260913-p0-shell">
-  <link rel="stylesheet" href="/workspace-v73-views.css?v=20260913-p0-shell">
-  <link rel="stylesheet" href="/workspace-flow.css?v=20260913-flow-motion">
-  <link rel="stylesheet" href="/workspace-flow-pages.css?v=20260913-flow-pages">
-  <link rel="stylesheet" href="/workspace-assets-v75.css?v=20260914-v75">
-  <link rel="stylesheet" href="/workspace-editor-v75.css?v=20260914-v75">
+  <link rel="stylesheet" href="/apple-workspace.css?v=20260923-release1">
+  <link rel="stylesheet" href="/workspace-v73.css?v=20260923-release1">
+  <link rel="stylesheet" href="/workspace-v73-views.css?v=20260923-release1">
+  <link rel="stylesheet" href="/workspace-flow.css?v=20260923-release1">
+  <link rel="stylesheet" href="/workspace-flow-pages.css?v=20260923-release1">
+  <link rel="stylesheet" href="/workspace-assets-v75.css?v=20260923-release1">
+  <link rel="stylesheet" href="/workspace-editor-v75.css?v=20260923-release1">
+  <link rel="stylesheet" href="/field-system.css?v=20260923-release1">
+  <link rel="stylesheet" href="/presence-ui.css?v=20260923-release1">
+  <link rel="stylesheet" href="/admin-center.css?v=20260923-release1">
 </head>
 <body data-context="hub" data-ui-mode="unified" data-has-shot="false" data-auth-state="pending">
   <!-- Toast Notification System -->
@@ -63,10 +66,12 @@
     <symbol id="icon-print" viewBox="0 0 24 24"><path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/></symbol>
     <symbol id="icon-share" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92 1.61 0 2.92-1.31 2.92-2.92s-1.31-2.92-2.92-2.92z"/></symbol>
     <symbol id="icon-delete" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></symbol>
+    <symbol id="icon-archive" viewBox="0 0 24 24"><path d="M20.54 5.23 19.15 3.5A1.99 1.99 0 0 0 17.58 3H6.42c-.63 0-1.22.3-1.58.8L3.46 5.23A2 2 0 0 0 3 6.42V19c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6.42c0-.43-.16-.85-.46-1.19zM6.42 5h11.16l.8 1H5.62l.8-1zM19 19H5V8h14v11zm-9-8h4v2h-4v-2z"/></symbol>
     <symbol id="icon-videocam" viewBox="0 0 24 24"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></symbol>
     <symbol id="icon-play_arrow" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></symbol>
     <symbol id="icon-pause" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></symbol>
     <symbol id="icon-tune" viewBox="0 0 24 24"><path d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"/></symbol>
+    <symbol id="icon-filter_list" viewBox="0 0 24 24"><path d="M10 18h4v-2h-4v2zM3 6v2h18V6H3zm3 7h12v-2H6v2z"/></symbol>
     <symbol id="icon-visibility" viewBox="0 0 24 24"><path d="M12 5c-5 0-9.27 3.11-11 7 1.73 3.89 6 7 11 7s9.27-3.11 11-7c-1.73-3.89-6-7-11-7zm0 12a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-8a3 3 0 1 0 .001 6.001A3 3 0 0 0 12 9z"/></symbol>
     <symbol id="icon-visibility_off" viewBox="0 0 24 24"><path d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.35 1.82l2.92 2.92A11.8 11.8 0 0 0 23 12C21.27 8.11 17 5 12 5c-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.61 11.35 7.5 12 7zm-10.73-4L4.2 5.93A11.76 11.76 0 0 0 1 12c1.73 3.89 6 7 11 7 1.55 0 3.03-.3 4.38-.84L19.73 21 21 19.73 2.54 1.27 1.27 3zM7.53 9.26l1.55 1.55A3 3 0 0 0 13.19 14.92l1.55 1.55A5 5 0 0 1 7.53 9.26z"/></symbol>
     <symbol id="icon-menu" viewBox="0 0 24 24"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></symbol>
@@ -79,6 +84,9 @@
     <symbol id="icon-chevron_left" viewBox="0 0 24 24"><path d="M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></symbol>
     <symbol id="icon-chevron_right" viewBox="0 0 24 24"><path d="M10 6 8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></symbol>
     <symbol id="icon-check" viewBox="0 0 24 24"><path d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></symbol>
+    <symbol id="icon-error" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="m8 8 8 8m0-8-8 8" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
+    <symbol id="icon-warning" viewBox="0 0 24 24"><path d="M12 3 2 21h20Z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M11 9h2v6h-2zm0 8h2v2h-2z"/></symbol>
+    <symbol id="icon-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M11 10h2v7h-2zm0-4h2v2h-2z"/></symbol>
     <symbol id="icon-edit" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></symbol>
     <symbol id="icon-content_copy" viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></symbol>
     <symbol id="icon-drag_indicator" viewBox="0 0 24 24"><path d="M11 18c0 1.1-.9 2-2 2s-2-.9-2-2 .9-2 2-2 2 .9 2 2zm-2-8c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0-6C7.9 4 7 4.9 7 6s.9 2 2 2 2-.9 2-2-.9-2-2-2zm6 4c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></symbol>
@@ -143,7 +151,7 @@
       <div class="header-center">
         <div class="global-search">
           <svg class="g-icon"><use href="#icon-search"></use></svg>
-          <input id="globalSearchInput" placeholder="搜索镜头、描述、旁白…">
+          <input id="globalSearchInput" type="search" aria-label="搜索当前项目镜头、描述和旁白" placeholder="搜索镜头、描述、旁白…">
           <kbd class="kbd-hint">⌘K</kbd>
         </div>
         <div id="searchResultPanel" class="search-result-panel hidden" role="listbox" aria-label="搜索结果"></div>
@@ -182,7 +190,7 @@
                 <h1>项目</h1>
                 <p>创建、打开和管理影视制作项目。</p>
               </div>
-              <div class="page-header-actions"><button id="userAdminBtn" class="btn btn-ghost hidden">用户审批</button><button id="dbBackupBtn" class="btn btn-ghost hidden" title="下载数据库完整备份 (.db)"><svg class="g-icon" style="margin-right:3px"><use href="#icon-download"></use></svg>数据库备份</button><button id="dashNewProjectBtn" class="btn btn-primary">+ 新建项目</button></div>
+              <div class="page-header-actions"><button id="userAdminBtn" class="btn btn-ghost hidden" type="button">管理员管理</button><button id="dashNewProjectBtn" class="btn btn-primary">+ 新建项目</button></div>
             </header>
 
             <div class="hub-section">
@@ -228,6 +236,8 @@
               <button id="projectFavoriteBtn" class="project-collab-icon" type="button" title="收藏当前项目" aria-pressed="false"><svg class="g-icon"><use href="#icon-star_border"></use></svg></button>
               <button id="projectMoreBtn" class="project-collab-icon" type="button" title="更多项目操作" aria-expanded="false" aria-controls="projectQuickMenu"><svg class="g-icon"><use href="#icon-more_horiz"></use></svg></button>
               <div id="projectQuickMenu" class="project-quick-menu hidden" role="menu">
+                <button type="button" data-project-quick="undo"><svg class="g-icon"><use href="#icon-undo"></use></svg><span>撤销</span></button>
+                <button type="button" data-project-quick="redo"><svg class="g-icon"><use href="#icon-redo"></use></svg><span>重做</span></button>
                 <button type="button" data-project-quick="settings"><svg class="g-icon"><use href="#icon-edit"></use></svg><span>项目设置</span></button>
                 <button type="button" data-project-quick="trash"><svg class="g-icon"><use href="#icon-delete"></use></svg><span>废纸篓</span></button>
               </div>
@@ -246,10 +256,10 @@
             </div>
 
             <div class="toolbar-right">
-              <button id="toggleInspectorBtn" class="btn btn-ghost toolbar-icon-action" type="button" title="镜头详情" aria-label="显示镜头详情" aria-expanded="false" aria-controls="inspectorSlot"><svg class="g-icon"><use href="#icon-description"></use></svg></button>
-              <button id="filterPopoverBtn" class="btn btn-ghost" type="button" aria-expanded="false" aria-controls="filterPopover">筛选</button>
-              <button id="columnSettingsBtn" class="btn btn-ghost" type="button" title="显示隐藏列、删除列或重新添加" aria-expanded="false" aria-controls="columnSettingsPopover">列管理</button>
-              <button id="autoTimingActionBtn" class="btn btn-ghost toolbar-icon-action" type="button" aria-label="自动计时" title="自动计时：按旁白分配时长"><svg class="g-icon"><use href="#icon-timer"></use></svg></button>
+              <button id="toggleInspectorBtn" class="btn btn-ghost toolbar-icon-action inspector-toggle" type="button" title="打开镜头详情" aria-label="详情" aria-expanded="false" aria-pressed="false" aria-controls="inspectorSlot"><svg class="g-icon"><use href="#icon-description"></use></svg><span class="inspector-toggle-label">详情</span></button>
+              <button id="filterPopoverBtn" class="btn btn-ghost" type="button" aria-label="筛选镜头" title="筛选镜头" aria-expanded="false" aria-controls="filterPopover"><svg class="g-icon" aria-hidden="true"><use href="#icon-filter_list"></use></svg><span>筛选</span></button>
+              <button id="columnSettingsBtn" class="btn btn-ghost column-settings-trigger" type="button" title="管理当前列、隐藏列和归档列" aria-expanded="false" aria-controls="columnSettingsPopover"><svg class="g-icon" aria-hidden="true"><use href="#icon-archive"></use></svg><span>列管理</span></button>
+              <button id="autoTimingActionBtn" class="btn btn-ghost toolbar-icon-action" type="button" aria-label="自动计时" title="按旁白语速重新估算镜头时长；不修改项目目标时长"><svg class="g-icon"><use href="#icon-timer"></use></svg></button>
               <button id="proConfigBtn" class="btn btn-ghost toolbar-icon-action" type="button" aria-label="保存视图" title="保存筛选、排序与列布局"><svg class="g-icon"><use href="#icon-tune"></use></svg></button>
               <button id="toolbarMoreBtn" class="btn btn-ghost toolbar-more-trigger" type="button" title="显示设置" aria-label="显示设置" aria-expanded="false" aria-controls="toolbarSecondaryActions">
                 <svg class="g-icon"><use href="#icon-more_horiz"></use></svg><span>更多工具</span>
@@ -428,7 +438,7 @@
   </dialog>
 
   <dialog id="userAdminModal" class="standard-dialog" aria-labelledby="userAdminModalTitle">
-    <div class="dialog-card wide"><div class="dialog-head"><div><h2 id="userAdminModalTitle">用户审批</h2><p class="modal-subtitle">ADMIN / USER 两种内部账号状态管理。</p></div><button class="btn-ghost-icon" data-close="userAdminModal" aria-label="关闭窗口"><svg class="g-icon"><use href="#icon-close"></use></svg></button></div><div id="userAdminList" class="user-admin-list"><div class="empty-state">正在加载…</div></div></div>
+    <div class="dialog-card wide"><div class="dialog-head"><div><h2 id="userAdminModalTitle">管理员管理</h2><p class="modal-subtitle">查看账户状态、审批申请，并管理当前管理员的个人资料。</p></div><button class="btn-ghost-icon" data-close="userAdminModal" aria-label="关闭管理员管理"><svg class="g-icon"><use href="#icon-close"></use></svg></button></div><div class="admin-center-tools" aria-label="管理员账户工具"><button id="adminProfileBtn" class="btn btn-secondary" type="button">管理员个人资料</button><button id="adminBackupBtn" class="btn btn-ghost" type="button"><svg class="g-icon" aria-hidden="true"><use href="#icon-download"></use></svg>下载数据库备份</button></div><h3 class="admin-center-section-title">账户状态管理</h3><div id="userAdminList" class="user-admin-list" aria-live="polite"><div class="empty-state">正在加载账户…</div></div></div>
   </dialog>
 
   <dialog id="userProfileModal" class="standard-dialog compact-dialog" aria-labelledby="userProfileModalTitle">
@@ -442,7 +452,7 @@
   </dialog>
 
   <dialog id="shotTrashModal" class="standard-dialog" aria-labelledby="shotTrashModalTitle">
-    <div class="dialog-card wide"><div class="dialog-head"><div><h2 id="shotTrashModalTitle">镜头废纸篓</h2><p class="modal-subtitle">删除内容保留 30 天，可恢复或立即彻底删除。</p></div><button class="btn-ghost-icon" data-close="shotTrashModal" aria-label="关闭窗口"><svg class="g-icon"><use href="#icon-close"></use></svg></button></div><div id="shotTrashList" class="config-list"><div class="empty-state">正在读取…</div></div><div class="dialog-foot"><button id="emptyShotTrashBtn" class="btn btn-danger" type="button">清空废纸篓</button><button class="btn btn-ghost" data-close="shotTrashModal" aria-label="关闭窗口">关闭</button></div></div>
+    <div class="dialog-card wide"><div class="dialog-head"><div><h2 id="shotTrashModalTitle">镜头废纸篓</h2><p class="modal-subtitle">删除内容保留 30 天，可恢复或立即彻底删除。</p></div><button class="btn-ghost-icon" data-close="shotTrashModal" aria-label="关闭窗口"><svg class="g-icon"><use href="#icon-close"></use></svg></button></div><div id="shotTrashList" class="config-list"><div class="empty-state">正在读取…</div></div><div class="dialog-foot"><button id="emptyShotTrashBtn" class="btn btn-danger" type="button" disabled>清空废纸篓</button><button class="btn btn-ghost" data-close="shotTrashModal" aria-label="关闭窗口">关闭</button></div></div>
   </dialog>
 
 
@@ -451,7 +461,7 @@
     <div class="dialog-card wide">
       <div class="dialog-head">
         <div>
-          <h2 id="pdfExportModalTitle">导出 PDF</h2>
+          <h2 id="pdfExportModalTitle">导出分镜文档</h2>
           <p class="modal-subtitle">选择版式与字段，可指定镜头范围。</p>
         </div>
         <button class="btn-ghost-icon" data-close="pdfExportModal" aria-label="关闭窗口"><svg class="g-icon"><use href="#icon-close"></use></svg></button>
@@ -462,6 +472,13 @@
           <div class="pdf-option-info">
             <div class="pdf-option-name">分镜表</div>
             <div class="pdf-option-desc">适合现场拍摄与排期调度</div>
+          </div>
+        </div>
+        <div class="pdf-layout-option" data-value="landscape-board" tabindex="0" role="radio" aria-checked="false">
+          <div class="pdf-layout-mini"><div class="big"></div><div class="line"></div></div>
+          <div class="pdf-option-info">
+            <div class="pdf-option-name">横版画面分镜表</div>
+            <div class="pdf-option-desc">A4 横向 · 每镜 16:9 图框与拍摄信息</div>
           </div>
         </div>
         <div class="pdf-layout-option" data-value="board" tabindex="0" role="radio" aria-checked="false">
@@ -490,7 +507,7 @@
         <select id="pdfShotScope"><option value="all">全部镜头</option><option value="selected">选中的镜头</option><option value="visible">当前筛选结果</option><option value="range">指定编号</option></select>
         <input id="pdfShotRange" type="text" placeholder="例如：1-10,15,20-25" aria-label="指定镜头编号" class="pdf-range-input" hidden>
       </div>
-      <label class="pdf-range-row" for="pdfFieldScope">字段
+      <label class="pdf-range-row" for="pdfFieldScope" id="pdfFieldScopeRow">字段
         <select id="pdfFieldScope"><option value="visible">与当前列表一致</option><option value="custom">自选字段</option><option value="all">全部可用字段</option></select>
       </label>
       <div class="pdf-fields-section" id="pdfCustomFields" hidden>
@@ -512,9 +529,14 @@
         </div>
       </div>
       <div id="pdfPreflightStatus" class="pdf-preflight-status" aria-live="polite"></div>
-      <progress id="pdfProgress" class="pdf-progress" value="0" max="100" hidden aria-label="PDF 生成进度"></progress>
+      <progress id="pdfProgress" class="pdf-progress" value="0" max="100" hidden aria-label="文档生成进度"></progress>
+      <p class="export-format-note">工程 PDF 会包含整个项目的完整备份，包括未显示的字段、历史和原始素材；请按工程文件保管。普通 PDF 预览仅用于阅读与打印。</p>
+      <input id="projectPdfImportInput" type="file" accept="application/pdf,.pdf" hidden>
       <div class="dialog-foot">
         <button class="btn btn-ghost" data-close="pdfExportModal" aria-label="关闭窗口">取消</button>
+        <button id="importProjectPdfBtn" class="btn btn-ghost" type="button" title="选择工程 PDF 并恢复为新项目">导入工程 PDF</button>
+        <button id="downloadWordDocumentBtn" class="btn btn-ghost" type="button" title="下载可编辑的横版画面分镜表 Word 文档" aria-label="下载横版画面分镜表 Word 文档">下载 Word</button>
+        <button id="downloadProjectPdfBtn" class="btn btn-ghost" type="button" title="下载可重新导入的完整工程 PDF">下载工程 PDF</button>
         <button id="openPdfDocumentBtn" class="btn btn-primary">生成预览</button>
       </div>
     </div>
@@ -648,17 +670,17 @@
         <div><h2 id="customFieldsModalTitle">当前工程自定义列</h2><p class="modal-subtitle">自定义列独立于保存视图，添加后可在专业镜头表中编辑。</p></div>
         <button class="btn-ghost-icon" data-close="customFieldsModal" aria-label="关闭自定义列"><svg class="g-icon"><use href="#icon-close"></use></svg></button>
       </div>
-      <section class="custom-fields-panel"><form id="customFieldForm" class="custom-field-create"><label class="form-field"><span class="form-label-title">列名称</span><input name="label" required placeholder="例如：客户备注"></label><label class="form-field"><span class="form-label-title">列键 <small>可选</small></span><input name="key" placeholder="例如：client_note"></label><label class="form-field"><span class="form-label-title">内容类型</span><span class="select-shell"><select name="field_type"><option value="text">文本</option><option value="textarea">长文本</option><option value="number">数字</option><option value="boolean">开关</option><option value="date">日期</option><option value="url">链接</option><option value="select">选项</option></select><svg class="g-icon"><use href="#icon-arrow_downward"></use></svg></span></label><label class="form-field custom-options-field"><span class="form-label-title">选项 <small>逗号分隔</small></span><input name="options" placeholder="例如：待定, 已确认, 驳回"></label><button class="btn btn-primary custom-field-add" type="submit"><svg class="g-icon"><use href="#icon-add"></use></svg>添加列</button></form><div class="custom-fields-list-head"><span>当前工程字段</span><small>右键列标题可排序、移除和调整宽度</small></div><div id="customFieldsList" class="config-list"></div></section>
+      <section class="custom-fields-panel"><form id="customFieldForm" class="custom-field-create"><label class="form-field"><span class="form-label-title">列名称</span><input name="label" required placeholder="例如：客户备注"></label><label class="form-field"><span class="form-label-title">列键 <small>创建后固定</small></span><input name="key" placeholder="例如：client_note"></label><label class="form-field"><span class="form-label-title">内容类型</span><span class="select-shell"><select name="field_type"><option value="text">文本</option><option value="textarea">长文本</option><option value="number">数字</option><option value="boolean">开关</option><option value="date">日期</option><option value="url">链接</option><option value="select">选项</option></select><svg class="g-icon"><use href="#icon-arrow_downward"></use></svg></span></label><label class="form-field custom-options-field" hidden><span class="form-label-title">选项 <small>逗号分隔</small></span><input name="options" placeholder="例如：待定, 已确认, 驳回"></label><button class="btn btn-primary custom-field-add" type="submit"><svg class="g-icon"><use href="#icon-add"></use></svg>添加列</button></form><div class="custom-fields-list-head"><span>当前工程字段</span><small>每行可通过编辑按钮管理字段</small></div><div id="customFieldsList" class="config-list"></div></section>
     </div>
   </dialog>
 
   <dialog id="customFieldEditModal" class="standard-dialog compact-dialog" aria-labelledby="customFieldEditModalTitle">
     <form id="customFieldEditForm" class="dialog-card">
-      <div class="dialog-head"><div><h2 id="customFieldEditModalTitle">编辑自定义列</h2><p class="modal-subtitle">修改列名称、键或单元格编辑类型。</p></div><button type="button" class="btn-ghost-icon" data-close="customFieldEditModal" aria-label="关闭编辑自定义列窗口"><svg class="g-icon"><use href="#icon-close"></use></svg></button></div>
+      <div class="dialog-head"><div><h2 id="customFieldEditModalTitle">编辑自定义列</h2><p class="modal-subtitle">列键创建后固定；可修改显示名称和编辑类型。</p></div><button type="button" class="btn-ghost-icon" data-close="customFieldEditModal" aria-label="关闭编辑自定义列窗口"><svg class="g-icon"><use href="#icon-close"></use></svg></button></div>
       <input type="hidden" name="id">
       <label>列名称<input name="label" required maxlength="80"></label>
-      <label>列键<input name="key" required pattern="[A-Za-z][A-Za-z0-9_]*" maxlength="48"></label>
-      <label>编辑类型<select name="field_type"><option value="text">文本</option><option value="textarea">长文本</option><option value="number">数字</option><option value="boolean">开关</option><option value="date">日期</option><option value="url">链接</option><option value="select">选项</option></select></label><label>选项（逗号分隔）<input name="options" placeholder="待定, 已确认, 驳回"></label>
+      <label>列键<input name="key" readonly aria-readonly="true"></label>
+      <label>编辑类型<select name="field_type"><option value="text">文本</option><option value="textarea">长文本</option><option value="number">数字</option><option value="boolean">开关</option><option value="date">日期</option><option value="url">链接</option><option value="select">选项</option></select></label><label class="custom-options-field" hidden>选项（逗号分隔）<input name="options" placeholder="待定, 已确认, 驳回"></label>
       <div class="dialog-foot"><button type="button" class="btn btn-ghost" data-close="customFieldEditModal" aria-label="关闭窗口">取消</button><button type="submit" class="btn btn-primary">保存列</button></div>
     </form>
   </dialog>
@@ -666,7 +688,7 @@
   <!-- Shared business editor dialogs: replaces browser prompt/confirm. -->
   <dialog id="fieldEditorModal" class="standard-dialog compact-dialog" aria-labelledby="fieldEditorTitle">
     <form id="fieldEditorForm" class="dialog-card">
-      <div class="dialog-head"><div><h2 id="fieldEditorTitle">编辑属性</h2><p class="modal-subtitle">修改后按 Enter 保存，Esc 取消。</p></div><button type="button" class="btn-ghost-icon" data-close="fieldEditorModal" aria-label="关闭属性编辑窗口"><svg class="g-icon"><use href="#icon-close"></use></svg></button></div>
+      <div class="dialog-head"><div><h2 id="fieldEditorTitle">编辑属性</h2><p class="modal-subtitle">多行内容：Ctrl/⌘ + Enter 保存 · Esc 取消。</p></div><button type="button" class="btn-ghost-icon" data-close="fieldEditorModal" aria-label="关闭属性编辑窗口"><svg class="g-icon"><use href="#icon-close"></use></svg></button></div>
       <label id="fieldEditorLabel">内容<textarea id="fieldEditorInput" rows="4" required></textarea></label>
       <div class="dialog-foot"><button type="button" class="btn btn-ghost" data-close="fieldEditorModal" aria-label="关闭窗口">取消</button><button class="btn btn-primary" type="submit">保存</button></div>
     </form>
@@ -728,16 +750,23 @@
     </div>
   </div>
 
-  <script src="/workspace-layout.js?v=20260911-r33-layout" defer></script>
-  <script src="/rich-text.js?v=20260911-r33" defer></script>
+  <script src="/workspace-layout.js?v=20260923-release1" defer></script>
+  <script src="/rich-text.js?v=20260923-release1" defer></script>
+  <script src="/field-system.js?v=20260923-release1" defer></script>
+  <script src="/presence-ui.js?v=20260923-release1" defer></script>
   <script src="/screenplay.js?v=20260911-r33" defer></script>
   <script src="/vendor/three-bundle.js?v=20260916-three" defer></script>
   <script src="/lighting-scene.js?v=20260916-v8-1" defer></script>
   <script src="/lighting-render.js?v=20260916-v8-1" defer></script>
   <script src="/lighting-assets.js?v=20260916-v8-1" defer></script>
-  <script src="/creative-boards.js?v=20260916-v8-1" defer></script>
-  <script src="/apple-workspace.js?v=20260912-r34" defer></script>
-  <script src="/workspace-v73.js?v=20260913-p0-shell" defer></script>
-  <script src="/app.js?v=20260913-p0-shell" defer></script>
+  <script src="/creative-board-navigation.js?v=20260926-nav1" defer></script>
+  <script src="/creative-boards.js?v=20260923-release1" defer></script>
+  <script src="/storyboard-landscape-export.js?v=20260923-release1" defer></script>
+  <script src="/storyboard-word-export.js?v=20260924-word1" defer></script>
+  <script src="/storyboard-document-media.js?v=20260925-media1" defer></script>
+  <script src="/storyboard-pdf-export.js?v=20260925-pdf1" defer></script>
+  <script src="/apple-workspace.js?v=20260923-release1" defer></script>
+  <script src="/workspace-v73.js?v=20260923-release1" defer></script>
+  <script src="/app.js?v=20260923-release1" defer></script>
 </body>
 </html>

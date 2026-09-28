@@ -5,16 +5,24 @@ const path = require('node:path');
 const src = fs.readFileSync(path.join(__dirname, '../static/app.js'), 'utf8');
 const html = fs.readFileSync(path.join(__dirname, '../static/index.html'), 'utf8');
 const slice = (start, end) => src.slice(src.indexOf(start), src.indexOf(end, src.indexOf(start)));
+const fn = name => {
+  const match = src.match(new RegExp(`function ${name}\\([^]*?\\n}`));
+  assert.ok(match, name);
+  return match[0];
+};
 
 async function timing() {
   let resolveRequest;
-  const c = { state: { bundle: { project: { id: 'p' }, shots: [{ id: 'a', voiceover: 'text', duration_frames: 25, title: 'old', _syncBaseline: { duration_frames: 25 } }] }, undoStack: [], redoStack: [], historyDeletedShots: new Map() },
+  const c = { state: { bundle: { project: { id: 'p' }, shots: [{ id: 'a', voiceover: 'text', duration_frames: 25, title: 'old', _syncBaseline: { duration_frames: 25 } }] }, selection: { activeShotId: 'a' }, narrationSpeed: 1, pendingUploads: 0, undoStack: [], redoStack: [], historyDeletedShots: new Map() },
     structuredClone, queueMicrotask, COLLAB_SYNC_FIELDS: ['title', 'duration_frames'],
     $: () => null, toast() {}, flushProjectBeforeLeaving: async () => true,
+    normalizeNarrationSpeed: value => Number(value) || 1,
     api: () => new Promise(resolve => { resolveRequest = resolve; }),
     markDirty() {}, renderProjectHeader() {}, renderCurrentView() {}, renderInspector() {} };
   vm.createContext(c);
-  vm.runInContext(slice('function cloneShots(', 'function setSaveStatus('), c);
+  for (const name of ['cloneShots', 'recordHistory', 'applyHistorySnapshot', 'undoLastChange', 'redoLastChange']) {
+    vm.runInContext(fn(name), c);
+  }
   vm.runInContext(slice('async function runProjectAutoTiming(', "$('#autoTimingActionBtn')?.addEventListener"), c);
   const task = c.runProjectAutoTiming();
   await new Promise(resolve => setImmediate(resolve));
@@ -50,20 +58,21 @@ function filter() {
 
 async function media() {
   let active = 0, peak = 0, progress = [];
-  const c = { Map, Promise, Array, AbortController, clearTimeout,
-    setTimeout: (fn) => setTimeout(fn, 25), printableMediaUrl: s => s.url,
-    blobToDataUrl: async () => 'data:image/png;base64,ok',
+  const c = { Map, Promise, Array, AbortController, clearTimeout, URL,
+    location: {origin:'http://localhost'},
+    setTimeout: (fn) => setTimeout(fn, 25),
+    FileReader: class { readAsDataURL() { this.result = 'data:image/png;base64,ok'; queueMicrotask(() => this.onload()); } },
     Image: class { set src(_) { queueMicrotask(() => this.onload()); } },
     fetch: async url => {
-      if (url === 'hang') return new Promise(() => {});
+      if (url.endsWith('/hang')) return new Promise(() => {});
       active++; peak = Math.max(peak, active);
       await new Promise(resolve => setTimeout(resolve, 1)); active--;
       return { ok: true, blob: async () => ({ type: 'image/png' }) };
     } };
   vm.createContext(c);
-  vm.runInContext(slice('async function preflightPdfMedia(', 'function buildPdfDocument('), c);
-  const shots = Array.from({ length: 14 }, (_, i) => ({ id: String(i), number: String(i), url: i === 13 ? 'hang' : 'ok' }));
-  const result = await c.preflightPdfMedia(shots, (done) => progress.push(done));
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../static/storyboard-document-media.js'), 'utf8'), c);
+  const shots = Array.from({ length: 14 }, (_, i) => ({ id: String(i), number: String(i), url: i === 13 ? 'hang' : `ok-${i}` }));
+  const result = await c.FrameForgeDocumentMedia.create(shot => shot.url).preflight(shots, (done) => progress.push(done));
   assert.equal(result.mediaMap.size, 13);
   assert.equal(result.failures.length, 1);
   assert.match(result.failures[0].reason, /超时/);
@@ -80,7 +89,7 @@ async function media() {
   const share = slice("$('#genShareBtn')?.addEventListener", "$('#revokeShareBtn')?.addEventListener");
   assert.match(share, /\['thumb'\]/);
   assert.match(share, /await flushProjectBeforeLeaving/);
-  assert.match(src, /script src="\/print-preview\.js/);
+  assert.match(fs.readFileSync(path.join(__dirname, '../static/storyboard-pdf-export.js'), 'utf8'), /script src="\/print-preview\.js/);
   assert.ok(!src.includes('onclick="window.print()"'));
   const printButton = { addEventListener(_, fn) { this.click = fn; } };
   let printed = false;

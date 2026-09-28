@@ -9,6 +9,7 @@ import urllib.request
 import urllib.parse
 import json
 import zipfile
+import uuid
 from pathlib import Path
 
 
@@ -101,12 +102,39 @@ class V62EditorActionsTest(unittest.TestCase):
         self.assertEqual(result["after_count"], 2)
         self.assertEqual([shot["title"] for shot in result["bundle"]["shots"]], ["替换一", "替换二"])
 
+    def test_new_shot_persists_dialogue_for_row_duplicate(self):
+        status, created = self.request(f"/api/projects/{self.pid}/shots", "POST", {
+            "title": "复制对白契约",
+            "voiceover": "旁白原文",
+            "dialogue": "角色台词应随镜头副本保留。",
+            "duration_frames": 81,
+        }, self.csrf)
+        self.assertEqual(status, 201)
+        shot = next(item for item in created["shots"] if item["id"] == created["created_shot_id"])
+        self.assertEqual(shot["dialogue"], "角色台词应随镜头副本保留。")
+        self.assertEqual(shot["voiceover"], "旁白原文")
+        _, reloaded = self.request(f"/api/projects/{self.pid}")
+        persisted = next(item for item in reloaded["shots"] if item["id"] == shot["id"])
+        self.assertEqual(persisted["dialogue"], shot["dialogue"])
+
     def test_custom_column_update_and_delete(self):
+        import urllib.error
         status, field = self.request(f"/api/projects/{self.pid}/custom-fields", "POST", {"label": "导演备注", "key": "director_note", "field_type": "text"}, self.csrf)
         self.assertEqual(status, 201)
-        status, updated = self.request(f"/api/projects/{self.pid}/custom-fields/{field['id']}", "PUT", {"label": "导演重点", "key": "director_focus", "field_type": "textarea"}, self.csrf)
+        try:
+            status, rejected = self.request(f"/api/projects/{self.pid}/custom-fields/{field['id']}", "PUT", {"label": "导演重点", "key": "director_focus", "field_type": "textarea"}, self.csrf)
+        except urllib.error.HTTPError as response:
+            status, rejected = response.code, json.loads(response.read().decode("utf-8"))
+        self.assertEqual(status, 409)
+        self.assertIn("不可修改", rejected["error"])
+        status, updated = self.request(f"/api/projects/{self.pid}/custom-fields/{field['id']}", "PUT", {"label": "导演重点", "field_type": "textarea"}, self.csrf)
         self.assertEqual(status, 200)
-        self.assertEqual(updated["key"], "director_focus")
+        self.assertEqual(updated["key"], "director_note")
+        self.assertEqual(updated["label"], "导演重点")
+        status, select_field = self.request(f"/api/projects/{self.pid}/custom-fields", "POST", {"label": "状态", "key": "approval_state", "field_type": "select", "options": ["待定", "已确认"]}, self.csrf)
+        self.assertEqual(status, 201)
+        _, fields = self.request(f"/api/projects/{self.pid}/custom-fields")
+        self.assertEqual(next(item for item in fields if item["id"] == select_field["id"])["options"], ["待定", "已确认"])
         status, _ = self.request(f"/api/projects/{self.pid}/custom-fields/{field['id']}", "DELETE", csrf=self.csrf)
         self.assertEqual(status, 204)
         _, fields = self.request(f"/api/projects/{self.pid}/custom-fields")
@@ -193,6 +221,50 @@ class V62EditorActionsTest(unittest.TestCase):
         with self.app.connect() as db:
             self.assertIsNone(db.execute("SELECT id FROM projects WHERE id=?", (project_id,)).fetchone())
             self.assertEqual(db.execute("SELECT COUNT(*) AS n FROM assets WHERE project_id=?", (project_id,)).fetchone()["n"], 0)
+
+    def test_project_delete_preserves_media_referenced_by_surviving_version(self):
+        _, bundle = self.request("/api/projects", "POST", {"name": "Shared file owner", "target_seconds": 10}, self.csrf)
+        project_id = bundle["project"]["id"]
+        with self.app.connect() as db:
+            shared_key = "shared-delete-" + project_id + ".png"
+            owner_id, surviving_id = str(uuid.uuid4()), str(uuid.uuid4())
+            at = self.app.now_iso()
+            db.execute("INSERT INTO assets (id, project_id, filename, stored_name, mime, size, created_at) VALUES (?, ?, 'owner.png', ?, 'image/png', 6, ?)",
+                       (owner_id, project_id, shared_key, at))
+            db.execute("INSERT INTO assets (id, project_id, filename, stored_name, mime, size, created_at) VALUES (?, ?, 'survivor.png', ?, 'image/png', 1, ?)",
+                       (surviving_id, self.pid, "survivor-" + project_id + ".png", at))
+            db.execute("INSERT INTO asset_versions (id, asset_id, version_number, storage_key, mime_type, size, created_at) VALUES (?, ?, 'v999', ?, 'image/png', 1, ?)",
+                       ("version-" + str(uuid.uuid4()), surviving_id, shared_key, at))
+        media_path = self.app.MEDIA_ROOT / shared_key
+        media_path.write_bytes(b"shared")
+
+        status, result = self.request(f"/api/projects/{project_id}", "DELETE", csrf=self.csrf)
+        self.assertEqual(status, 200)
+        self.assertTrue(result["deleted"])
+        self.assertTrue(media_path.is_file(), "a remaining asset version still references the shared storage key")
+        with self.app.connect() as db:
+            self.assertIsNotNone(db.execute("SELECT 1 FROM asset_versions WHERE asset_id=? AND storage_key=?",
+                                             (surviving_id, shared_key)).fetchone())
+
+    def test_project_delete_database_failure_does_not_unlink_files(self):
+        import urllib.error
+        _, bundle = self.request("/api/projects", "POST", {"name": "Failed delete", "target_seconds": 10}, self.csrf)
+        project_id = bundle["project"]["id"]
+        with self.app.connect() as db:
+            asset_id = str(uuid.uuid4())
+            db.execute("INSERT INTO assets (id, project_id, filename, stored_name, mime, size, created_at) VALUES (?, ?, 'delete-failure.png', 'delete-failure.png', 'image/png', 1, ?)",
+                       (asset_id, project_id, self.app.now_iso()))
+            db.execute("CREATE TRIGGER fail_project_delete BEFORE DELETE ON projects WHEN OLD.id='" + project_id + "' BEGIN SELECT RAISE(ABORT, 'test failure'); END")
+        media_path = self.app.MEDIA_ROOT / "delete-failure.png"
+        media_path.write_bytes(b"must survive rollback")
+
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.request(f"/api/projects/{project_id}", "DELETE", csrf=self.csrf)
+        self.assertEqual(error.exception.code, 500)
+        self.assertTrue(media_path.is_file(), "filesystem cleanup must happen only after successful DB commit")
+        with self.app.connect() as db:
+            self.assertIsNotNone(db.execute("SELECT 1 FROM projects WHERE id=?", (project_id,)).fetchone())
+            self.assertIsNotNone(db.execute("SELECT 1 FROM assets WHERE id=?", (asset_id,)).fetchone())
 
     def test_embedded_excel_image_is_anchored_to_row(self):
         png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")

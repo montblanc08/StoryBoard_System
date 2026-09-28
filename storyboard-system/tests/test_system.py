@@ -73,13 +73,21 @@ class FrameForgeSystemTest(unittest.TestCase):
             {"id": "s2", "voiceover": "千年商脉奔流不息，时代浪潮浩荡向前。", "locked": False, "duration_frames": 75},
             {"id": "s3", "voiceover": "产品展示镜头", "locked": True, "duration_frames": 50}
         ]
-        # Target 10.0s @ 25fps = 250 frames. Locked = 50f. Unlocked remainder = 200f.
+        # Speech-rate estimates replace a fixed project budget. Locked = 50f.
         result = self.app.compute_auto_timing(shots, 10.0, 25.0)
         self.assertEqual(result[2]["duration_frames"], 50)  # Locked preserved
         total_frames = sum(s["duration_frames"] for s in result)
-        self.assertEqual(total_frames, 250)  # Exact frames budget
-        # s2 has more text & punctuation than s1 -> should get more frames
+        self.assertEqual(total_frames, sum(self.app.estimate_narration_frames(s["voiceover"], 25.0) for s in shots[:2]) + 50)
+        # s2 has more text & punctuation than s1 -> should get more frames.
         self.assertGreater(result[1]["duration_frames"], result[0]["duration_frames"])
+
+        slower = self.app.compute_auto_timing([dict(shot) for shot in shots], 10.0, 25.0, 0.5)
+        faster = self.app.compute_auto_timing([dict(shot) for shot in shots], 10.0, 25.0, 2.0)
+        self.assertGreater(sum(s["duration_frames"] for s in slower), sum(s["duration_frames"] for s in faster))
+
+        dialogue_only = [{"id": "dialogue", "voiceover": "", "dialogue": "Take two, please.", "locked": False, "duration_frames": 75}]
+        self.app.compute_auto_timing(dialogue_only, 10.0, 25.0, 1.0)
+        self.assertEqual(dialogue_only[0]["duration_frames"], self.app.estimate_narration_frames("Take two, please.", 25.0))
 
         picture_only = [
             {"id": "p1", "voiceover": "", "locked": False, "duration_frames": 80},
@@ -89,19 +97,44 @@ class FrameForgeSystemTest(unittest.TestCase):
         timed_picture_only = self.app.compute_auto_timing(picture_only, 12.0, 25.0)
         self.assertEqual(timed_picture_only[0]["duration_frames"], 80)
         self.assertEqual(timed_picture_only[2]["duration_frames"], 80)
-        self.assertEqual(sum(s["duration_frames"] for s in timed_picture_only), 300)
+        self.assertEqual(sum(s["duration_frames"] for s in timed_picture_only), 160 + self.app.estimate_narration_frames("有旁白的镜头。", 25.0))
 
-        # A target shorter than the per-shot minimum must still produce a
-        # self-consistent frame total; every narrated shot keeps the minimum
-        # rather than making the summary/timecode disagree with the rows.
+        # Very short narration still receives the shared 0.6 second minimum.
         short_target = [
             {"id": "short-1", "voiceover": "一句话", "locked": False, "duration_frames": 75},
             {"id": "short-2", "voiceover": "另一句话", "locked": False, "duration_frames": 75},
             {"id": "short-3", "voiceover": "第三句话", "locked": False, "duration_frames": 75},
         ]
         short_result = self.app.compute_auto_timing(short_target, 1.0, 25.0)
-        self.assertEqual(sum(s["duration_frames"] for s in short_result), 60)
-        self.assertTrue(all(s["duration_frames"] >= 20 for s in short_result))
+        self.assertEqual(sum(s["duration_frames"] for s in short_result), sum(self.app.estimate_narration_frames(s["voiceover"], 25.0) for s in short_target))
+        self.assertTrue(all(s["duration_frames"] >= 15 for s in short_result))
+
+    def test_auto_timing_api_rate_bounds_and_project_target(self):
+        _, session = self.request("/api/login", "POST", {"username": "qa-admin", "password": "FrameForge2026!QA"})
+        csrf = session["csrf"]
+        status, bundle = self.request("/api/projects", "POST", {"name": "Timing Rate Contract", "fps": 25, "target_seconds": 37}, csrf)
+        self.assertEqual(status, 201)
+        project_id = bundle["project"]["id"]
+        shot_id = bundle["shots"][0]["id"]
+        with self.app.connect() as db:
+            db.execute("UPDATE shots SET voiceover=?, duration_frames=75 WHERE id=?", ("A short line, then another.", shot_id))
+            db.commit()
+
+        import urllib.error
+        for invalid in (0.49, 2.01, "fast", True):
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                self.request(f"/api/projects/{project_id}/auto-timing", "POST", {"speech_rate": invalid}, csrf)
+            self.assertEqual(error.exception.code, 400)
+        with self.app.connect() as db:
+            self.assertEqual(db.execute("SELECT duration_frames FROM shots WHERE id=?", (shot_id,)).fetchone()[0], 75)
+
+        status, slow = self.request(f"/api/projects/{project_id}/auto-timing", "POST", {"speech_rate": 0.5}, csrf)
+        self.assertEqual(status, 200)
+        status, fast = self.request(f"/api/projects/{project_id}/auto-timing", "POST", {"speech_rate": 2.0}, csrf)
+        self.assertEqual(status, 200)
+        self.assertGreater(slow["shots"][0]["duration_frames"], fast["shots"][0]["duration_frames"])
+        self.assertEqual(slow["project"]["target_seconds"], 37)
+        self.assertEqual(fast["project"]["target_seconds"], 37)
 
     # 3. Complete Production API Workflow
     def test_complete_production_workflow(self):
@@ -145,9 +178,11 @@ class FrameForgeSystemTest(unittest.TestCase):
         self.assertEqual(saved["shots"][1]["lens"], "85mm")
 
         # Auto Timing API
-        status, timed = self.request(f"/api/projects/{pid}/auto-timing", "POST", {}, csrf)
+        status, timed = self.request(f"/api/projects/{pid}/auto-timing", "POST", {"speech_rate": 1.25}, csrf)
         self.assertEqual(status, 200)
-        self.assertEqual(timed["total_frames"], 750)  # 30s * 25fps = 750f
+        self.assertEqual(timed["project"]["target_seconds"], 30)  # Auto timing leaves project target metadata alone.
+        self.assertEqual(timed["shots"][0]["duration_frames"], self.app.estimate_narration_frames("晨光破晓，万物复苏。", 25, 1.25))
+        self.assertEqual(timed["total_frames"], sum(shot["duration_frames"] for shot in timed["shots"]))
 
         # Add Comment
         sid = saved["shots"][0]["id"]

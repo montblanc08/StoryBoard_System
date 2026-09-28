@@ -10,6 +10,7 @@
  */
 (function (root) {
   'use strict';
+  let activeInlineSession = null;
   const sizes = [10, 12, 14, 16, 18, 20, 24, 28, 32];
   const colors = ['yellow', 'green', 'blue', 'pink'];
   const highlights = {yellow:'#ffe08a', green:'#bce7b3', blue:'#b9dbff', pink:'#f5bfd5'};
@@ -20,7 +21,8 @@
       if (!run || typeof run.text !== 'string' || !run.text) continue;
       const clean = {text: run.text};
       for (const key of ['bold', 'italic', 'underline']) if (run[key] === true) clean[key] = true;
-      if (sizes.includes(run.size)) clean.size = run.size;
+      const numericSize = Number(run.size);
+      if (Number.isFinite(numericSize) && sizes.includes(numericSize)) clean.size = numericSize;
       if (colors.includes(run.highlight)) clean.highlight = run.highlight;
       const previous = result.at(-1);
       if (previous && JSON.stringify({...previous,text:''}) === JSON.stringify({...clean,text:''})) previous.text += clean.text;
@@ -106,9 +108,11 @@
 
   const TOOLBAR = `<div class="rich-toolbar" role="toolbar" aria-label="文字格式">
         <select data-format="size" aria-label="字号"><option value="">字号</option>${sizes.map(n => `<option value="${n}">${n}</option>`).join('')}</select>
+        <span class="rich-toolbar-divider" aria-hidden="true"></span>
         <button type="button" data-format="bold" aria-label="粗体 Ctrl+B" title="粗体 Ctrl+B" aria-pressed="false"><b>B</b></button>
         <button type="button" data-format="italic" aria-label="斜体 Ctrl+I" title="斜体 Ctrl+I" aria-pressed="false"><i>I</i></button>
         <button type="button" data-format="underline" aria-label="下划线 Ctrl+U" title="下划线 Ctrl+U" aria-pressed="false"><u>U</u></button>
+        <span class="rich-toolbar-divider" aria-hidden="true"></span>
         <select data-format="highlight" aria-label="高亮标记"><option value="">标记</option><option value="yellow">黄色标记</option><option value="green">绿色标记</option><option value="blue">蓝色标记</option><option value="pink">粉色标记</option></select>
         <button type="button" data-format="clear" title="清除格式" aria-label="清除格式">T×</button>
         <button type="button" data-history="undo" aria-label="撤销文字编辑" title="撤销 Ctrl+Z">↶</button><button type="button" data-history="redo" aria-label="重做文字编辑" title="重做 Ctrl+Shift+Z">↷</button>
@@ -217,8 +221,13 @@
         const hits = current.filter(run => { const next = offset + run.text.length; const yes = next > start && offset < end; offset = next; return yes; });
         const out = {};
         for (const key of ['bold','italic','underline']) out[key] = hits.length > 0 && hits.every(r => r[key]);
-        out.size = hits.length && hits.every(r => r.size) ? hits[0].size : '';
-        out.highlight = hits.length && hits.every(r => r.highlight) ? hits[0].highlight : '';
+        // A collapsed caret is also a valid formatting target: the toolbar
+        // must still reflect the current run (and after applying a format to
+        // the whole field, the whole field is the target).  Returning an
+        // empty value here made the selected字号/标记 immediately disappear.
+        const inspected = hits.length ? hits : current;
+        out.size = inspected.length && inspected.every(r => r.size) ? inspected[0].size : '';
+        out.highlight = inspected.length && inspected.every(r => r.highlight) ? inspected[0].highlight : '';
         return out;
       }
     };
@@ -244,8 +253,15 @@
       // 焦点短暂移出编辑区由 inline() 的 blur 判定（relatedTarget）兜住。
       select.addEventListener('change', () => {
         const key = select.dataset.format;
-        controller.format(key, key === 'size' ? Number(select.value) : select.value);
-        controller.rememberSelection(); sync();
+        // Native selects briefly take focus away from contenteditable. Keep
+        // the text selection before applying the new value.
+        controller.rememberSelection();
+        const selectedValue = select.value;
+        controller.format(key, key === 'size' ? Number(selectedValue) : selectedValue);
+        sync();
+        // Keep the native control on the value just applied even when the
+        // browser briefly collapses the selection while its menu closes.
+        if (selectedValue) select.value = selectedValue;
       });
     });
     toolbar.querySelectorAll('[data-history]').forEach(button => {
@@ -308,13 +324,30 @@
    * Enter or Ctrl+Enter; Escape reverts. The floating toolbar follows the text
    * selection and is also shown by right-clicking inside the field.
    */
-  function inline({element, text = '', runs = [], title = '', onTab, clientX, clientY, source} = {}) {
+  function inline({element, text = '', runs = [], title = '', onTab, onChange, clientX, clientY, source} = {}) {
     const host = element;
     if (!host) return Promise.resolve(null);
+    // Only one inline editor may own the document-level floating toolbar.
+    // Switching cells therefore closes the previous editor before creating a
+    // new one, preventing stacked toolbars and stale blue edit frames.
+    if (root.__frameforgeInlineCommit) root.__frameforgeInlineCommit();
+    else root.__frameforgeInlineCancel?.();
     const doc = host.ownerDocument;
     const originalHtml = host.innerHTML;
     const originalText = String(text || '');
     let settled = false;
+
+    // The editor is nested in draggable/selectable rows. Keep row gestures
+    // out of the text surface while preserving the browser's native selection
+    // behaviour (there is intentionally no preventDefault on pointerdown).
+    const previousDraggable = host.getAttribute('draggable');
+    const previousUserSelect = host.style.userSelect;
+    const previousWebkitUserSelect = host.style.webkitUserSelect;
+    const previousTouchAction = host.style.touchAction;
+    host.setAttribute('draggable', 'false');
+    host.style.userSelect = 'text';
+    host.style.webkitUserSelect = 'text';
+    host.style.touchAction = 'auto';
 
     host.classList.add('is-rich-editing');
     host.setAttribute('contenteditable', 'true');
@@ -323,7 +356,15 @@
     if (title) host.setAttribute('aria-label', title);
     host.spellcheck = false;
 
-    const controller = createController(host, {initial: {text, runs}});
+    const controller = createController(host, {
+      initial: {text, runs},
+      onChange: runsVal => {
+        if (typeof onChange === 'function') {
+          const textVal = (runsVal || []).map(r => r.text).join('');
+          onChange({ text: textVal, runs: runsVal });
+        }
+      }
+    });
     controller.render();
 
     const toolbar = doc.createElement('div');
@@ -334,16 +375,40 @@
     // 外层已经是 toolbar，避免嵌套同名 role 让读屏软件重复播报。
     const inner = toolbar.querySelector('.rich-toolbar');
     if (inner) { inner.removeAttribute('role'); inner.removeAttribute('aria-label'); }
+    const dragHandle = doc.createElement('span');
+    dragHandle.className = 'rich-toolbar-drag-handle';
+    dragHandle.setAttribute('role', 'button');
+    dragHandle.setAttribute('tabindex', '0');
+    dragHandle.setAttribute('aria-label', '移动文字格式工具栏');
+    dragHandle.title = '拖动工具栏';
+    dragHandle.textContent = '⋮⋮';
+    if (inner) inner.prepend(dragHandle);
+    else toolbar.prepend(dragHandle);
     doc.body.append(toolbar);
     const syncToolbar = wireToolbar(toolbar, controller);
 
+    let manuallyPositioned = false;
+    let toolbarDrag = null;
+    const clampPosition = (left, top) => ({
+      left: Math.max(8, Math.min(left, root.innerWidth - (toolbar.offsetWidth || 320) - 8)),
+      top: Math.max(8, Math.min(top, root.innerHeight - (toolbar.offsetHeight || 34) - 8))
+    });
     const place = (rect) => {
       const width = toolbar.offsetWidth || 320, height = toolbar.offsetHeight || 34;
       const margin = 8;
-      let left = rect ? rect.left + rect.width / 2 - width / 2 : host.getBoundingClientRect().left;
-      let top = rect ? rect.top - height - 6 : host.getBoundingClientRect().top - height - 6;
+      if (manuallyPositioned) {
+        const rawLeft = toolbarDrag?.left ?? Number.parseFloat(toolbar.style.left);
+        const rawTop = toolbarDrag?.top ?? Number.parseFloat(toolbar.style.top);
+        const fixed = clampPosition(Number.isFinite(rawLeft) ? rawLeft : margin, Number.isFinite(rawTop) ? rawTop : margin);
+        toolbar.style.left = `${Math.round(fixed.left)}px`;
+        toolbar.style.top = `${Math.round(fixed.top)}px`;
+        return;
+      }
+      const anchor = host.getBoundingClientRect();
+      let left = anchor.left;
+      let top = anchor.bottom + 8;
       left = Math.max(margin, Math.min(left, root.innerWidth - width - margin));
-      if (top < margin) top = (rect ? rect.bottom : host.getBoundingClientRect().bottom) + 6;
+      if (top + height > root.innerHeight - margin) top = anchor.top - height - 8;
       toolbar.style.left = `${Math.round(left)}px`;
       toolbar.style.top = `${Math.round(Math.max(margin, top))}px`;
     };
@@ -352,6 +417,9 @@
       place(rect || null);
     };
     const hideToolbar = () => toolbar.classList.remove('is-visible');
+    const repositionToolbar = () => { if (!settled) place(null); };
+    root.addEventListener('resize', repositionToolbar);
+    doc.addEventListener('scroll', repositionToolbar, true);
 
     const selectionRect = () => {
       const s = doc.getSelection();
@@ -377,8 +445,35 @@
       // 关键：阻止默认行为，焦点与正文选区才不会在按下按钮的瞬间丢失。
       // 原生 <select>（字号/标记）必须放行 —— 它需要拿到焦点才能展开下拉，
       // 焦点短暂移出由 onBlur 的 relatedTarget 判定兜住。
-      if (!event.target.closest('select')) event.preventDefault();
+      if (!event.target.closest('select, .rich-toolbar-drag-handle')) event.preventDefault();
     });
+
+    const onToolbarDragStart = event => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const rect = toolbar.getBoundingClientRect();
+      manuallyPositioned = true;
+      toolbarDrag = {pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, left: rect.left, top: rect.top};
+      toolbar.classList.add('is-dragging');
+      try { dragHandle.setPointerCapture(event.pointerId); } catch (_) {}
+    };
+    const onToolbarDragMove = event => {
+      if (!toolbarDrag || event.pointerId !== toolbarDrag.pointerId) return;
+      const next = clampPosition(toolbarDrag.left + event.clientX - toolbarDrag.startX, toolbarDrag.top + event.clientY - toolbarDrag.startY);
+      toolbar.style.left = `${Math.round(next.left)}px`;
+      toolbar.style.top = `${Math.round(next.top)}px`;
+    };
+    const onToolbarDragEnd = event => {
+      if (!toolbarDrag || (event?.pointerId != null && event.pointerId !== toolbarDrag.pointerId)) return;
+      try { dragHandle.releasePointerCapture(toolbarDrag.pointerId); } catch (_) {}
+      toolbarDrag = null;
+      toolbar.classList.remove('is-dragging');
+    };
+    dragHandle.addEventListener('pointerdown', onToolbarDragStart);
+    dragHandle.addEventListener('pointermove', onToolbarDragMove);
+    dragHandle.addEventListener('pointerup', onToolbarDragEnd);
+    dragHandle.addEventListener('pointercancel', onToolbarDragEnd);
 
     const onContextMenu = event => {
       event.preventDefault();
@@ -387,8 +482,30 @@
     };
     host.addEventListener('contextmenu', onContextMenu);
 
-    const onPointerDown = event => { if (event.button !== 2) hideToolbar(); };
+    const onPointerDown = event => {
+      if (event.button !== 2) hideToolbar();
+      event.stopPropagation();
+    };
+    // Rows/cards also listen for pointer movement for reordering. Let the
+    // browser keep its native contenteditable selection gesture, but never
+    // let that movement reach those parent drag controllers.
+    const onPointerMove = event => event.stopPropagation();
+    const onMouseMove = event => event.stopPropagation();
+    const onMouseDown = event => event.stopPropagation();
+    const onTouchStart = event => event.stopPropagation();
+    const onClick = event => event.stopPropagation();
+    const onDoubleClick = event => event.stopPropagation();
+    const onSelectStart = event => event.stopPropagation();
+    const onDragStart = event => { event.preventDefault(); event.stopPropagation(); };
     host.addEventListener('pointerdown', onPointerDown);
+    host.addEventListener('pointermove', onPointerMove);
+    host.addEventListener('mousemove', onMouseMove);
+    host.addEventListener('mousedown', onMouseDown);
+    host.addEventListener('touchstart', onTouchStart, {passive: true});
+    host.addEventListener('click', onClick);
+    host.addEventListener('dblclick', onDoubleClick);
+    host.addEventListener('selectstart', onSelectStart);
+    host.addEventListener('dragstart', onDragStart);
 
     // 中文/日文输入法组字期间不能收尾：此时读到的是未完成内容，
     // 而且撤销 contenteditable 后 IME 仍会往已变回普通元素的节点里写入。
@@ -407,6 +524,7 @@
     // 兜底：宿主元素若被别的逻辑摘出 DOM（视图重建、筛选、排序），
     // contenteditable 不会触发 blur，必须主动收尾，否则内容丢失且浮动工具条永久滞留。
     let commitNow = null;
+    let cancelActive = null;
     let observer = null;
     const hostParent = host.parentNode;
     if (hostParent && typeof MutationObserver === 'function') {
@@ -418,13 +536,27 @@
       observer.observe(hostParent, { childList: true });
     }
 
-    return new Promise(resolve => {
+    const inlinePromise = new Promise(resolve => {
       const finish = (result, restoreHtml) => {
         if (settled) return;
         settled = true;
         doc.removeEventListener('selectionchange', onSelectionChange);
+        root.removeEventListener('resize', repositionToolbar);
+        doc.removeEventListener('scroll', repositionToolbar, true);
         host.removeEventListener('contextmenu', onContextMenu);
         host.removeEventListener('pointerdown', onPointerDown);
+        host.removeEventListener('pointermove', onPointerMove);
+        host.removeEventListener('mousemove', onMouseMove);
+        host.removeEventListener('mousedown', onMouseDown);
+        host.removeEventListener('touchstart', onTouchStart);
+        host.removeEventListener('click', onClick);
+        host.removeEventListener('dblclick', onDoubleClick);
+        host.removeEventListener('selectstart', onSelectStart);
+        host.removeEventListener('dragstart', onDragStart);
+        dragHandle.removeEventListener('pointerdown', onToolbarDragStart);
+        dragHandle.removeEventListener('pointermove', onToolbarDragMove);
+        dragHandle.removeEventListener('pointerup', onToolbarDragEnd);
+        dragHandle.removeEventListener('pointercancel', onToolbarDragEnd);
         host.removeEventListener('blur', onBlur);
         host.removeEventListener('keydown', onKeyDown);
         host.removeEventListener('compositionstart', onCompositionStart);
@@ -432,7 +564,14 @@
         if (observer) observer.disconnect();
         controller.dispose?.();
         toolbar.remove();
+        if (root.__frameforgeInlineCancel === cancelActive) root.__frameforgeInlineCancel = null;
+        if (root.__frameforgeInlineCommit === commitNow) root.__frameforgeInlineCommit = null;
         host.removeAttribute('contenteditable');
+        if (previousDraggable === null) host.removeAttribute('draggable');
+        else host.setAttribute('draggable', previousDraggable);
+        host.style.userSelect = previousUserSelect;
+        host.style.webkitUserSelect = previousWebkitUserSelect;
+        host.style.touchAction = previousTouchAction;
         host.removeAttribute('role');
         host.removeAttribute('aria-multiline');
         host.classList.remove('is-rich-editing');
@@ -448,6 +587,9 @@
         finish({text: joined, runs: value}, false);
       };
       commitNow = commit;
+      root.__frameforgeInlineCommit = commit;
+      cancelActive = () => finish(null, true);
+      root.__frameforgeInlineCancel = cancelActive;
       const onBlur = event => {
         // 焦点只是移进工具条（含原生 select 下拉）时属于格式操作，不是编辑结束。
         // 用 relatedTarget 判断而不是 :hover —— 键盘移动焦点时根本没有 hover。
@@ -524,9 +666,73 @@
       showToolbar(null);
       syncToolbar();
     });
+
+    activeInlineSession = {
+      host,
+      commit: () => {
+        commitNow?.();
+      },
+      cancel: () => {
+        cancelActive?.();
+      },
+      isComposing: () => composingNow,
+      waitForCompositionEnd: () => {
+        if (!composingNow) return Promise.resolve();
+        return new Promise(resolve => {
+          const oldQueued = pendingAfterCompose;
+          pendingAfterCompose = () => {
+            if (oldQueued) oldQueued();
+            resolve();
+          };
+        });
+      },
+      readCurrent: () => {
+        if (settled) return null;
+        const current = controller.read();
+        const currentText = current.map(r => r.text).join('');
+        return { text: currentText, runs: current };
+      },
+      isDirty: () => {
+        if (settled) return false;
+        const current = controller.read();
+        const currentText = current.map(r => r.text).join('');
+        const normalizedOriginalRuns = normalize(runs, originalText);
+        return currentText !== originalText || JSON.stringify(current) !== JSON.stringify(normalizedOriginalRuns);
+      },
+      done: inlinePromise
+    };
+
+    return inlinePromise.finally(() => {
+      if (activeInlineSession?.host === host) {
+        activeInlineSession = null;
+      }
+    });
   }
 
-  const api = {normalize, html, apply, edit, inline, readElement, sizes, colors};
+  async function flushActive() {
+    const active = activeInlineSession;
+    if (!active) return true;
+    if (active.isComposing?.()) {
+      await active.waitForCompositionEnd();
+    }
+    active.commit();
+    await active.done;
+    return true;
+  }
+
+  function hasActive() {
+    return Boolean(activeInlineSession);
+  }
+
+  function isComposing() {
+    return Boolean(activeInlineSession?.isComposing?.());
+  }
+
+  function getActiveSession() {
+    return activeInlineSession;
+  }
+
+  const api = {normalize, html, apply, edit, inline, readElement, sizes, colors, flushActive, hasActive, isComposing, getActiveSession};
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.FrameForgeRichText = api;
 })(globalThis);

@@ -138,6 +138,45 @@ class CreativeBoardsContractTest(unittest.TestCase):
         self.assertEqual(self.put([mood, light])['revision'], self.revision)
         self.assertEqual(self.request(self.path)[1]['boards'], result['boards'])
 
+    def test_moodboard_empty_rename_resize_and_revision_round_trip(self):
+        empty = _board('mood-empty', 'moodboard', [])
+        first = self.put([empty])
+        self.assertEqual(first['revision'], 1)
+        self.assertEqual(first['boards'], [empty])
+        renamed = {**empty, 'name': 'Moodboard renamed', 'width': 1800, 'height': 1200}
+        second = self.put([renamed])
+        self.assertEqual(second['revision'], 2)
+        self.assertEqual(self.request(self.path)[1], second)
+
+    def test_moodboard_note_color_link_image_whitelist_round_trip(self):
+        asset_id = str(uuid.uuid4())
+        with self.app.connect() as db:
+            db.execute("""INSERT INTO assets
+                (id, project_id, filename, stored_name, mime, size, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (asset_id, self.pid, 'reference.png', asset_id + '.png', 'image/png', 68, '2026-09-23T00:00:00Z'))
+        mood = _board('mood-types', 'moodboard', [
+            _item('note', 'note', text='Visual direction', color='#fff2b3'),
+            _item('color', 'color', color='#64748b'),
+            _item('link', 'link', url='https://example.com/reference'),
+            _item('image', 'image', asset_id=asset_id),
+        ])
+        result = self.put([mood])
+        self.assertEqual([item['type'] for item in result['boards'][0]['items']], ['note', 'color', 'link', 'image'])
+        self.assertEqual(result['boards'][0]['items'][3]['asset_id'], asset_id)
+        self.assertEqual(self.request(self.path)[1]['boards'], result['boards'])
+
+    def test_moodboard_rejects_unknown_fields_and_stale_revision(self):
+        bad = _board('mood-bad', 'moodboard', [_item('note', 'note', text='hi', runtime_only=True)])
+        self.assertEqual(self.request(self.path, 'PUT', {'revision': 0, 'boards': [bad]})[0], 400)
+        valid = _board('mood-good', 'moodboard', [_item('note', 'note', text='hi')])
+        saved = self.put([valid])
+        self.assertEqual(saved['revision'], 1)
+        status, result = self.request(self.path, 'PUT', {'revision': 0, 'boards': [valid]})
+        self.assertEqual(status, 409)
+        self.assertIn('error', result)
+        self.assertEqual(self.request(self.path)[1]['boards'], saved['boards'])
+
     # -- backup import validates the same contract ----------------------------
 
     def test_backup_import_validates_boards(self):

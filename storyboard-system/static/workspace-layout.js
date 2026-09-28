@@ -8,12 +8,18 @@
   const sidebarButton = document.querySelector('#sidebarCollapseBtn');
   let transitionTimer;
   const collapseSidebar = (collapsed, animate = false) => {
-    document.body.classList.toggle('sidebar-collapsed', collapsed);
-    sidebarButton?.setAttribute('aria-expanded', String(!collapsed));
-    sidebarButton?.setAttribute('aria-label', collapsed ? '展开侧栏' : '收起侧栏');
-    if (sidebarButton) sidebarButton.title = collapsed ? '展开侧栏' : '收起侧栏';
-    if (animate) { document.body.classList.add('workspace-panels-animating');clearTimeout(transitionTimer);transitionTimer=setTimeout(()=>document.body.classList.remove('workspace-panels-animating'),200); }
-    try { localStorage.setItem('frameforge-sidebar-collapsed',String(collapsed)); } catch (_) {}
+    const apply = () => {
+      document.body.classList.toggle('sidebar-collapsed', collapsed);
+      sidebarButton?.setAttribute('aria-expanded', String(!collapsed));
+      sidebarButton?.setAttribute('aria-label', collapsed ? '展开侧栏' : '收起侧栏');
+      if (sidebarButton) sidebarButton.title = collapsed ? '展开侧栏' : '收起侧栏';
+      try { localStorage.setItem('frameforge-sidebar-collapsed',String(collapsed)); } catch (_) {}
+    };
+    if (!animate) { apply(); return; }
+    document.body.classList.add('workspace-panels-animating');
+    requestAnimationFrame(() => requestAnimationFrame(apply));
+    clearTimeout(transitionTimer);
+    transitionTimer = setTimeout(() => document.body.classList.remove('workspace-panels-animating'), 300);
   };
   if(sidebarButton){let collapsed=false;try{collapsed=localStorage.getItem('frameforge-sidebar-collapsed')==='true';}catch(_){}collapseSidebar(collapsed);sidebarButton.addEventListener('click',()=>collapseSidebar(!document.body.classList.contains('sidebar-collapsed'),true));}
   const effects = document.querySelector('#workspaceEffects');

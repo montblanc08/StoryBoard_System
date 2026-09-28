@@ -400,6 +400,17 @@ dialog[open] > .dialog-card { animation: workspace-dialog-in 160ms ease-out; }
     backdrop-filter: none;
   }
 
+  /* Search results must be an opaque layer: controls underneath remain usable
+     after the panel closes, but must not visually bleed through it while open. */
+  body .search-result-panel {
+    background: var(--bg-surface-1) !important;
+    background-image: none !important;
+    border-color: var(--border-subtle) !important;
+    box-shadow: 0 14px 32px rgba(0,0,0,.38) !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
   body :is(.column-settings-popover, .sidebar-settings-popover, #filterPopover,
     .project-activity-panel, .project-quick-menu, .toolbar-secondary-actions,
     .search-result-panel, .context-menu) {
@@ -520,7 +531,7 @@ dialog[open] > .dialog-card { animation: workspace-dialog-in 160ms ease-out; }
     background: var(--accent-selection);
     box-shadow: inset 3px 0 0 var(--accent);
   }
-  body :is(.app-shell, .standard-dialog) :is(button, input, select, textarea, [tabindex], [contenteditable="true"]):focus-visible {
+  body :is(.app-shell, .standard-dialog) :is(button, [tabindex]):not(.ffui-select,[contenteditable="true"]):focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
   }
@@ -563,6 +574,8 @@ dialog[open] > .dialog-card { animation: workspace-dialog-in 160ms ease-out; }
     box-sizing: border-box;
   }
   body dialog.standard-dialog .dialog-head { flex-wrap: wrap; }
+  body #pdfExportModal .dialog-head { flex-wrap: nowrap; }
+  body #pdfExportModal .dialog-head > :first-child { flex: 1 1 auto; }
   body dialog.standard-dialog .dialog-head > :first-child { flex: 1 1 160px; }
   body dialog.standard-dialog .dialog-head :is(h2, h3) { font-size: 1.125rem; overflow-wrap: anywhere; }
   body dialog.standard-dialog .dialog-foot {
@@ -695,10 +708,10 @@ dialog[open] > .dialog-card { animation: workspace-dialog-in 160ms ease-out; }
     z-index: var(--z-toast, 120);
     display: none;
     padding: 5px;
-    border: 1px solid var(--ux-glass-edge);
+    border: 1px solid var(--border-subtle);
     border-radius: 10px;
     background: var(--bg-surface-1);
-    box-shadow: 0 14px 34px rgba(0, 0, 0, .30);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, .28);
     -webkit-user-select: none;
     user-select: none;
   }
@@ -712,7 +725,7 @@ dialog[open] > .dialog-card { animation: workspace-dialog-in 160ms ease-out; }
     padding: 4px 7px;
     color: var(--text-primary);
     background: var(--bg-surface-1);
-    border: 1px solid var(--border-strong);
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
     font: inherit; font-size: 12px; line-height: 1;
     cursor: pointer;
@@ -723,17 +736,21 @@ dialog[open] > .dialog-card { animation: workspace-dialog-in 160ms ease-out; }
     color: var(--accent);
     background: var(--accent-selection);
     border-color: var(--accent);
+    box-shadow: none;
   }
+  /* Toolbar keyboard focus is owned by field-system.css. */
   body .rich-float-toolbar .rich-toolbar button:disabled { opacity: .4; cursor: not-allowed; }
 
   /* 正在原位编辑的单元格 / 文本块 (P0-EDIT-01) */
   body :is(.cell-display, .card-inline-field, .inspector-text-block-value, .property-value, .script-voiceover).is-rich-editing,
   body .cell-display.is-editing {
     display: block !important;
-    outline: 2px solid var(--accent);
-    outline-offset: 1px;
+    outline: none;
+    outline-offset: 0;
     border-radius: 6px;
     background: var(--bg-surface-2);
+    border: 1px solid var(--accent);
+    box-shadow: none;
     white-space: pre-wrap !important;
     overflow-wrap: anywhere !important;
     user-select: text !important;
@@ -776,7 +793,7 @@ dialog[open] > .dialog-card { animation: workspace-dialog-in 160ms ease-out; }
   body .rich-editor-dialog footer .btn { flex: 0 1 auto; }
 
   /* No passive layout transitions or avatar entrance/pulse effects. */
-  body :is(.app-body, .sidebar, .workspace-content-grid, .shot-inspector) { transition: none; }
+  body :is(.workspace-content-grid, .shot-inspector) { transition: none; }
   body :is(.presence-avatar, .avatar-circle),
   body :is(.presence-avatar, .avatar-circle) :is(img, svg),
   body :is(.presence-avatar, .avatar-circle)::before,
@@ -820,8 +837,12 @@ dialog[open] > .dialog-card { animation: workspace-dialog-in 160ms ease-out; }
     body.sidebar-collapsed .sidebar-settings-popover { left: 60px; }
     body.workspace-panels-animating .app-body { transition: grid-template-columns var(--ux-panel-duration) var(--ux-panel-ease); }
     body.workspace-panels-animating .sidebar {
-      transition: width var(--ux-panel-duration) var(--ux-panel-ease), min-width var(--ux-panel-duration) var(--ux-panel-ease);
+      transition: width 260ms var(--ux-panel-ease), min-width 260ms var(--ux-panel-ease), padding 260ms var(--ux-panel-ease);
     }
+  }
+  @media (max-width: 767px) {
+    body.workspace-panels-animating .sidebar { transition: transform 260ms var(--ux-panel-ease); }
+    body.workspace-panels-animating .nav-scrim { transition: opacity 220ms ease; }
   }
   @media (min-width: 1280px) {
     body .workspace-content-grid { grid-template-columns: minmax(0, 1fr) 0px; }
@@ -916,7 +937,7 @@ dialog[open] > .dialog-card { animation: workspace-dialog-in 160ms ease-out; }
   body .toolbar-compact-control #workspaceEffects { flex: 1 1 160px; }
   body #pdfExportModal .pdf-layout-options {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(112px, 100%), 1fr));
     gap: 8px;
   }
   body #pdfExportModal .pdf-layout-option {
@@ -953,6 +974,25 @@ dialog[open] > .dialog-card { animation: workspace-dialog-in 160ms ease-out; }
     line-height: 1.6;
   }
   body #pdfExportModal .export-format-note { margin: 0; overflow-wrap: anywhere; }
+
+  /* Keep every document action aligned and make the preview the final primary step. */
+  body #pdfExportModal .dialog-foot > [data-close="pdfExportModal"] { margin-right: auto; }
+  @media (max-width: 480px) {
+    body #pdfExportModal .dialog-foot {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    body #pdfExportModal .dialog-foot .btn {
+      width: 100%;
+      min-height: 40px;
+      padding-inline: 8px;
+      white-space: nowrap;
+      font-size: 12px;
+    }
+    body #pdfExportModal .dialog-foot > [data-close="pdfExportModal"] { margin-right: 0; }
+    body #pdfExportModal #openPdfDocumentBtn { grid-column: 1 / -1; }
+  }
 
   /* Slow color drift paints only a bounded, non-interactive pseudo backdrop.
      No element/text opacity animation, no avatar animation, no moving geometry.

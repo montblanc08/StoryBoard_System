@@ -153,6 +153,43 @@ const ADMIN_PASS = process.env.QA_PASS || 'FrameForge2026!Admin';
     assert.strictEqual(conflictState.numberVal, '', 'Number input must be cleared to prevent duplicate mapping');
     assert.strictEqual(conflictState.numberCol, '-1', 'Number input data-col must be reset to -1');
 
+    // Image-only PDF warnings must remain visible through the mapping and
+    // preview steps while allowing the user to continue.
+    await page.evaluate(() => {
+      const modal = document.querySelector('#importModal');
+      if (modal?.showModal && !modal.open) modal.showModal();
+      renderImportMapping({
+      total_rows: 1,
+      headers: ['镜号', '镜头标题'],
+      rows: [['001', 'PDF 第 1 页']],
+      mapping: { number: { col: 0 }, title: { col: 1 } },
+      embedded_images: [{ data_row: 0, preview_url: '' }],
+      embedded_image_count: 1,
+      source_diagnostics: [{
+        code: 'pdf_text_not_extracted', severity: 'warning',
+        page_count: 1, text_page_count: 0, rendered_page_count: 1, image_count: 1,
+        message: '当前 PDF 解析器未取得可用文字；页面上可能仍有清晰可见的文字，但需要 OCR 才能识别分镜字段。'
+      }],
+      diagnostics: []
+      });
+    });
+    const warning = page.locator('.import-source-warning[data-diagnostic-code="pdf_text_not_extracted"]');
+    assert.ok(await warning.isVisible(), 'scanned PDF warning must be visible in the mapping step');
+    assert.ok((await warning.innerText()).includes('OCR'), 'warning must explain OCR is needed');
+    assert.ok(!(await page.locator('#mappingPreviewBox').innerText()).includes('当前预检通过'),
+      'image-only PDF must not be labelled as fully prechecked');
+    await page.click('#importNextBtn');
+    assert.ok(await warning.isVisible(), 'scanned PDF warning must remain visible in the preview step');
+
+    if (process.env.FRAMEFORGE_SAMPLE_PDF) {
+      await page.locator('#importFileInput').setInputFiles(process.env.FRAMEFORGE_SAMPLE_PDF);
+      await page.locator('.import-source-warning[data-diagnostic-code="pdf_text_not_extracted"]').waitFor({ state: 'visible', timeout: 60000 });
+      assert.ok(!(await page.locator('#mappingPreviewBox').innerText()).includes('当前预检通过'),
+        'real PDF preview must not claim all fields were recognized');
+      assert.strictEqual(await page.locator('#mappingPreviewBox .mapping-combobox[data-col="-1"]').count() > 0, true,
+        'real PDF preview must leave unrecognized fields unmapped');
+    }
+
     console.log('[QA] PASS: import_mapping_browser_qa passed successfully.');
   } finally {
     await browser.close();

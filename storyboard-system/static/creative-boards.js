@@ -134,6 +134,18 @@
   /** 按 V2 subtype 细化灯具图标；type 在 2D 画布上是 V1 降级值，故优先看 subtype */
   function iconPathFor(item) {
     const t = item.type, st = String(item.subtype || '');
+    // Floor plans use top-down footprints; elevation silhouettes belong only
+    // to an elevation legend, never to the editable plan.
+    if (t === 'light') {
+      if (/skypanel|led_panel|nova|panel|^led/.test(st)) return 'M20 20H65V80H20Z M65 20H75V80H65 M30 30V70 M45 30V70 M75 50H95 M85 40L95 50L85 60';
+      if (/softbox|oct|rect/.test(st)) return primitivePaths.softbox;
+      if (/practical|prac/.test(st)) return 'M50 15A35 35 0 1 0 50 85A35 35 0 1 0 50 15 M25 25L75 75 M75 25L25 75';
+      return primitivePaths.light;
+    }
+    return primitivePaths[t] || primitivePaths.arrow;
+  }
+  function elevationIconPathFor(item) {
+    const t = item.type, st = String(item.subtype || '');
     if (t === 'light' || t === 'softbox' || t === 'diffuser') {
       if (/skypanel|led_panel|nova|panel|^led/.test(st)) return sidePaths.led_panel;
       if (/softbox|oct|rect/.test(st)) return sidePaths.softbox;
@@ -220,27 +232,70 @@
     if (!value || !Number.isSafeInteger(value.revision) || value.revision < 0 || !Array.isArray(value.boards)) throw new Error('服务器返回了无效的创意板数据');
     return value;
   }
+  function createMoodboardRecord(name) {
+    return {id:uid(), kind:'moodboard', name, width:1600, height:1000, shot_ids:[], items:[]};
+  }
+  function createLightingBoardRecord(name) {
+    return {id:uid(), kind:'lighting', schemaVersion:2, version:2, name,
+      width:1600, height:1000, shot_ids:[], items:[], objects:[],
+      environment:{roomWidth:1600, roomDepth:1000},
+      settings:{unit:'cm', gridSize:100, snapEnabled:true, showGrid:true, defaultView:'3d'}};
+  }
+  function serializeMoodboardItem(item) {
+    const base = {id:String(item.id), type:String(item.type), x:Number(item.x)||0, y:Number(item.y)||0,
+      width:Number(item.width)||100, height:Number(item.height)||100,
+      rotation:Number(item.rotation)||0, label:String(item.label||'')};
+    switch (item.type) {
+      case 'image': return {...base, asset_id:String(item.asset_id||'')};
+      case 'note': return {...base, text:String(item.text||''), color:String(item.color||'#fff2b3')};
+      case 'color': return {...base, color:String(item.color||'#64748b')};
+      case 'link': return {...base, url:String(item.url||'')};
+      default: throw new Error(`不支持的情绪板元素类型: ${item.type}`);
+    }
+  }
+  function serializeMoodboardForSave(board) {
+    return {id:String(board.id), kind:'moodboard', name:String(board.name||''),
+      width:Number(board.width)||1600, height:Number(board.height)||1000,
+      shot_ids:Array.isArray(board.shot_ids)?[...board.shot_ids]:[],
+      items:Array.isArray(board.items)?board.items.map(serializeMoodboardItem):[]};
+  }
+  function serializeLightingForSave(board) {
+    const source = clone(board);
+    // UI edits hydrated V1 items. Rebuild objects from those current items,
+    // rather than saving the stale V2 objects returned by the previous GET.
+    const normalize = globalThis.FrameForgeLightingScene?.normalizeScene;
+    if (normalize) {
+      const normalized = normalize({...source, version:1, objects:[]});
+      source.objects = normalized.objects || [];
+      source.environment = normalized.environment || source.environment || {};
+      source.settings = normalized.settings || source.settings;
+    }
+    const result = {};
+    for (const key of ['id','kind','name','width','height','shot_ids','items','objects','environment','settings']) {
+      if (source[key] !== undefined) result[key] = source[key];
+    }
+    return {...result, schemaVersion:2, version:2};
+  }
+  function serializeBoardForSave(board) {
+    if (!board) return null;
+    if (board.kind === 'moodboard') return serializeMoodboardForSave(board);
+    if (board.kind === 'lighting') return serializeLightingForSave(board);
+    throw new Error(`不支持的画板类型: ${board.kind}`);
+  }
   function createSession(projectId, api) {
     const s = {projectId, api, boards:[], revision:0, loaded:false, dirty:false, conflict:false,
-      version:0, history:[], future:[], listeners:new Set(), views:{}, status:'正在载入创意板…', recovery:null, gestures:0};
+      version:0, lastSaveError:null, blockedSaveVersion:null,
+      history:[], future:[], listeners:new Set(), views:{}, status:'正在载入创意板…', recovery:null, gestures:0};
     s.emit = (render=false) => s.listeners.forEach(fn => fn(render));
     s.snapshot = () => ({
       revision: s.revision,
-      boards: clone(s.boards).map(b => {
-        if (b.kind === 'lighting') {
-          b.schemaVersion = 2;
-          if (globalThis.FrameForgeLightingScene?.normalizeScene) {
-            try {
-              const norm = globalThis.FrameForgeLightingScene.normalizeScene(b);
-              b.objects = norm.objects;
-              b.environment = norm.environment || b.environment || {};
-            } catch (_) {}
-          }
-        }
-        return b;
-      })
+      boards: s.boards.map(serializeBoardForSave).filter(Boolean)
     });
-    s.schedule = () => { clearTimeout(s.timer); if (!s.conflict) s.timer = setTimeout(() => s.flush(), 700); };
+    s.schedule = () => {
+      clearTimeout(s.timer);
+      if (s.conflict || s.blockedSaveVersion === s.version) return;
+      s.timer = setTimeout(() => s.flush(), 700);
+    };
     s.record = (before, notify=true) => {
       if (JSON.stringify(before) === JSON.stringify(s.boards)) return;
       s.history.push(before); if (s.history.length > 60) s.history.shift();
@@ -264,7 +319,7 @@
       const LS = globalThis.FrameForgeLightingScene;
       if (!Array.isArray(boards)) return boards;
       boards.forEach(board => {
-        if (!board || !Array.isArray(board.objects) || !board.objects.length) return;
+        if (!board || board.kind !== 'lighting' || !Array.isArray(board.objects) || !board.objects.length) return;
         if (Array.isArray(board.items) && board.items.length) return;
         board.items = LS && LS.demoteItem ? board.objects.map(o => LS.demoteItem(o)) : [];
       });
@@ -280,6 +335,7 @@
         s.boards = clone(data.boards); s.revision = data.revision; s.loaded = true;
         hydrateBoards(s.boards);
         s.dirty = false; s.conflict = false; s.history = []; s.future = []; s.version++;
+        s.lastSaveError = null; s.blockedSaveVersion = null;
         s.status = s.recovery ? '已载入服务器版本 · 旧草稿仍可导出' : '已同步';
         return true;
       } catch (error) { s.status = `载入失败：${error.message} · 可重试`; return false; }
@@ -289,20 +345,34 @@
       clearTimeout(s.timer);
       if (s.pending) { await s.pending; return s.dirty && !s.conflict ? s.flush() : !s.dirty; }
       if (!s.dirty) return true;
-      if (!s.loaded || s.loading || s.conflict || s.gestures) return false;
-      const version = s.version, payload = s.snapshot();
+      if (!s.loaded || s.loading || s.conflict || s.gestures || s.blockedSaveVersion === s.version) return false;
+      const version = s.version;
+      let payload;
+      try { payload = s.snapshot(); }
+      catch (error) {
+        s.lastSaveError = error; s.blockedSaveVersion = version;
+        s.status = `画板数据校验失败：${error.message} · 本地草稿已保留`;
+        s.emit(); return false;
+      }
       s.status = '正在保存…'; s.emit();
       s.pending = (async () => {
         try {
           const data = validResponse(await s.api(`/api/projects/${encodeURIComponent(projectId)}/creative-boards`, {method:'PUT', json:payload}));
           if (data.revision !== payload.revision + 1) throw new Error('保存回执版本不匹配，请重新载入核对');
           s.revision = data.revision; s.dirty = s.version !== version;
+          s.lastSaveError = null; s.blockedSaveVersion = null;
           // Never replace boards here: a pointer gesture or newer edit may exist.
           s.status = s.dirty ? '有新修改等待保存' : '已保存';
           return !s.dirty;
         } catch (error) {
-          if (Number(error.status || error.response?.status) === 409) {
+          s.lastSaveError = error;
+          const status = Number(error.status || error.response?.status || 0);
+          if (status === 409) {
             s.conflict = true; s.status = '保存冲突 · 本地草稿已保留，请导出或重新载入';
+          } else if (status === 400 || status === 422) {
+            // Block the rejected request's version, not an edit made in flight.
+            s.blockedSaveVersion = version;
+            s.status = `画板数据校验失败：${error.message} · 本地草稿已保留`;
           } else s.status = `保存失败：${error.message} · 草稿已保留，点击重试保存`;
           return false;
         } finally { s.pending = null; s.emit(); }
@@ -327,6 +397,14 @@
   }
   function button(label, action, parent) {
     const node = el('button', 'ff-boards-button', label, {minHeight:'32px', cursor:'pointer'});
+    const icons = {'选择':'M4 3L19 12L12 14L9 21Z','点选':'M4 3L19 12L12 14L9 21Z','平移':'M8 12V5a2 2 0 0 1 4 0v6V3a2 2 0 0 1 4 0v8V6a2 2 0 0 1 4 0v9c0 5-3 7-7 7-3 0-5-2-7-5L2 12a2 2 0 0 1 3-2l3 2',
+      '移动':'M12 2v20M2 12h20M8 6l4-4 4 4M8 18l4 4 4-4M6 8l-4 4 4 4M18 8l4 4-4 4','旋转':'M4 9a8 8 0 1 1 0 6M4 3v6h6','环绕':'M3 12a9 4 0 1 0 18 0a9 4 0 1 0-18 0M12 3a4 9 0 1 0 0 18a4 9 0 1 0 0-18',
+      '适合窗口':'M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5','撤销':'M9 4L3 10l6 6M3 10h11a6 6 0 0 1 6 6v4','重做':'M15 4l6 6-6 6M21 10H10a6 6 0 0 0-6 6v4','吸附':'M5 3v10a7 7 0 0 0 14 0V3h-5v10a2 2 0 0 1-4 0V3Z'};
+    if (icons[label]) {
+      const icon = svg('svg', {viewBox:'0 0 24 24',width:18,height:18,'aria-hidden':'true',class:'ff-boards-tool-icon'});
+      icon.append(svg('path',{d:icons[label],fill:'none',stroke:'currentColor','stroke-width':1.7,'stroke-linecap':'round','stroke-linejoin':'round'}));
+      node.prepend(icon);
+    }
     node.title = label;
     node.type = 'button'; node.addEventListener('click', action); parent?.append(node); return node;
   }
@@ -357,7 +435,7 @@
     const old = mounts.get(container);
     if (old && old.projectId === options.projectId && old.kind === options.kind) { old.update(options); return old.cleanup; }
     old?.cleanup();
-    let opts = {...options}, alive = true, drag = null, uploading = false;
+    let opts = {...options}, alive = true, drag = null, uploading = false, spaceHeld = false;
     let session = sessions.get(options.projectId);
     if (!session) { session = createSession(options.projectId, options.api); sessions.set(options.projectId, session); }
     const s = session, kind = options.kind;
@@ -382,8 +460,45 @@
     const workspace = el('div','ff-boards-workspace');
     const floating = el('div','ff-boards-floating'); floating.setAttribute('role','group'); floating.setAttribute('aria-label','画布工具');
     stage.append(canvas); viewport.append(stage); workspace.append(viewport,floating); layout.append(sidebar,workspace,inspector); root.append(toolbar,status,notice,layout); container.replaceChildren(root);
-    const board = () => s.boards.find(b => b.id === view.boardId && b.kind === kind);
+    const board = () => {
+      const current = s.boards.find(b => b.id === view.boardId && b.kind === kind);
+      // A V2 lighting response is canonicalized as `objects` by the server.
+      // Keep the interaction layer usable even if the first render happens
+      // before the normal hydration pass completes.
+      if (current && kind === 'lighting' && (!Array.isArray(current.items) || !current.items.length) && Array.isArray(current.objects) && current.objects.length) {
+        const LS = globalThis.FrameForgeLightingScene;
+        if (LS?.demoteItem) current.items = current.objects.map(object => LS.demoteItem(object));
+      }
+      return current;
+    };
     const selected = () => board()?.items.find(i => i.id === view.selected);
+    const planViewport = () => canvas.closest('.ff-boards-split-left') || viewport;
+    function zoomPlan(next, clientX, clientY) {
+      if (!board() || drag) return;
+      if (kind === 'lighting' && view.mode === '3d') {
+        webglRuntime?.zoomBy(next > view.zoom ? -120 : 120);
+        return;
+      }
+      const host = planViewport(), rect = host.getBoundingClientRect();
+      const px = ((clientX ?? rect.left + rect.width / 2) - rect.left) * host.clientWidth / rect.width;
+      const py = ((clientY ?? rect.top + rect.height / 2) - rect.top) * host.clientHeight / rect.height;
+      const ratio = clamp(next, .1, 4) / view.zoom;
+      const left = (host.scrollLeft + px) * ratio - px, top = (host.scrollTop + py) * ratio - py;
+      view.zoom = clamp(next, .1, 4);
+      canvas.style.transform = `scale(${view.zoom})`;
+      canvas.style.setProperty('--ff-zoom', String(view.zoom));
+      canvas.style.setProperty('--ff-touch-target-size', `${44 / view.zoom}px`);
+      if (view.mode !== 'split') Object.assign(stage.style, {width: `${board().width * view.zoom}px`, height: `${board().height * view.zoom}px`});
+      host.scrollLeft = left; host.scrollTop = top;
+      renderToolbar();
+    }
+    function fitBoard() {
+      if (!board()) return;
+      if (kind === 'lighting' && view.mode === '3d') { webglRuntime?.setViewPreset('3q'); return; }
+      const host = planViewport();
+      zoomPlan(Math.min((host.clientWidth - 32) / board().width, (host.clientHeight - 32) / board().height));
+      host.scrollLeft = host.scrollTop = 0;
+    }
     const message = text => { if (alive) notice.textContent = text; };
     const editItem = fn => s.change(() => { const item = selected(); if (item) fn(item); });
     const availableAssets = () => (opts.assets || []).filter(a => a && (!a.project_id || a.project_id === options.projectId) && (!a.mime || a.mime.startsWith('image/')));
@@ -418,7 +533,11 @@
       if (!s.loaded || s.loading) return;
       const count = s.boards.filter(b => b.kind === kind).length;
       if (s.boards.length >= 50) return message('每个项目最多 50 个画板');
-      s.change(() => { const b = {id:uid(),kind,schemaVersion:kind==='lighting'?2:1,name:`${kind==='lighting'?'灯光图':'情绪板'} ${count+1}`,width:1600,height:1000,shot_ids:[],items:[],objects:[]}; s.boards.push(b); view.boardId=b.id; view.selected=null; });
+      s.change(() => {
+        const name = `${kind==='lighting'?'灯光图':'情绪板'} ${count+1}`;
+        const b = kind === 'lighting' ? createLightingBoardRecord(name) : createMoodboardRecord(name);
+        s.boards.push(b); view.boardId=b.id; view.selected=null;
+      });
     }
     function duplicateBoard() {
       const source = board(); if (!source) return;
@@ -470,10 +589,18 @@
       button('重做', () => s.travel(true),toolbar).disabled = !s.future.length || !!drag || s.loading;
       const zoomOptions=[['0.25','25%'],['0.5','50%'],['0.75','75%'],['1','100%'],['1.5','150%'],['2','200%']];
       if (!zoomOptions.some(([v])=>Number(v)===view.zoom)) zoomOptions.push([String(view.zoom),`${Math.round(view.zoom*100)}%`]);
-      select(toolbar,'缩放',zoomOptions,String(view.zoom), value => { view.zoom=Number(value); renderCanvas(); });
-      button('适合窗口', () => { const b=board(); if(!b)return; view.zoom=clamp(Math.min((viewport.clientWidth-48)/b.width,(viewport.clientHeight-48)/b.height),.1,2); renderCanvas(); renderToolbar(); }, toolbar).disabled = !board();
+      if (kind !== 'lighting' || view.mode !== '3d') select(toolbar,'缩放',zoomOptions,String(view.zoom), value => zoomPlan(Number(value)));
+      button('适合窗口', fitBoard, toolbar).disabled = !board();
       floating.replaceChildren();
-      ['选择','平移'].forEach((label,index)=>{ const control=button(label,()=>{view.hand=!!index;renderToolbar();viewport.classList.toggle('is-hand',view.hand);},floating); control.setAttribute('aria-pressed',String(!!view.hand===!!index)); });
+      ['选择','平移'].forEach((label,index)=>{ const control=button(label,()=>{view.hand=!!index;if(!index)view.tool='select';renderToolbar();viewport.classList.toggle('is-hand',view.hand);},floating); control.setAttribute('aria-pressed',String(index?!!view.hand:!view.hand&&(!view.tool||view.tool==='select'))); });
+      if (kind === 'lighting' && view.mode !== '2d') {
+        [['select','点选'],['move','移动'],['rotate','旋转'],['orbit','环绕']].forEach(([tool,label]) => {
+          const control = button(label, () => { view.tool = tool; view.hand = false; renderToolbar(); }, floating);
+          control.dataset.tool = tool; control.setAttribute('aria-pressed', String((view.tool || 'select') === tool));
+        });
+        if (webglRuntime) webglRuntime.tool = view.hand ? 'pan' : (view.tool || 'select');
+        button('聚焦所选', () => webglRuntime?.focusSelected(), floating).disabled = !selected();
+      }
       if (kind === 'moodboard') ['note','color','link'].forEach(type=>{button(names[type],()=>add(type),floating).disabled=!board()||s.loading;});
       const snap=button('吸附',()=>{view.snap=!view.snap;renderCanvas();renderToolbar();},floating); snap.setAttribute('aria-pressed',String(view.snap)); snap.title='按 20 画布单位吸附';
       if (kind === 'lighting') { const coverage=button('光束',()=>{view.coverage=!view.coverage;renderCanvas();renderToolbar();},floating); coverage.setAttribute('aria-pressed',String(view.coverage)); }
@@ -667,6 +794,7 @@
     let webglRuntime = null;
     let sceneCanvas = null, sceneCtx = null;
     let splitCanvas = null, splitCtx = null;   // right panel in split mode
+    let splitRenderFrame = null;
 
     if (typeof window !== 'undefined') {
       window.__FF_ON_ASSET_VERIFIED = () => {
@@ -698,8 +826,13 @@
       // 2D 模式不使用立体渲染。必须在此提前返回并移除 WebGL 画布 ——
       // 否则它会被 prepend 到白色平面图上，把 2D 视图整个盖成深色（scene.background 0x0e1014）。
       if (view.mode === '2d') {
-        if (webglRuntime && webglRuntime.canvas && webglRuntime.canvas.isConnected) {
-          webglRuntime.canvas.remove();
+        if (webglRuntime) {
+          if (webglRuntime.boardId === board()?.id && webglRuntime.orbit) {
+            view.orbit = {...webglRuntime.orbit};
+            view.orbitBoardId = webglRuntime.boardId;
+          }
+          webglRuntime.dispose();
+          webglRuntime = null;
         }
         return;
       }
@@ -707,41 +840,36 @@
       const R = globalThis.FrameForgeLightingRender;
       if (!R) return;
 
-      if (globalThis.THREE && R.createWebGLRuntime) {
+      if (globalThis.THREE && R.reconcileWebGLRuntime) {
         // 上下文互斥：这块画布若已取过 2D context 就不能再给 WebGL 用，先移除
         if (targetCtx) { targetCtx = null; }
         if (sceneCanvas?.isConnected) { sceneCanvas.remove(); sceneCanvas = null; sceneCtx = null; }
         const parent = targetCanvas?.parentElement || canvas;
-        const created = (() => {
-          if (!webglRuntime || !webglRuntime.canvas?.isConnected || webglRuntime.container !== parent) {
-            if (webglRuntime) webglRuntime.dispose();
-            // 分屏时外层画布已经分成左右两栏（左 2D 主画布 / 右 3D），
-            // runtime 内部不得再做一次双视口，否则右栏被二次切割成 196px。
-            const runtimeMode = renderMode === 'split' ? '3d' : renderMode;
-            webglRuntime = R.createWebGLRuntime(parent, {
-              roomWidth: b.width || 1600,
-              roomDepth: b.height || 1000,
-              mode: runtimeMode,
-              zoom: view.zoom,
-              selectedId: view.selected,
-              coverage: view.coverage,
-              viewPreset: view.cameraPreset || '3q'
+        webglRuntime = R.reconcileWebGLRuntime(webglRuntime, parent, b, {
+          roomWidth: b.width || 1600,
+          roomDepth: b.height || 1000,
+          mode: renderMode,
+          zoom: view.zoom,
+          selectedId: view.selected,
+          coverage: view.coverage,
+          viewPreset: view.cameraPreset || '3q',
+          tool: view.hand ? 'pan' : (view.tool || 'select'),
+          onGestureStart() { s.gestures++; },
+          onGestureEnd() { s.gestures = Math.max(0, s.gestures - 1); if(s.dirty&&!s.conflict)s.schedule(); },
+          onSelect(id) { view.selected = id; renderInspector(); renderToolbar(); webglRuntime?.syncScene(board(), {selectedId:id}); },
+          onTransform(id, patch) {
+            const b = board(), item = b?.items.find(i => i.id === id);
+            if (!item) return;
+            s.change(() => {
+              const snap = v => view.snap ? Math.round(v / SNAP) * SNAP : v;
+              if (patch.x != null) item.x = clamp(snap(patch.x), 0, Math.max(0, b.width - item.width));
+              if (patch.y != null) item.y = clamp(snap(patch.y), 0, Math.max(0, b.height - item.height));
+              if (patch.rotation != null) item.rotation = ((patch.rotation % 360) + 360) % 360;
             });
-            return true;
           }
-          return false;
-        })();
+        }, view.orbitBoardId === b.id ? view.orbit : null);
         // WebGL 初始化失败（无 WebGL2/上下文被占用等）→ 回退 2D 投影渲染
-        if (webglRuntime && webglRuntime.renderer) {
-          webglRuntime.syncScene(b, {
-            mode: renderMode === 'split' ? '3d' : renderMode,
-            selectedId: view.selected,
-            zoom: view.zoom,
-            coverage: view.coverage
-          });
-          return;
-        }
-        if (webglRuntime) { webglRuntime.dispose(); webglRuntime = null; }
+        if (webglRuntime) return;
         // 回退：2D 画布在上面已被移除，需重新挂载
         if (!targetCanvas?.isConnected) {
           if (targetCanvas === splitCanvas) {
@@ -807,7 +935,12 @@
     }
 
     function renderCanvas() {
-      if (drag) return;
+      if (splitRenderFrame != null) {
+        global.cancelAnimationFrame(splitRenderFrame);
+        splitRenderFrame = null;
+      }
+      if (drag || s.gestures) return;
+      viewport.querySelector(':scope > .ff-boards-empty-state')?.remove();
       root.dataset.viewMode = view.mode;
       const isSplit = kind === 'lighting' && view.mode === 'split';
       const is25d   = kind === 'lighting' && view.mode === '3d';
@@ -829,6 +962,7 @@
         stage.replaceChildren(splitWrap);
         // Left: 复用主画布（保留其事件监听器，分屏下 2D 可交互），不要新建无监听的替身
         Object.assign(canvas.style,{position:'relative', width:width+'px', height:height+'px', transform:'scale('+view.zoom+')', backgroundColor:'var(--ff-boards-paper,#fafaf9)', color:'var(--ff-boards-ink,#1e293b)', isolation:'isolate', backgroundImage:view.snap?'radial-gradient(var(--ff-boards-grid,#303030) .7px, transparent .7px)':'none', backgroundSize:SNAP+'px '+SNAP+'px'});
+        canvas.style.setProperty('--ff-touch-target-size', `${44 / view.zoom}px`);
         leftPanel.append(canvas);
         // Right: 2.5D Canvas preview
         splitCanvas = document.createElement('canvas');
@@ -839,7 +973,10 @@
         // Render left items into the main canvas (reuses existing code path + listeners)
         renderCanvasItems(canvas, b, false);
         // Render right preview
-        requestAnimationFrame(() => {
+        const scheduledSplitCanvas = splitCanvas;
+        splitRenderFrame = global.requestAnimationFrame(() => {
+          splitRenderFrame = null;
+          if (!alive || view.mode !== 'split' || splitCanvas !== scheduledSplitCanvas || !rightPanel.isConnected) return;
           const rw = rightPanel.clientWidth || width, rh = rightPanel.clientHeight || height;
           renderScene3d(splitCanvas, splitCtx, 'split', rw, rh);
         });
@@ -859,9 +996,14 @@
       const width = b ? b.width : 1600, height = b ? b.height : 1000;
       Object.assign(stage.style,{width:(width*view.zoom)+'px',height:(height*view.zoom)+'px'});
       Object.assign(canvas.style,{width:width+'px',height:height+'px',transform:'scale('+view.zoom+')',backgroundImage:view.snap?'radial-gradient(var(--ff-boards-grid, #303030) .7px, transparent .7px)':'none',backgroundSize:SNAP+'px '+SNAP+'px'});
+      if (is25d) {
+        Object.assign(stage.style, {width:'100%',height:'100%'});
+        Object.assign(canvas.style, {width:'100%',height:'100%',transform:'none'});
+      }
       if (is25d) canvas.style.backgroundImage = 'none';
       // 供 CSS 反算：图元要按「屏幕像素」恒定尺寸显示，需抵消画布缩放
       canvas.style.setProperty('--ff-zoom', String(view.zoom || 1));
+      canvas.style.setProperty('--ff-touch-target-size', `${44 / (view.zoom || 1)}px`);
       root.classList.toggle('ff-boards-empty',!b);
       if (!b) {
         const empty=el('div','ff-boards-empty-state');
@@ -873,7 +1015,7 @@
         empty.append(el('h4','',s.loaded?(kind==='lighting'?'创建第一张灯光平面图':'创建第一张情绪板'):s.loading?'正在载入…':'画板载入失败，请从更多操作重试'));
         if (s.loaded) empty.append(el('p','ff-boards-empty-desc',kind==='lighting'?'在画布上布置场景、灯光与摄影机位置，规划拍摄布光。':'收集参考图片、便签与色卡，为分镜定调。'));
         const create=button('创建第一张画板',createBoard,empty); create.dataset.action='create-board'; create.disabled=!s.loaded||s.loading;
-        canvas.append(empty); return;
+        viewport.append(empty); return;
       }
       if (!b.items.length) canvas.append(el('p','ff-boards-canvas-hint',kind==='lighting'?'从左侧对象库开始':'上传图片或从左侧素材开始'));
       renderCanvasItems(canvas, b, is25d);
@@ -896,7 +1038,7 @@
           if (!as25d) {
             // xMidYMid meet：保持图元比例居中，避免被 item 框拉伸成怪异几何（参考图器材图标均为等比）
             const icon = svg('svg',{viewBox:'0 0 100 100',width:'100%',height:'100%',preserveAspectRatio:'xMidYMid meet','aria-hidden':'true'});
-            // 2D 用侧视剪影（矢量插画风格），无对应侧视图元时回退俯视符号
+            // Floor-plan symbols always use the top-down footprint.
             icon.append(svg('path',{d:iconPathFor(item) || primitivePaths[item.type],fill:'none',stroke:'currentColor','stroke-width':3,'stroke-linejoin':'round','stroke-linecap':'round'})); node.append(icon);
             // 标签：品名 + 规格两行（矢量插画风格）
             const labelEl = el('span','ff-boards-item-label',null,{position:'absolute',top:'100%',left:'0',whiteSpace:'nowrap',maxWidth:'240px',overflow:'hidden',textOverflow:'ellipsis'});
@@ -905,6 +1047,7 @@
             if (spec) labelEl.append(el('span','ff-label-spec',spec));
             node.append(labelEl);
           } else {
+            node.style.pointerEvents='none';
             node.style.background='transparent'; node.style.border='none'; node.style.color='transparent';
             if (item.label) node.append(el('span','ff-boards-item-label',item.label,{position:'absolute',bottom:'-4px',left:'50%',transform:'translateX(-50%)',fontSize:'12px',color:'rgba(255,255,255,0.55)',whiteSpace:'nowrap',pointerEvents:'none'}));
           }
@@ -916,19 +1059,35 @@
             img.addEventListener('error',() => { img.replaceWith(el('span','','图片无法载入')); }); node.append(img);
           } else node.append(el('span','','素材已移除或不可用'));
         } else {
-          Object.assign(node.style,{padding:'12px',overflow:'hidden',border:'1px solid var(--ff-boards-border, #cbd5e1)',background:item.color || 'var(--ff-boards-paper, #fafaf9)',color:'var(--ff-boards-ink,#1e293b)',whiteSpace:'pre-wrap',overflowWrap:'anywhere'});
+          Object.assign(node.style,{overflow:'visible',border:'1px solid var(--ff-boards-border, #cbd5e1)',background:item.color || 'var(--ff-boards-paper, #fafaf9)',color:'var(--ff-boards-ink,#1e293b)'});
           if (item.color) {
             const rgb = item.color.match(/[\da-f]{2}/gi)?.map(v => parseInt(v,16)) || [255,255,255];
             node.style.color = (rgb[0]*299+rgb[1]*587+rgb[2]*114)/1000 > 145 ? '#172033' : '#ffffff';
           }
-          node.append(el('strong','',item.label));
+          const content=el('div','ff-boards-item-content',null,{position:'absolute',inset:'0',boxSizing:'border-box',padding:'12px',overflow:'hidden',pointerEvents:'none',whiteSpace:'pre-wrap',overflowWrap:'anywhere'});
+          content.append(el('strong','',item.label));
           if (item.type === 'color') {
-            node.append(el('div','ff-boards-color-val',item.color,{fontFamily:'var(--font-mono, monospace)',whiteSpace:'nowrap',wordBreak:'keep-all',letterSpacing:'0.04em'}));
+            content.append(el('div','ff-boards-color-val',item.color,{fontFamily:'var(--font-mono, monospace)',whiteSpace:'nowrap',wordBreak:'keep-all',letterSpacing:'0.04em'}));
           } else {
-            node.append(el('div','',item.type==='note'?item.text:item.url));
+            content.append(el('div','',item.type==='note'?item.text:item.url));
           }
+          node.append(content);
         }
-        node.addEventListener('pointerdown',event => startGesture(event,item,node,event.target.closest('.ff-boards-rotate') ? 'rotate' : event.target.closest('.ff-boards-resize') ? 'resize' : 'move'));
+        node.addEventListener('pointerdown',event => {
+          const handle=event.target.closest('.ff-boards-rotate,.ff-boards-resize');
+          let mode=handle?.classList.contains('ff-boards-rotate')?'rotate':handle?'resize':'move';
+          // At fit-to-screen zoom, a 44px touch target can overlap most of a
+          // small object's visible body. A finger landing on that body should
+          // still move it; reserve rotate/resize for the visible handle itself
+          // or for expanded hit area outside the object.
+          if(event.pointerType==='touch'&&handle){
+            const itemRect=node.getBoundingClientRect(),handleRect=handle.getBoundingClientRect();
+            const inItem=event.clientX>=itemRect.left&&event.clientX<=itemRect.right&&event.clientY>=itemRect.top&&event.clientY<=itemRect.bottom;
+            const onVisibleHandle=event.clientX>=handleRect.left&&event.clientX<=handleRect.right&&event.clientY>=handleRect.top&&event.clientY<=handleRect.bottom;
+            if(inItem&&!onVisibleHandle)mode='move';
+          }
+          startGesture(event,item,node,mode);
+        });
         node.addEventListener('focus',() => { if (view.selected !== item.id) { view.selected=item.id; markSelection(); renderInspector(); } });
         if (active) {
           const rotate=el('span','ff-boards-rotate','↻'); rotate.title='拖动旋转 · Shift 按 15° 吸附'; node.append(rotate);
@@ -948,7 +1107,7 @@
       renderCoverage();
     }
     function startGesture(event,item,node,mode) {
-      if (event.button !== 0 || view.hand || drag || s.loading || s.gestures) return;
+      if (event.button !== 0 || view.hand || spaceHeld || drag || s.loading || s.gestures) return;
       event.preventDefault(); event.stopPropagation();
       view.selected=item.id; node.focus({preventScroll:true}); markSelection(); renderInspector();
       const b = board(), rect = canvas.getBoundingClientRect();
@@ -1008,6 +1167,13 @@
     function cancelGesture(event) { if (drag?.id === event.pointerId) finishGesture(true); }
     function renderInspector() {
       inspector.replaceChildren(); const b=board(); if (!b) return;
+      if (kind === 'lighting' && b.items.length) {
+        select(inspector, '场景对象', [['','未选择'], ...b.items.map(item => [item.id,item.label || names[item.type] || item.type])], view.selected || '', id => {
+          view.selected = id || null;
+          if (view.mode !== '2d') webglRuntime?.syncScene(b, {selectedId:view.selected});
+          markSelection(); renderInspector(); renderToolbar();
+        });
+      }
       inspector.append(el('h3','ff-boards-panel-title',selected()?'元素属性':'画板设置'));
       if (!selected()) {
         field(inspector,'画板名称',b.name,'text',value => { if (!value.trim()) return message('画板名称不能为空'); s.change(() => { b.name=value; }); },{maxLength:120});
@@ -1125,13 +1291,11 @@
       announce(); renderSidebar(); renderCanvas(); renderInspector();
     }
     canvas.addEventListener('pointerdown',event=>{if(event.target===canvas){view.selected=null;renderCanvas();renderInspector();}});
-    // Middle-button pan follows established canvas editors without changing object geometry.
-    viewport.addEventListener('pointerdown',event=>{
-      if(event.button!==1&&!(event.button===0&&view.hand))return;event.preventDefault();const x=event.clientX,y=event.clientY,left=viewport.scrollLeft,top=viewport.scrollTop;
-      viewport.setPointerCapture(event.pointerId);viewport.classList.add('is-panning');
-      const move=e=>{if(e.pointerId!==event.pointerId)return;viewport.scrollLeft=left+x-e.clientX;viewport.scrollTop=top+y-e.clientY;};
-      const end=e=>{if(e?.pointerId!==undefined&&e.pointerId!==event.pointerId)return;viewport.classList.remove('is-panning');viewport.releasePointerCapture?.(event.pointerId);viewport.removeEventListener('pointermove',move);viewport.removeEventListener('pointerup',end);viewport.removeEventListener('pointercancel',end);viewport.removeEventListener('lostpointercapture',end);};
-      viewport.addEventListener('pointermove',move);viewport.addEventListener('pointerup',end);viewport.addEventListener('pointercancel',end);viewport.addEventListener('lostpointercapture',end);
+    const disposeNavigation = global.FrameForgeBoardNavigation.bindViewportNavigation({
+      viewport, view, board, planViewport, zoomPlan,
+      isItemDragging: () => Boolean(drag),
+      cancelItemGesture: () => finishGesture(true),
+      isSpaceHeld: () => spaceHeld
     });
     canvas.addEventListener('dragover',event=>{if(event.dataTransfer.types.includes('application/x-frameforge-board')){event.preventDefault();event.dataTransfer.dropEffect='copy';}});
     canvas.addEventListener('drop',event=>{
@@ -1146,11 +1310,47 @@
         }
       } catch (_) { message('无法读取拖放内容'); }
     });
+    const saveShortcut = async event => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') return;
+      const target = event.target;
+      if (!root.isConnected || (target !== document.body && target !== document.documentElement && !root.contains(target))) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.repeat) return;
+      // Board fields normally commit on change/blur. Include the focused value
+      // before taking the snapshot, using the field's existing validation path.
+      if (root.contains(target) && target.matches?.('input,textarea,select')) {
+        const label = target.getAttribute('aria-label');
+        const selection = typeof target.selectionStart === 'number'
+          ? [target.selectionStart, target.selectionEnd, target.selectionDirection] : null;
+        target.dispatchEvent(new Event('change', {bubbles:true}));
+        if (target.isConnected && !target.checkValidity()) return;
+        const replacement = label && [...root.querySelectorAll('input,textarea,select')]
+          .find(node => node.getAttribute('aria-label') === label);
+        if (replacement && replacement !== target) {
+          replacement.focus({preventScroll:true});
+          if (selection && typeof replacement.setSelectionRange === 'function') {
+            replacement.setSelectionRange(...selection);
+          }
+        }
+      }
+      if (drag) finishGesture();
+      if (!uploading) await s.flush();
+    };
+    // Capture also handles a canvas click that left focus on body, and stops
+    // the workspace-level Shot shortcut from running for a Board save.
+    global.addEventListener('keydown', saveShortcut, true);
     root.addEventListener('keydown',event=>{
       if (event.target.closest('input,textarea,select,[contenteditable="true"]')) return;
       if (event.key==='Escape' && drag) {event.preventDefault();finishGesture(true);return;}
       const mod=event.ctrlKey||event.metaKey,key=event.key.toLowerCase();
-      if(mod&&key==='s'){event.preventDefault();s.flush();}
+      if (!mod && kind==='lighting' && view.mode!=='2d' && ['v','g','r','h','f'].includes(key)) {
+        event.preventDefault();
+        if(key==='f')webglRuntime?.focusSelected();
+        else {view.hand=key==='h';view.tool={v:'select',g:'move',r:'rotate',h:'pan'}[key];renderToolbar();}
+      }
+      else if (event.code === 'Space') { event.preventDefault(); spaceHeld = true; viewport.classList.add('is-hand'); }
+      else if (!mod && ['+','=','-','0'].includes(key)) { event.preventDefault(); if(key==='0')fitBoard();else zoomPlan(view.zoom * (key==='-' ? .8 : 1.25)); }
       else if(mod&&key==='z'){event.preventDefault();s.travel(event.shiftKey);}
       else if(mod&&key==='y'){event.preventDefault();s.travel(true);}
       else if(mod&&key==='d'){event.preventDefault();duplicate();}
@@ -1161,23 +1361,33 @@
         canvas.focus({preventScroll:true});
       }
     });
+    const releaseSpace = () => { spaceHeld = false; viewport.classList.toggle('is-hand', Boolean(view.hand)); };
+    root.addEventListener('keyup', event => { if(event.code==='Space') releaseSpace(); });
+    global.addEventListener('blur', releaseSpace);
     const listener=full=>{if(!alive)return;if(full&&!drag)render();else announce();};s.listeners.add(listener);
     const beforeUnload=event=>{if(s.dirty||drag||uploading){event.preventDefault();event.returnValue='';}};
     global.addEventListener('beforeunload',beforeUnload);
     function cleanup() {
       if(!alive)return;
-      if(drag)finishGesture(); alive=false;s.listeners.delete(listener);global.removeEventListener('beforeunload',beforeUnload);
+      if(drag)finishGesture();
+      if(splitRenderFrame!=null)global.cancelAnimationFrame(splitRenderFrame);
+      splitRenderFrame=null; alive=false;s.listeners.delete(listener);global.removeEventListener('beforeunload',beforeUnload);
+      global.removeEventListener('blur', releaseSpace);
+      global.removeEventListener('keydown', saveShortcut, true);
+      disposeNavigation();
+      webglRuntime?.dispose(); webglRuntime = null;
       if(mounts.get(container)?.cleanup===cleanup)mounts.delete(container);
       root.remove(); if(s.dirty&&!s.conflict)s.flush();
     }
     cleanup.flush=()=>{if(drag)finishGesture();return uploading?Promise.resolve(false):s.flush();};
     cleanup.getDraft=()=>s.snapshot();
     // 让调用方在放弃未保存草稿前先把草稿交还给用户，避免保存失败时数据静默丢失。
-    cleanup.exportDraft=()=>{if(alive)exportDraft();};
+    cleanup.exportDraft=()=>alive ? exportDraft() : false;
     mounts.set(container,{projectId:options.projectId,kind,cleanup,update(next){opts={...opts,...next};s.api=next.api;if(!root.isConnected)container.replaceChildren(root);/* Keep focused controls/gestures intact on parent renders. */ if(!root.contains(document.activeElement)&&!drag){renderSidebar();renderInspector();renderCanvas();}}});
     render(); if(!s.loaded&&!s.loading)s.load(); return cleanup;
   }
   global.FrameForgeBoards = Object.freeze({mount, primitives:Object.freeze(Object.keys(primitivePaths)),
     // Pure model helpers also support deterministic non-browser regression tests.
-    model:Object.freeze({point,safeLink,setAttachment,conePath,newItem,createSession})});
+    model:Object.freeze({point,safeLink,setAttachment,conePath,newItem,createSession,
+      createMoodboardRecord,createLightingBoardRecord,serializeBoardForSave,serializeMoodboardItem})});
 })(globalThis);

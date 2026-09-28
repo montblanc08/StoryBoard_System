@@ -30,3 +30,14 @@ storyboard-system/scratch/*/
 storyboard-system/scratch/**/*.db
 **/qa-artifacts/
 storyboard-system/dist/
+
+# Asset packs — large binary files, not for VCS
+film_equipment_25d_pack/
+film_studio_equipment_ingest_kit_v2/
+film_studio_equipment_library_standard_v1/
+merge-backups/
+
+# Credentials — never commit
+storyboard-system/askpass.bat
+storyboard-system/askpass_test.bat
+storyboard-system/test_askpass.py

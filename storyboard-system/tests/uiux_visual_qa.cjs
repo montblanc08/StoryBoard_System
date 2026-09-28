@@ -151,6 +151,7 @@ async function auditDialogContainment(page, ids, label, screenshotId = '') {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.click('#openRegisterBtn');
     await page.waitForSelector('#registerModal[open]');
+    await page.waitForTimeout(250);
     await page.screenshot({ path: path.join(out, '01b-register-375.png'), fullPage: true });
     const registerDialog = await page.locator('#registerForm').evaluate(form => {
       const box = form.getBoundingClientRect();
@@ -229,6 +230,7 @@ async function auditDialogContainment(page, ids, label, screenshotId = '') {
         user_id: 'qa-remote-director',
         display_name: 'Cammy Hogg',
         workspace: 'table',
+        module: 'table-scroll',
         cursor_x: 0.42,
         cursor_y: 0.28,
         cursor_visible: true,
@@ -241,7 +243,9 @@ async function auditDialogContainment(page, ids, label, screenshotId = '') {
       const avatar = document.querySelector('#presenceCluster .presence-avatar');
       const cursor = document.querySelector('.remote-presence-cursor.is-visible');
       const cursorBox = cursor?.getBoundingClientRect();
-      const workspaceBox = document.getElementById('workspaceMain')?.getBoundingClientRect();
+      const host = document.getElementById('tableScrollWrap');
+      const workspaceBox = host?.getBoundingClientRect();
+      const layerBox = cursor?.parentElement?.getBoundingClientRect();
       const cursorStyle = cursor ? getComputedStyle(cursor) : null;
       return {
         avatarVisible: Boolean(avatar && getComputedStyle(avatar).display !== 'none'),
@@ -249,7 +253,10 @@ async function auditDialogContainment(page, ids, label, screenshotId = '') {
         label: cursor?.querySelector('span')?.textContent || '',
         color: cursor?.style.getPropertyValue('--presence-color') || '',
         cursorPoint: cursorBox ? [Math.round(cursorBox.left), Math.round(cursorBox.top)] : null,
-        expectedPoint: workspaceBox ? [Math.round(workspaceBox.left + workspaceBox.width * 0.42), Math.round(workspaceBox.top + workspaceBox.height * 0.28)] : null,
+        expectedPoint: workspaceBox && layerBox ? [Math.round(layerBox.left + Math.max(workspaceBox.width, host.scrollWidth) * 0.42 - host.scrollLeft), Math.round(layerBox.top + Math.max(workspaceBox.height, host.scrollHeight) * 0.28 - host.scrollTop)] : null,
+        hostMetrics: host ? {left:workspaceBox.left,layerLeft:layerBox?.left,scrollWidth:host.scrollWidth,clientWidth:host.clientWidth,scrollLeft:host.scrollLeft} : null,
+        cursorTransform: cursor?.style.transform || '',
+        layerTransform: cursor?.parentElement?.style.transform || '',
         opacity: cursorStyle?.opacity || '',
         visibility: cursorStyle?.visibility || '',
         openDialogs: document.querySelectorAll('dialog[open]').length
@@ -276,6 +283,7 @@ async function auditDialogContainment(page, ids, label, screenshotId = '') {
     const csv = Buffer.from(`镜号,标题,画面描述,旁白,时长,制作方式,制片批次\n${csvRows.map(row => `${row},回归批次`).join('\n')}\n`, 'utf8');
     await page.locator('#importFileInput').setInputFiles({ name: 'uiux-long-page.csv', mimeType: 'text/csv', buffer: csv });
     await page.waitForSelector('#importModal[open] .import-mapping-grid');
+    await page.locator('#importCustomColumns [data-add-import-custom]').filter({hasText:'制片批次'}).click();
     const customImportColumnCount = await page.locator('#importCustomColumns .import-custom-column').count();
     const importFooter = await page.locator('#importModal .dialog-foot').evaluate(footer => {
       const visible = element => {
@@ -355,8 +363,7 @@ async function auditDialogContainment(page, ids, label, screenshotId = '') {
     await page.waitForSelector('#customFieldsModal[open]');
     await page.screenshot({ path: path.join(out, '08aa-custom-fields-dialog.png') });
     await page.locator('[data-close="customFieldsModal"]').first().click();
-    await page.locator('#mainShotTable th[data-column="description"]').click({ button: 'right' });
-    await page.locator('[data-context-action="column-settings"]').click();
+    await page.locator('[data-frameforge-column-manager-trigger="canonical"]').click();
     await page.waitForSelector('#columnSettingsPopover:not(.hidden)');
     const columnSettingsPosition = await page.locator('#columnSettingsPopover').evaluate(element => {
       const rect = element.getBoundingClientRect();
@@ -411,6 +418,12 @@ async function auditDialogContainment(page, ids, label, screenshotId = '') {
     const presetCustomValue = (await presetCell.innerText()).trim();
     const presetSingleAndCustom = presetOptionCount >= 8 && presetSingleValue.includes('特写') && presetCustomValue.includes('超广角建立镜头');
 
+    await page.evaluate(() => {
+      // This visual fixture starts with empty shots; timing is only available
+      // when the selected shot actually has narration.
+      state.bundle.shots[0].voiceover = '用于单镜自动计时的隔离验收旁白。';
+      renderCurrentView();
+    });
     const narratedRow = page.locator('#mainShotTable tbody tr[data-id]').first();
     await narratedRow.click({ button: 'right' });
     await page.waitForSelector('#tableContextMenu:not(.hidden) [data-context-action="row-auto-timing"]');
@@ -422,7 +435,7 @@ async function auditDialogContainment(page, ids, label, screenshotId = '') {
     await page.locator('#timingModal [data-close="timingModal"]').first().click();
     const singleTimingInContextMenu = singleTimingEnabled && singleTimingSegments > 0;
 
-    const reviewShotId = await page.evaluate(() => state.activeShotId);
+    const reviewShotId = await page.evaluate(() => state.selection.activeShotId);
     await page.evaluate(() => { const review = document.getElementById('reviewContainer'); review.dataset.reviewTab = 'versions'; navigateToView(VIEW.REVIEW); });
     await page.waitForSelector('#createVersionBtn');
     const versionResponse = page.waitForResponse(response => response.url().includes(`/api/shots/${reviewShotId}/versions`) && response.request().method() === 'POST');
@@ -451,17 +464,37 @@ async function auditDialogContainment(page, ids, label, screenshotId = '') {
     const wordReviewMarks = await page.locator('.word-review-copy del, .word-review-copy ins').count();
     const beforeAfterReview = wordReviewMarks >= 2 && await page.locator('.review-version-pane.is-before').isVisible() && await page.locator('.review-version-pane.is-after').isVisible();
     await page.screenshot({ path: path.join(out, '08c-word-review-before-after.png'), fullPage: true });
-    await page.evaluate(shotId => { navigateToView(VIEW.TABLE); selectShot(shotId); }, reviewShotId);
+    await page.evaluate(shotId => { navigateToView(VIEW.TABLE); selectShot(shotId, {openInspector:true}); }, reviewShotId);
     await page.waitForSelector('.inspector-version-compare');
     const inspectorReviewSummary = await page.locator('.inspector-version-compare').isVisible() && await page.locator('.inspector-review-section .word-comment-pin').count() > 0;
 
+    await page.locator('#mainShotTable tbody tr[data-id]').nth(1).evaluate(row => row.scrollIntoView({block:'center',inline:'nearest'}));
+    await page.locator('#tableScrollWrap').evaluate(host => { host.scrollLeft = 0; host.dispatchEvent(new Event('scroll')); });
     const beforeReorder = await page.locator('#mainShotTable tbody tr[data-id]').evaluateAll(rows => rows.slice(0, 2).map(row => row.dataset.id));
     const targetRowBox = await page.locator('#mainShotTable tbody tr[data-id]').nth(1).boundingBox();
-    await page.locator('#mainShotTable tbody tr[data-id]').first().locator('[data-shot-drag-handle]').dragTo(
-      page.locator('#mainShotTable tbody tr[data-id]').nth(1),
-      { targetPosition: { x: 64, y: Math.max(2, targetRowBox.height - 2) } }
-    );
-    await page.waitForFunction(firstId => document.querySelector('#mainShotTable tbody tr[data-id]')?.dataset.id !== firstId, beforeReorder[0]);
+    const reorderHandle = await page.locator('#mainShotTable tbody tr[data-id]').first().locator('[data-shot-drag-handle]').boundingBox();
+    await page.mouse.move(reorderHandle.x + reorderHandle.width / 2, reorderHandle.y + reorderHandle.height / 2);
+    await page.mouse.down();
+    await page.waitForTimeout(120);
+    await page.mouse.move(targetRowBox.x + 64, targetRowBox.y + targetRowBox.height - 3, {steps:10});
+    const duringReorder = await page.evaluate(({x,y}) => ({
+      hit:document.elementFromPoint(x,y)?.outerHTML.slice(0,220),
+      reordering:document.body.classList.contains('is-reordering'),
+      target:document.querySelector('#mainShotTable tbody tr[data-id]:nth-child(2)')?.className
+    }),{x:targetRowBox.x+64,y:targetRowBox.y+targetRowBox.height-3});
+    await page.mouse.up();
+    try {
+      await page.waitForFunction(firstId => document.querySelector('#mainShotTable tbody tr[data-id]')?.dataset.id !== firstId, beforeReorder[0], {timeout:4000});
+    } catch (error) {
+      const diagnostics = await page.evaluate(() => ({
+        sort:state.tablePrefs.sort, dirty:state.dirty, saveInFlight:state.saveInFlight,
+        selected:[...state.selection.selectedShotIds],
+        order:[...document.querySelectorAll('#mainShotTable tbody tr[data-id]')].slice(0,3).map(row=>row.dataset.id),
+        indicators:document.querySelectorAll('.drop-before,.drop-after,.is-reordering').length,
+        toast:document.querySelector('.toast')?.textContent
+      }));
+      throw new Error(`${error.message}; during=${JSON.stringify(duringReorder)}; reorder=${JSON.stringify(diagnostics)}`);
+    }
     const afterReorder = await page.locator('#mainShotTable tbody tr[data-id]').evaluateAll(rows => rows.slice(0, 2).map(row => row.dataset.id));
     const shotReorderWorks = beforeReorder.length === 2 && afterReorder[0] === beforeReorder[1] && afterReorder[1] === beforeReorder[0];
 
@@ -495,6 +528,7 @@ async function auditDialogContainment(page, ids, label, screenshotId = '') {
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       return {
         cardCount: document.querySelectorAll('#shareCardsGrid .shot-card').length,
+        pagination: document.querySelector('#sharePagination')?.textContent || '',
         clientHeight: scrollingElement.clientHeight,
         scrollHeight: scrollingElement.scrollHeight,
         maxScrollTop,
@@ -512,7 +546,7 @@ async function auditDialogContainment(page, ids, label, screenshotId = '') {
       ...view.toolbarOverlaps
     ]);
     const regression = {
-      shareLongPageScrollable: importResult.imported === csvRows.length && shareLongPage.cardCount === 20 && shareLongPage.scrollable,
+      shareLongPageScrollable: importResult.imported === csvRows.length && shareLongPage.cardCount === 9 && /第 1 \/ 3 页/.test(shareLongPage.pagination) && shareLongPage.scrollable,
       importFooterButtonsVisible: importFooter.footerInViewport && importFooter.buttonsVisible,
       narrowButtonsDoNotOverlap: narrowButtonOverlaps.length === 0,
       registerDialogFits: registerDialog.inViewport && registerDialog.controls.every(control => control.inViewport && control.width > 200 && control.height >= 36),

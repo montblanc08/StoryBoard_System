@@ -35,7 +35,7 @@ for(const type of ['table','chair','sofa','bed','cabinet','camera','actor','wall
   };
   const s=m.createSession('project',api);
   assert.equal(await s.flush(),true,'empty failed/loading view never traps navigation');
-  await s.load();s.change(boards=>boards.push({id:'board',items:[light]}));
+  await s.load();s.change(boards=>boards.push({...m.createLightingBoardRecord('Board'),id:'board',items:[light]}));
   assert.equal(await s.flush(),true);assert.equal(s.revision,1);
   s.travel(false);assert.equal(s.boards.length,0);s.travel(true);assert.equal(s.boards.length,1);
   await s.flush();

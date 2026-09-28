@@ -1,7 +1,7 @@
 /* Enhance dynamically-created chrome without wrapping, cloning or remounting
  * controls. No remote assets, DOM sampling, render loop or pointer listeners. */
 (() => {
-  const chrome = '.global-header, .sidebar, .workspace-view-tabs, .bulk-action-bar, .column-settings-popover, .sidebar-settings-popover, #filterPopover, .project-activity-panel, .project-quick-menu, .toolbar-secondary-actions, .search-result-panel, .context-menu, .rich-toolbar, .ff-boards-toolbar';
+  const chrome = '.global-header, .sidebar, .workspace-view-tabs, .bulk-action-bar, .column-settings-popover, .sidebar-settings-popover, #filterPopover, .project-activity-panel, .project-quick-menu, .toolbar-secondary-actions, .search-result-panel, .context-menu, .ff-boards-toolbar';
   function decorate(root) {
     if (!(root instanceof Element)) return;
     if (root.matches(chrome)) root.classList.add('liquid-glass');

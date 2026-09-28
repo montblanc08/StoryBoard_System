@@ -1,7 +1,36 @@
 /* Auxiliary pages and dialogs. Screen-only: exported/printed layouts stay independent.
    Keep layout ownership, visibility, resizing and interaction in the existing styles. */
 @media screen {
-  body[data-ui-version="7.3"] .global-header { z-index:var(--z-toolbar); }
+  /* State colors have separate jobs: the blue ring means keyboard focus;
+     selected and active content uses a quiet surface and a neutral edge. */
+  :root {
+    --shell-gutter:16px;
+    --ff-focus-ring:var(--focus, #356CC8);
+    --ff-selected-edge:var(--selection-edge, var(--border-default));
+    --ff-selected-fill:var(--selection, var(--bg-surface-2));
+  }
+  body[data-ui-version="7.3"] :where(button,a,[tabindex]):focus-visible:not(.ffui-button):not(.ffui-segment) {
+    outline:2px solid var(--ff-focus-ring);
+    outline-offset:2px;
+  }
+  body[data-ui-version="7.3"] .script-row.is-selected {
+    position:relative;
+    border-color:var(--ff-selected-edge);
+    background:var(--ff-selected-fill);
+    box-shadow:inset 3px 0 0 var(--text-3);
+  }
+  body[data-ui-version="7.3"] :is(.review-shot-chip.is-active,.review-before-version.is-selected) {
+    border-color:var(--ff-selected-edge);
+    background:var(--ff-selected-fill);
+    box-shadow:inset 3px 0 0 var(--text-3);
+  }
+  body[data-ui-version="7.3"] :is(.review-shot-chip.is-active,.review-before-version.is-selected)::after {
+    background:var(--surface-3);
+    color:var(--text-1);
+  }
+  body[data-ui-version="7.3"] .global-header { z-index:var(--z-dock); }
+  body[data-ui-version="7.3"] .global-header { padding-inline:var(--shell-gutter); }
+  body[data-ui-version="7.3"] :is(.project-context-header,.workspace-toolbar) { padding-inline:var(--shell-gutter); }
   body[data-ui-version="7.3"] .workspace-toolbar { position:relative; z-index:var(--z-toolbar); }
   body[data-ui-version="7.3"] .shot-table thead { z-index:var(--z-sticky); }
   body[data-ui-version="7.3"] :is(.methods-popover,.shot-preset-popover,.context-menu,.column-settings-popover,.sidebar-settings-popover,.project-activity-panel,.project-quick-menu,.search-result-panel) { z-index:var(--z-dropdown); }
@@ -22,8 +51,6 @@
   body[data-ui-version="7.3"] .ff-boards .ff-boards-inspector { border-left:1px solid var(--border-soft); }
   body[data-ui-version="7.3"] .ff-boards .ff-boards-inspector .ff-boards-field { min-height:32px; margin-bottom:4px!important; }
   body[data-ui-version="7.3"] .ff-boards .ff-boards-inspector .ff-boards-field > span { font-size:12px; color:var(--text-3); }
-  body[data-ui-version="7.3"] .ff-boards .ff-boards-inspector input:not([type="checkbox"]):not([type="color"]) { height:30px!important; min-height:30px!important; padding:4px 6px!important; }
-  body[data-ui-version="7.3"] .ff-boards .ff-boards-inspector textarea { min-height:72px!important; padding:6px!important; }
   body[data-ui-version="7.3"] .ff-boards .ff-boards-empty-state { position:static!important; transform:none!important; text-align:left!important; inset:auto!important; }
   body[data-ui-version="7.3"] .ff-boards-empty .ff-boards-canvas { display:block; }
   body[data-ui-version="7.3"] .ff-boards .ff-boards-inspector input[type="checkbox"] { width:16px!important; height:16px!important; min-height:16px!important; padding:0!important; flex:0 0 16px; }
@@ -112,17 +139,30 @@
   body[data-ui-version="7.3"] .asset-kind img { width: 100%; height: 100%; object-fit: cover; }
   body[data-ui-version="7.3"] .asset-row { grid-template-columns: 112px minmax(0,1fr) auto; padding: 12px; }
   body[data-ui-version="7.3"] .script-list { max-width: 1440px; margin-inline: auto; gap:0; }
-  body[data-ui-version="7.3"] .script-row { grid-template-columns: 140px 120px minmax(0,1fr); min-height: 56px; padding: 6px 12px; gap: 12px; border:0; border-bottom:1px solid var(--border-soft); border-radius:0; background:transparent; }
-  body[data-ui-version="7.3"] .script-row .script-voiceover {
-    min-height: 40px; height: auto; padding: 8px 12px; background: transparent; color: var(--text-1); text-align: left;
-    border: 1px solid transparent; border-radius: 6px; line-height: 1.7;
+  body[data-ui-version="7.3"] .script-row {
+    grid-template-columns: 148px 132px 180px minmax(240px,1fr) auto;
+    min-height: 108px; padding: 12px 14px; gap: 16px;
+    border: 1px solid var(--flow-edge); border-radius: 14px;
+    background: var(--surface-1); box-shadow: none;
   }
-  body[data-ui-version="7.3"] .script-row:is(:hover, :focus-within, .is-selected) { background: var(--surface-2); }
-  body[data-ui-version="7.3"] .script-row.is-selected { border-color: var(--text-3); }
-  body[data-ui-version="7.3"] .shot-inspector .inspector-section { padding:16px; margin:0; background:transparent; border-radius:0; box-shadow:none; }
+  body[data-ui-version="7.3"] .script-row-thumb { width:148px; height:84px; border-radius:10px; background:var(--surface-2); }
+  body[data-ui-version="7.3"] .script-row-thumb img { width:100%; height:100%; object-fit:cover; filter:none; }
+  body[data-ui-version="7.3"] .script-row-timing { min-height:34px; padding:0 10px; white-space:nowrap; }
+  body[data-ui-version="7.3"] .script-row .script-voiceover {
+    min-height: 58px; height: auto; padding: 11px 12px; background: var(--surface-2); color: var(--text-1); text-align: left;
+    border: 1px solid var(--flow-edge); border-radius: 10px; line-height: 1.7; overflow-wrap:anywhere;
+  }
+  body[data-ui-version="7.3"] .script-row:is(:hover, :focus-within, .is-selected) { background: var(--surface-2); border-color: var(--text-3); }
+  body[data-ui-version="7.3"] .script-row.is-selected { border-color: var(--ff-selected-edge); }
+  body[data-ui-version="7.3"] .shot-inspector .inspector-section { padding:16px 20px 12px; margin:0; background:transparent; border-radius:0; box-shadow:none; }
   body[data-ui-version="7.3"] .shot-inspector .inspector-section + .inspector-section { margin:0; border-top:1px solid var(--border-soft); }
   body[data-ui-version="7.3"] .shot-inspector .inspector-section-title { font-size:11px; margin-bottom:8px; color:var(--text-3); }
-  body[data-ui-version="7.3"] .shot-inspector .property-row { min-height:30px; grid-template-columns:88px minmax(0,1fr); }
+  body[data-ui-version="7.3"] .shot-inspector .property-row {
+    min-height:30px; grid-template-columns:128px minmax(0,1fr); gap:12px;
+    margin:0; padding:5px 0; align-items:center;
+  }
+  body[data-ui-version="7.3"] .shot-inspector .property-label { padding-top:2px; line-height:1.45; }
+  body[data-ui-version="7.3"] .shot-inspector .property-value { min-width:0; line-height:1.45; }
   body[data-ui-version="7.3"] .shot-inspector .btn { min-height:30px; height:30px; padding:0 8px; border:0; border-radius:6px; background:transparent; }
   body[data-ui-version="7.3"] .shot-inspector .btn:hover { background:var(--surface-2); }
   body[data-ui-version="7.3"] ::-webkit-scrollbar { width:6px; height:6px; }
@@ -150,6 +190,19 @@
   body[data-ui-version="7.3"] .project-row:hover { background: var(--surface-2); }
   body[data-ui-version="7.3"] .project-row-title { color: var(--text-1); }
   body[data-ui-version="7.3"] :is(.project-row-meta, .project-row-modified, .hub-section-title) { color: var(--text-3); }
+  @media (max-width: 760px) {
+    body[data-ui-version="7.3"] .project-row { padding: 12px; gap: 10px; border-radius: 12px; }
+    body[data-ui-version="7.3"] .project-cover { width: 72px; height: 42px; }
+    body[data-ui-version="7.3"] .project-row-main { gap: 4px; }
+    body[data-ui-version="7.3"] .project-row-title { font-size: 13px; white-space: normal; overflow-wrap: anywhere; }
+    body[data-ui-version="7.3"] .project-row-meta,
+    body[data-ui-version="7.3"] .project-row-modified { display: none; }
+    body[data-ui-version="7.3"] .project-row-side { gap: 4px; }
+    body[data-ui-version="7.3"] .project-row-open { font-size: 11px; padding: 4px 0; white-space: nowrap; }
+  }
+  @media (max-width: 400px) {
+    body[data-ui-version="7.3"] .project-row-edit { display: none; }
+  }
 
   /* Native and React dialogs share surfaces without changing open/close behavior. */
   body[data-ui-version="7.3"] :is(dialog.standard-dialog, .ffui-dialog) {
@@ -165,10 +218,7 @@
   body[data-ui-version="7.3"] .standard-dialog .dialog-head { padding-bottom: 16px; }
   body[data-ui-version="7.3"] .standard-dialog .dialog-foot { gap: 8px; padding-block: 16px 0; }
   body[data-ui-version="7.3"] :is(.modal-subtitle, .dialog-eyebrow) { color: var(--text-3); line-height: 1.6; }
-  body[data-ui-version="7.3"] :is(.standard-dialog, #reviewContainer) :is(input, select, textarea):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]):not([type="file"]) {
-    padding: 8px 12px; border: 1px solid var(--text-3); border-radius: 12px;
-    background: var(--surface-2); color: var(--text-1);
-  }
+/* Shared input visuals: field-system.css. */
   body[data-ui-version="7.3"] .standard-dialog :is(.rich-editor-surface, .timing-shot-summary,
     .timing-segment-row, .mapping-preview-box, .config-list) {
     background: var(--surface-2); color: var(--text-1); border-color: var(--flow-edge); border-radius: 12px;
@@ -189,12 +239,96 @@
   body[data-ui-version="7.3"] :is(#reviewContainer, #assetsContainer, #scriptContainer,
     #deliverablesContainer, .standard-dialog) .btn-secondary:hover:not(:disabled) { background: var(--surface-3); }
   body[data-ui-version="7.3"] :is(#reviewContainer, #assetsContainer, #scriptContainer,
-    #deliverablesContainer, .standard-dialog, .project-list-container) :is(button, a, input, select, textarea, [tabindex], [contenteditable]):focus-visible {
-    outline: 2px solid var(--text-1); outline-offset: 2px;
+    #deliverablesContainer, .standard-dialog, .project-list-container) :is(button, a, [tabindex]):not(.ffui-select,[contenteditable="true"]):focus-visible {
+    outline: 2px solid var(--ff-focus-ring); outline-offset: 2px;
   }
+
+
+  /* The top global search is the single search entry point. The React toolbar
+     keeps its state bridge, but its duplicate visual control is removed. */
+  body[data-ui-version="7.3"] .ff73-local-search {
+    display: none !important;
+  }
+  body[data-ui-version="7.3"] .ff73-toolbar-content {
+    justify-content: flex-start;
+  }
+  body[data-ui-version="7.3"] :is(.shot-inspector, .ff-boards-inspector) {
+    border-left: 0 !important;
+  }
+  body[data-ui-version="7.3"] .ffui-popover.ff73-sidebar-settings {
+    z-index: var(--z-toast, 120) !important;
+  }
+  body[data-ui-version="7.3"] .ff73-nav-item[aria-current="page"]::before {
+    display: none !important;
+  }
+  body[data-ui-version="7.3"] .sidebar .nav-item.is-active {
+    box-shadow: none !important;
+  }
+
+  /* The rich toolbar is a floating object, not part of the text surface.
+     Keep a small, neutral drag grip so moving it never looks like selecting
+     or editing the underlying text box. */
+  body[data-ui-version="7.3"] .rich-float-toolbar .rich-toolbar-drag-handle {
+    display: inline-grid;
+    place-items: center;
+    flex: 0 0 16px;
+    width: 16px;
+    min-width: 16px;
+    height: 30px;
+    margin-right: 2px;
+    color: var(--text-3);
+    border-radius: 6px;
+    cursor: grab;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+    font-size: 12px;
+    letter-spacing: -3px;
+    line-height: 1;
+  }
+  body[data-ui-version="7.3"] .rich-float-toolbar .rich-toolbar-drag-handle:hover,
+  body[data-ui-version="7.3"] .rich-float-toolbar.is-dragging .rich-toolbar-drag-handle {
+    color: var(--text-1);
+    background: var(--surface-2);
+  }
+  body[data-ui-version="7.3"] .rich-float-toolbar.is-dragging .rich-toolbar-drag-handle {
+    cursor: grabbing;
+  }
+
+  /* Text selection is a browser operation, not a card-selection state. Make
+     it visibly blue in every text surface, including direct text nodes inside
+     contenteditable hosts. */
+  body[data-ui-version="7.3"] ::selection,
+  body[data-ui-version="7.3"] ::-moz-selection {
+    color: #fff !important;
+    background: #356cc8 !important;
+  }
+  body[data-ui-version="7.3"] :is([contenteditable="true"], .is-rich-editing)::selection,
+  body[data-ui-version="7.3"] :is([contenteditable="true"], .is-rich-editing) *::selection {
+    color: #fff !important;
+    background: #356cc8 !important;
+  }
+
+
+  /* Give the selection column breathing room instead of pinning the check to
+     the table edge. */
+  body[data-ui-version="7.3"] .shot-table :is(th:first-child, td:first-child) {
+    padding-inline: 12px;
+    min-width: 44px;
+  }
+  body[data-ui-version="7.3"] .shot-table .shot-select {
+    box-shadow: none !important;
+    background-image: none !important;
+  }
+
+
   body[data-ui-version="7.3"] :is(#reviewContainer, #assetsContainer, #scriptContainer, .standard-dialog) :disabled { opacity: .55; }
   @media (max-width: 720px) {
-    body[data-ui-version="7.3"] .script-row { grid-template-columns: 1fr 1fr; }
+    body[data-ui-version="7.3"] .script-row { grid-template-columns: 88px minmax(0,1fr) auto; min-height: 88px; }
+    body[data-ui-version="7.3"] .script-row-thumb { width:88px; height:58px; grid-row: span 2; }
+    body[data-ui-version="7.3"] .script-row-meta { grid-column: 2; }
+    body[data-ui-version="7.3"] .script-row-title { grid-column: 2; }
+    body[data-ui-version="7.3"] .script-row-timing { grid-column: 3; grid-row: 1 / span 2; }
     body[data-ui-version="7.3"] .script-voiceover { grid-column: 1 / -1; }
     body[data-ui-version="7.3"] :is(.review-head, .assets-view-head, .script-view-head, .page-header) { padding: 16px; flex-wrap: wrap; }
     body[data-ui-version="7.3"] :is(.review-workspace, .asset-list, .script-list) { padding: 0 16px 16px; gap: 12px; }

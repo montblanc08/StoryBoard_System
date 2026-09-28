@@ -5,6 +5,33 @@ import { Sidebar } from './sidebar';
 import { publish } from './store';
 import type { Snapshot, WorkspaceBridge } from './contracts';
 
+const horizontalScrollSelector='.ff73-toolbar-actions,.table-wrap,.ff73-toolbar-content > .ffui-segmented';
+const observedScrollTargets=new WeakSet<HTMLElement>();
+let horizontalScrollResizeObserver:ResizeObserver|null=null;
+
+function updateHorizontalScrollEdges(target:HTMLElement){
+  const maxScroll=Math.max(0,target.scrollWidth-target.clientWidth);
+  const canScroll=maxScroll>2;
+  target.dataset.horizontalScrollable=String(canScroll);
+  target.style.setProperty('--ff73-fade-left',canScroll&&target.scrollLeft>2?'18px':'0px');
+  target.style.setProperty('--ff73-fade-right',canScroll&&target.scrollLeft<maxScroll-2?'18px':'0px');
+  target.style.setProperty('--ff73-fade-safe-right',target.matches('.ff73-toolbar-actions')&&canScroll&&target.scrollLeft<maxScroll-2?'202px':'0px');
+}
+
+function observeHorizontalScrollEdges(root:ParentNode=document){
+  const targets:HTMLElement[]=[];
+  if(root instanceof HTMLElement&&root.matches(horizontalScrollSelector))targets.push(root);
+  root.querySelectorAll<HTMLElement>(horizontalScrollSelector).forEach(target=>targets.push(target));
+  targets.forEach(target=>{
+    updateHorizontalScrollEdges(target);
+    if(observedScrollTargets.has(target))return;
+    observedScrollTargets.add(target);
+    target.addEventListener('scroll',()=>updateHorizontalScrollEdges(target),{passive:true});
+    horizontalScrollResizeObserver??=new ResizeObserver(entries=>entries.forEach(entry=>updateHorizontalScrollEdges(entry.target as HTMLElement)));
+    horizontalScrollResizeObserver.observe(target);
+  });
+}
+
 const workspaceUI={
   ready:false,
   bridge:null as WorkspaceBridge|null,
@@ -21,6 +48,12 @@ const workspaceUI={
     toolbar.prepend(toolbarRoot);
     createRoot(toolbarRoot).render(<UIProvider><WorkspaceToolbar bridge={bridge}/></UIProvider>);
     document.body.dataset.uiVersion='7.3';this.ready=true;
+    observeHorizontalScrollEdges();
+    const scrollTargetObserver=new MutationObserver(records=>records.forEach(record=>record.addedNodes.forEach(node=>{
+      if(node instanceof HTMLElement)observeHorizontalScrollEdges(node);
+    })));
+    [toolbar,document.querySelector('#workspaceMain')].forEach(root=>root&&scrollTargetObserver.observe(root,{childList:true,subtree:true}));
+    window.addEventListener('resize',()=>observeHorizontalScrollEdges(),{passive:true});
     this.syncSidebar(false);
   },
   /**

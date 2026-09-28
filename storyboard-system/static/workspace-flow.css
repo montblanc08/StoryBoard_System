@@ -33,6 +33,21 @@
   body[data-ui-version="7.3"] .ff73-nav-group>span { padding:8px 10px 4px; font-size:11px; font-weight:500; color:var(--text-3); }
   body[data-ui-version="7.3"] .ff73-nav-item { height:36px; min-height:36px; border-radius: var(--radius-sm); }
   body[data-ui-version="7.3"] .ff73-nav-footer { border-top:1px solid var(--border-soft); }
+  /* Collapsed rail is one evenly spaced icon sequence. Section labels may be
+     hidden, but their former margins must not survive as irregular gaps. */
+  body[data-ui-version="7.3"].sidebar-collapsed .ff73-nav-scroll {
+    display:flex; flex-direction:column; align-items:center; gap:4px;
+  }
+  body[data-ui-version="7.3"].sidebar-collapsed .ff73-nav-group {
+    display:contents;
+  }
+  body[data-ui-version="7.3"].sidebar-collapsed .ff73-nav-item {
+    width:44px; height:44px; min-height:44px; margin:0;
+    border-radius:12px; justify-content:center; padding:0;
+  }
+  body[data-ui-version="7.3"].sidebar-collapsed .ff73-nav-item svg {
+    width:18px; height:18px;
+  }
   body[data-ui-version="7.3"] .ff73-local-search {
     width:220px;
     height:30px;
@@ -105,7 +120,7 @@
   body[data-ui-version="7.3"] .shot-table tbody tr { background:transparent!important; }
   body[data-ui-version="7.3"] .shot-table tbody tr.is-selected { background:var(--selection)!important; }
   body[data-ui-version="7.3"] .shot-table tbody tr.is-selected td { background:transparent; }
-  body[data-ui-version="7.3"] .shot-table tbody tr.is-selected td:first-child { box-shadow:inset 2px 0 0 var(--text-2); }
+  body[data-ui-version="7.3"] .shot-table tbody tr.is-selected td:first-child { box-shadow:none; }
   body[data-ui-version="7.3"] :is(.shot-card,.wall-media,.review-viewer) { border-radius: var(--radius-xl); }
   body[data-ui-version="7.3"] .shot-card { border-color:transparent; background:var(--surface-1); }
   body[data-ui-version="7.3"] .shot-card.is-selected { border-color:var(--text-3); box-shadow:none; }

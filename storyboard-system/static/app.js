@@ -5,7 +5,6 @@
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
-let tableContextAnchor = null;
 
 // --------------------------------------------------------------------------
 // 1. CONSTANTS & APPLICATION STATE
@@ -143,10 +142,16 @@ const state = {
   projectBundleCache: new Map(),
   bundle: null,
   context: APP_CONTEXT.HUB,
-  currentView: VIEW.TABLE,
+  view: { current: VIEW.TABLE },
+  selection: {
+    activeShotId: null,
+    selectedShotIds: new Set(),
+    anchorShotId: null
+  },
+  get activeShotId() { return this.selection?.activeShotId ?? null; },
+  set activeShotId(id) { if (this.selection) this.selection.activeShotId = id; },
+  inspector: { open: false, targetShotId: null },
   uiMode: 'unified',
-  activeShotId: null,
-  inspectorOpen: false,
   dirty: false,
   shareToken: null,
   undoStack: [],
@@ -168,18 +173,29 @@ const state = {
   searchQuery: '',
   projectSearchQuery: '',
   shareViewToken: null,
-  selectedShotIds: new Set(),
-  selectionAnchorShotId: null,
   searchResults: [],
   searchActiveIndex: -1,
   searchTimer: null,
-  tablePrefs: { widths: {}, hidden: [], removed: [], order: [], sort: null, wrap: {}, rowHeight: 'standard' },
+  tablePrefs: { widths: {}, hidden: [], archived: [], purged: [], order: [], sort: null, wrap: {}, rowHeight: 'standard' },
   autoSaveTimer: null,
   saveInFlight: false,
   saveQueued: false,
+  saveStartedAt: null,
+  lastSaveAttemptAt: null,
+  lastSaveCompletedAt: null,
+  currentSaveToken: 0,
+  saveAbortController: null,
+  wakeRecoveryCount: 0,
   changeVersion: 0,
+  saveRefreshInFlight: false,
+  networkHealth: 'online',
+  networkFailureCount: 0,
+  lastSaveError: null,
+  localDraftError: null,
+  autoSaveRetryAttempt: 0,
   importWizard: null,
   timingDraft: null,
+  narrationSpeed: 1,
   insertAnchorShotId: null,
   presence: [],
   presenceProjectId: null,
@@ -189,11 +205,16 @@ const state = {
   projectSyncTimer: null,
   lastServerUpdatedAt: '',
   remoteRefreshInFlight: false,
+  remoteRefreshStartedAt: null,
   presenceSendTimer: null,
   presenceSendInFlight: false,
+  presencePollInFlight: false,
+  presencePollStartedAt: null,
   presenceLastSentAt: 0
 };
 window.state = state;
+let saveRequestToken = 0;
+let reviewStatusInFlight = false;
 
 const PRODUCTION_METHODS = [
   ['LIVE', 'LIVE 实拍'], ['STOCK', 'STOCK 素材'], ['CLIENT', 'CLIENT 甲方提供'],
@@ -256,6 +277,7 @@ function prepareCollaborativeShots(bundle) {
   });
   return payload;
 }
+window.prepareCollaborativeShots = prepareCollaborativeShots;
 
 const TABLE_COLUMNS = {
   select: [38, 38, 38], number: [64, 64, 120], thumb: [82, 82, 240], tc: [100, 100, 180],
@@ -289,39 +311,702 @@ function formattedShotField(shot, field, empty = '—', strict = false) {
   return plain ? FrameForgeRichText.html(shot?.rich_text_json?.[field], plain, strict) : escapeHtml(empty);
 }
 /**
+ * --------------------------------------------------------------------------
+ * MULTIPLAYER RELIABILITY & ACTIVE EDITOR INFRASTRUCTURE
+ * --------------------------------------------------------------------------
+ */
+async function waitUntil(
+  predicate,
+  { timeout = 5000, interval = 25, errorMessage = '等待操作完成超时' } = {}
+) {
+  const startedAt = performance.now();
+  while (true) {
+    if (predicate()) return true;
+    if (performance.now() - startedAt >= timeout) {
+      throw new Error(errorMessage);
+    }
+    await new Promise(resolve => setTimeout(resolve, interval));
+  }
+}
+
+const activeEditorRegistry = new Map();
+window.activeEditorRegistry = activeEditorRegistry;
+let editorSessionCounter = 0;
+
+function nextEditorSessionId(type = 'editor') {
+  editorSessionCounter += 1;
+  return `${type}-${Date.now()}-${editorSessionCounter}`;
+}
+
+function registerActiveEditor(session) {
+  if (!session?.id) throw new Error('Editor session requires id');
+  activeEditorRegistry.set(session.id, session);
+  refreshSaveStatus();
+  queuePresenceHeartbeat(true);
+  return session;
+}
+
+function unregisterActiveEditor(sessionOrId) {
+  const id = typeof sessionOrId === 'string' ? sessionOrId : sessionOrId?.id;
+  if (!id) return;
+  activeEditorRegistry.delete(id);
+  refreshSaveStatus();
+  queuePresenceHeartbeat(true);
+}
+
+function activeEditorsForCurrentProject() {
+  const projectId = String(state.bundle?.project?.id || '');
+  return [...activeEditorRegistry.values()].filter(
+    session => String(session.projectId || '') === projectId && !session.closed
+  );
+}
+
+function hasDirtyActiveEditor() {
+  return activeEditorsForCurrentProject().some(session =>
+    typeof session.isDirty === 'function' ? session.isDirty() : Boolean(session.isDirty)
+  );
+}
+
+async function flushActiveEditors({ timeout = 5000 } = {}) {
+  const projectId = state.bundle?.project?.id;
+  if (!projectId) return true;
+
+  const flush = async () => {
+    const sessions = activeEditorsForCurrentProject();
+    for (const session of sessions) {
+      if (session.closed) continue;
+      if (typeof session.waitForCompositionEnd === 'function') {
+        await session.waitForCompositionEnd();
+      }
+      if (typeof session.commit === 'function') {
+        await session.commit({ reason: 'flush' });
+      }
+    }
+  };
+
+  try {
+    await Promise.race([
+      flush(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('当前编辑仍在提交')), timeout))
+    ]);
+
+    await waitUntil(
+      () => !activeEditorsForCurrentProject().some(session => session.composing || session.commitInFlight),
+      { timeout, interval: 25, errorMessage: '当前文本仍在提交' }
+    );
+    return true;
+  } catch (error) {
+    toast('当前文本仍在提交，本地内容已保留，请稍后重试', true);
+    return false;
+  }
+}
+
+function editorDraftKey(projectId, shotId, field) {
+  return ['frameforge-editor-draft', projectId, shotId, field].join(':');
+}
+
+const editorDraftTimers = new Map();
+const pendingEditorDrafts = new Map();
+window.pendingEditorDrafts = pendingEditorDrafts;
+
+function scheduleEditorDraft({ projectId, shotId, field, text, runs, baseRevision }) {
+  if (!projectId || !shotId || !field) return;
+  const key = editorDraftKey(projectId, shotId, field);
+  const payload = {
+    version: 1,
+    savedAt: Date.now(),
+    projectId,
+    shotId,
+    field,
+    text: String(text ?? ''),
+    runs: Array.isArray(runs) ? runs : undefined,
+    baseRevision: baseRevision || undefined
+  };
+  pendingEditorDrafts.set(key, payload);
+
+  clearTimeout(editorDraftTimers.get(key));
+  editorDraftTimers.set(
+    key,
+    setTimeout(() => {
+      editorDraftTimers.delete(key);
+      try {
+        localStorage.setItem(key, JSON.stringify(payload));
+        // Successful write clears any prior localDraftError
+        if (state.localDraftError) {
+          state.localDraftError = null;
+          refreshSaveStatus();
+        }
+      } catch (draftErr) {
+        // Keep pendingEditorDrafts entry — do NOT delete key or payload
+        // Re-insert timer so retry will be attempted on next schedule
+        state.localDraftError = draftErr;
+        refreshSaveStatus();
+        console.warn?.('[draft] localStorage persistence failed', { key, error: draftErr });
+      }
+    }, 350)
+  );
+}
+
+function flushAllPendingEditorDraftsSync() {
+  for (const [key, payload] of pendingEditorDrafts.entries()) {
+    clearTimeout(editorDraftTimers.get(key));
+    editorDraftTimers.delete(key);
+    try {
+      localStorage.setItem(key, JSON.stringify(payload));
+      if (state.localDraftError) {
+        state.localDraftError = null;
+        refreshSaveStatus();
+      }
+    } catch (draftErr) {
+      // Keep pendingEditorDrafts entry — do NOT delete
+      state.localDraftError = draftErr;
+      console.warn?.('[draft] flush persistence failed', { key, error: draftErr });
+    }
+  }
+}
+window.flushAllPendingEditorDraftsSync = flushAllPendingEditorDraftsSync;
+
+function clearEditorDraft(projectId, shotId, field) {
+  const key = editorDraftKey(projectId, shotId, field);
+  clearTimeout(editorDraftTimers.get(key));
+  editorDraftTimers.delete(key);
+  pendingEditorDrafts.delete(key);
+  try { localStorage.removeItem(key); } catch (_) {}
+}
+
+function isDraftAcknowledged(draft, shot) {
+  if (!draft || !shot) return false;
+  const field = draft.field;
+  const acknowledgedText = String(shot[field] ?? '');
+  const draftText = String(draft.text ?? '');
+  if (acknowledgedText !== draftText) return false;
+  if (draft.runs !== undefined) {
+    const ackRuns = shot.rich_text_json?.[field] || [];
+    return JSON.stringify(ackRuns) === JSON.stringify(draft.runs);
+  }
+  return true;
+}
+
+function clearAcknowledgedEditorDrafts(projectId, savedBundle) {
+  if (!projectId || !savedBundle?.shots) return;
+  const prefix = `frameforge-editor-draft:${projectId}:`;
+
+  // 1. Check in-memory pendingEditorDrafts
+  for (const [key, pendingPayload] of pendingEditorDrafts.entries()) {
+    if (!key.startsWith(prefix)) continue;
+    const shot = savedBundle.shots.find(s => s.id === pendingPayload.shotId);
+    if (shot && isDraftAcknowledged(pendingPayload, shot)) {
+      clearTimeout(editorDraftTimers.get(key));
+      editorDraftTimers.delete(key);
+      pendingEditorDrafts.delete(key);
+      try { localStorage.removeItem(key); } catch (_) {}
+    }
+  }
+
+  // 2. Check persisted localStorage drafts
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (!key || !key.startsWith(prefix)) continue;
+    try {
+      const pending = pendingEditorDrafts.get(key);
+      if (pending) {
+        const shot = savedBundle.shots.find(s => s.id === pending.shotId);
+        if (!shot || !isDraftAcknowledged(pending, shot)) {
+          continue;
+        }
+      }
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      const draft = JSON.parse(raw);
+      const shot = savedBundle.shots.find(s => s.id === draft.shotId);
+      if (shot && isDraftAcknowledged(draft, shot)) {
+        clearTimeout(editorDraftTimers.get(key));
+        editorDraftTimers.delete(key);
+        pendingEditorDrafts.delete(key);
+        localStorage.removeItem(key);
+        i--;
+      }
+    } catch (_) {}
+  }
+}
+
+let projectDraftTimer = null;
+function scheduleProjectDraft() {
+  clearTimeout(projectDraftTimer);
+  projectDraftTimer = setTimeout(() => {
+    projectDraftTimer = null;
+    const projectId = state.bundle?.project?.id;
+    if (!projectId) return;
+    try {
+      localStorage.setItem(
+        `frameforge-draft:${projectId}`,
+        JSON.stringify({
+          savedAt: Date.now(),
+          shots: state.bundle.shots
+        })
+      );
+    } catch (_) {}
+  }, 750);
+}
+
+const RESERVATION_SOFT_TIMEOUT = 1000;
+const RESERVATION_RENEW_MS = 9000;
+const RESERVATION_RETRY_DELAYS = [2000, 4000, 8000, 15000, 30000];
+
+const reservationSessions = new Map();
+let reservationSerial = 0;
+
+function reservationKey(shotId, field) {
+  return `${shotId}:${field}`;
+}
+
+function retryDelay(attempt) {
+  const base = RESERVATION_RETRY_DELAYS[Math.min(attempt, RESERVATION_RETRY_DELAYS.length - 1)];
+  const jitter = 0.85 + Math.random() * 0.3;
+  return Math.round(base * jitter);
+}
+
+function updateReservationUI(session) {
+  if (!session) return;
+  const elements = document.querySelectorAll(`[data-field="${CSS.escape(session.field)}"], [data-card-copy="${CSS.escape(session.field)}"]`);
+  elements.forEach(el => {
+    const hostShotId = el.closest('[data-id], [data-shot-id]')?.dataset.id || el.closest('[data-shot-id]')?.dataset.shotId;
+    if (!hostShotId || hostShotId === session.shotId) {
+      el.dataset.reservationState = session.state;
+      if (session.state === 'contended') {
+        el.title = `${session.holder || '其他协作者'}也在编辑，保存时将检查冲突`;
+      } else if (session.state === 'degraded') {
+        el.title = '协作状态延迟，本地修改已保留';
+      } else if (session.state === 'offline') {
+        el.title = '当前离线，本地修改已保留';
+      } else {
+        el.removeAttribute('title');
+      }
+    }
+  });
+}
+
+function createSoftReservationSession(shotId, field) {
+  reservationSerial += 1;
+  const id = `reservation-${Date.now()}-${reservationSerial}`;
+  const session = {
+    id,
+    shotId,
+    field,
+    state: 'pending',
+    holder: null,
+    released: false,
+    renewTimer: null,
+    degradeTimer: null,
+    retryTimer: null,
+    retryAttempt: 0,
+    release: null
+  };
+
+  reservationSessions.set(reservationKey(shotId, field), session);
+  session.release = () => releaseSoftReservation(session);
+  acquireSoftReservation(session);
+  return session;
+}
+
+async function acquireSoftReservation(session) {
+  if (!session || session.released || !state.session?.authenticated) return;
+  session.state = 'pending';
+  clearTimeout(session.degradeTimer);
+  session.degradeTimer = setTimeout(() => {
+    if (!session.released && session.state === 'pending') {
+      session.state = 'degraded';
+      updateReservationUI(session);
+    }
+  }, RESERVATION_SOFT_TIMEOUT);
+
+  try {
+    const result = await api('/api/v1/edit-reservations', {
+      method: 'POST',
+      json: { shot_id: session.shotId, field: session.field, action: 'acquire' }
+    });
+    clearTimeout(session.degradeTimer);
+
+    if (session.released) {
+      if (result?.success !== false) {
+        releaseReservationHttp(session.shotId, session.field);
+      }
+      return;
+    }
+
+    const current = reservationSessions.get(reservationKey(session.shotId, session.field));
+    if (!current || current.id !== session.id) return;
+
+    if (result?.success === false) {
+      session.state = 'contended';
+      session.holder = result?.holder || '其他协作者';
+      updateReservationUI(session);
+      scheduleReservationRetry(session, 8000 + Math.random() * 2000);
+      return;
+    }
+
+    session.state = 'owned';
+    session.holder = null;
+    session.retryAttempt = 0;
+    updateReservationUI(session);
+    startReservationRenew(session);
+  } catch (error) {
+    clearTimeout(session.degradeTimer);
+    if (session.released) return;
+    session.state = error?.isNetworkError ? 'offline' : 'degraded';
+    updateReservationUI(session);
+    scheduleReservationRetry(session);
+  }
+}
+
+function scheduleReservationRetry(session, explicitDelay) {
+  if (session.released) return;
+  clearTimeout(session.retryTimer);
+  const delay = explicitDelay != null ? explicitDelay : retryDelay(session.retryAttempt++);
+  session.retryTimer = setTimeout(() => {
+    acquireSoftReservation(session);
+  }, delay);
+}
+
+function startReservationRenew(session) {
+  clearTimeout(session.renewTimer);
+  session.renewTimer = setTimeout(() => renewSoftReservation(session), RESERVATION_RENEW_MS);
+}
+
+async function renewSoftReservation(session) {
+  if (!session || session.released || session.state !== 'owned' || session.renewInFlight) {
+    return;
+  }
+
+  session.renewInFlight = true;
+
+  try {
+    const result = await api('/api/v1/edit-reservations', {
+      method: 'POST',
+      json: { shot_id: session.shotId, field: session.field, action: 'acquire' }
+    });
+
+    if (session.released) return;
+
+    const current = reservationSessions.get(reservationKey(session.shotId, session.field));
+    if (!current || current.id !== session.id) return;
+
+    if (result?.success === false) {
+      session.state = 'contended';
+      session.holder = result?.holder || '其他协作者';
+      updateReservationUI(session);
+      scheduleReservationRetry(session, 8000 + Math.random() * 2000);
+      return;
+    }
+
+    session.state = 'owned';
+    session.holder = null;
+  } catch (error) {
+    if (!session.released) {
+      session.state = error?.isNetworkError ? 'degraded' : session.state;
+      updateReservationUI(session);
+    }
+  } finally {
+    session.renewInFlight = false;
+
+    if (!session.released && session.state === 'owned') {
+      session.renewTimer = setTimeout(
+        () => renewSoftReservation(session),
+        RESERVATION_RENEW_MS
+      );
+    }
+  }
+}
+
+function releaseSoftReservation(session) {
+  if (!session || session.released) return;
+  session.released = true;
+  session.state = 'released';
+  clearTimeout(session.renewTimer);
+  clearTimeout(session.degradeTimer);
+  clearTimeout(session.retryTimer);
+
+  const key = reservationKey(session.shotId, session.field);
+  const current = reservationSessions.get(key);
+  if (current?.id === session.id) {
+    reservationSessions.delete(key);
+  }
+  releaseReservationHttp(session.shotId, session.field);
+  updateReservationUI(session);
+}
+
+function releaseReservationHttp(shotId, field) {
+  api('/api/v1/edit-reservations', {
+    method: 'POST',
+    json: { shot_id: shotId, field, action: 'release' }
+  }).catch(() => {});
+  queuePresenceHeartbeat(true);
+}
+
+function acquireFieldReservation(shotId, field) {
+  if (!shotId || !field) return Promise.resolve(true);
+  createSoftReservationSession(shotId, field);
+  return Promise.resolve(true);
+}
+
+function releaseFieldReservation(shotId, field) {
+  if (!shotId || !field) return;
+  const key = reservationKey(shotId, field);
+  const session = reservationSessions.get(key);
+  if (session) session.release();
+  else releaseReservationHttp(shotId, field);
+}
+
+function noteNetworkSuccess() {
+  state.networkFailureCount = 0;
+  if (state.networkHealth !== 'online') {
+    state.networkHealth = 'online';
+    refreshSaveStatus();
+  }
+}
+
+function noteNetworkFailure() {
+  state.networkFailureCount = (state.networkFailureCount || 0) + 1;
+  const next = state.networkFailureCount >= 3 ? 'offline' : 'degraded';
+  if (next !== state.networkHealth) {
+    state.networkHealth = next;
+    refreshSaveStatus();
+  }
+}
+
+function setSaveStatus(text, tone = '', tooltip = '') {
+  const indicator = $('#saveProjectBtn');
+  if (!indicator) return;
+  indicator.textContent = text;
+  indicator.classList.toggle('dirty', tone === 'dirty');
+  indicator.classList.toggle('is-syncing', tone === 'syncing');
+  indicator.classList.toggle('is-error', tone === 'error');
+  if (tooltip) indicator.title = tooltip;
+}
+
+function refreshSaveStatus() {
+  if (state.saveConflict) {
+    setSaveStatus('! 存在冲突', 'error', '检测到协同修改冲突，请处理');
+    return;
+  }
+  if (state.saveRefreshInFlight || state.saveInFlight) {
+    setSaveStatus('↻ 同步中…', 'syncing', '正在同步到服务器');
+    return;
+  }
+  if (state.lastSaveError && state.dirty) {
+    setSaveStatus('! 同步失败 · 本地已保留', 'error', '服务器同步失败，修改已在本地保存，将自动重试');
+    return;
+  }
+  if (state.localDraftError && (hasDirtyActiveEditor() || state.dirty || pendingEditorDrafts.size > 0)) {
+    setSaveStatus('! 本地草稿存储失败', 'error', '浏览器本地存储写入失败，编辑内容仅保留在内存中');
+    return;
+  }
+  if (hasDirtyActiveEditor()) {
+    setSaveStatus('● 编辑中', 'dirty', '当前输入尚未提交到服务器');
+    return;
+  }
+  if (state.dirty) {
+    setSaveStatus('● 待同步', 'dirty', '修改已保存到本地，等待服务器同步');
+    return;
+  }
+  if (state.networkHealth === 'offline') {
+    setSaveStatus('○ 离线 · 本地修改已保留', 'error', '网络不可用，本地修改仍被保留');
+    return;
+  }
+  if (state.networkHealth === 'degraded') {
+    setSaveStatus('△ 网络较慢', 'dirty', '网络连接延迟较高');
+    return;
+  }
+  setSaveStatus('● 已同步', '', '本地内容与服务器已同步');
+}
+
+/**
  * 富文本字段编辑。传入 host 时走原位编辑（选区浮动工具条 / 右键菜单），
  * 不再强制弹出大编辑窗口；没有宿主元素的场景才退回弹窗。
  */
 async function openRichShotEditor(shot, field, host, options = {}) {
-  // 重入保护：同一元素上叠加多个编辑会话会让选区互相打断、内容互相覆盖。
-  // 放在统一入口而不是每个调用点，才不会漏掉新增入口（检视器 dblclick + Enter 连击就会触发）。
   if (host && (host.classList.contains('is-rich-editing') || host.getAttribute('contenteditable') === 'true')) return;
   if (!host && document.querySelector('.rich-editor-dialog[open]')) return;
-  const projectId = state.bundle?.project?.id, shotId = shot.id;
-  const original = String(shot[field] || ''), marks = JSON.stringify(shot.rich_text_json?.[field] || []);
-  const runs = shot.rich_text_json?.[field];
+
+  const projectId = state.bundle?.project?.id;
+  if (!projectId || !shot?.id) return;
+  const shotId = shot.id;
+
+  const originalText = String(shot[field] || '');
+  const originalRuns = structuredClone(shot.rich_text_json?.[field] || []);
+  const originalMarks = JSON.stringify(originalRuns);
   const label = tableColumnLabel(field);
-  const result = host
-    ? await FrameForgeRichText.inline({element: host, text: original, runs, title: label, onTab: options.onTab, clientX: options.clientX, clientY: options.clientY, source: options.source})
-    : await FrameForgeRichText.edit({title: `SHOT ${shot.number} · ${label}`, text: original, runs});
-  if (!result || state.bundle?.project?.id !== projectId) return;
-  const current = state.bundle.shots.find(item=>item.id===shotId);
-  if (!current || String(current[field]||'') !== original || JSON.stringify(current.rich_text_json?.[field]||[]) !== marks) { toast('该字段已被更新，请重新打开编辑，避免覆盖他人的修改。',true); return; }
-  if (result.text===original && JSON.stringify(result.runs)===marks) return;
-  recordHistory();current[field]=result.text;current.rich_text_json={...(current.rich_text_json||{}),[field]:result.runs};markDirty();renderCurrentView();renderInspector();
+
+  const reservation = options.skipReservation ? null : createSoftReservationSession(shotId, field);
+
+  const editorId = nextEditorSessionId('rich');
+  let resolveDone;
+  const done = new Promise(resolve => { resolveDone = resolve; });
+
+  const session = {
+    id: editorId,
+    type: 'rich',
+    projectId,
+    shotId,
+    field,
+    composing: false,
+    commitInFlight: false,
+    closed: false,
+    isDirty() {
+      if (session.closed) return false;
+      const targetEl = host || document.querySelector('.rich-editor-dialog[open] .rich-editor-surface');
+      if (targetEl) {
+        if (globalThis.FrameForgeRichText?.getActiveSession?.()?.host === targetEl) {
+          const active = globalThis.FrameForgeRichText.getActiveSession();
+          if (typeof active?.isDirty === 'function') return active.isDirty();
+        }
+        const currentRuns = globalThis.FrameForgeRichText?.readElement?.(targetEl) || [];
+        const currentText = currentRuns.map(r => r.text).join('');
+        const normOriginalRuns = globalThis.FrameForgeRichText?.normalize?.(originalRuns, originalText) || [];
+        return currentText !== originalText || JSON.stringify(currentRuns) !== JSON.stringify(normOriginalRuns);
+      }
+      return false;
+    },
+    async waitForCompositionEnd() {
+      if (!session.composing && !globalThis.FrameForgeRichText?.isComposing?.()) return;
+      await waitUntil(
+        () => !session.composing && !globalThis.FrameForgeRichText?.isComposing?.(),
+        { timeout: 5000, errorMessage: '等待输入法完成超时' }
+      );
+    },
+    async commit() {
+      if (session.closed || session.commitInFlight) return done;
+      session.commitInFlight = true;
+      try {
+        await session.waitForCompositionEnd();
+        await globalThis.FrameForgeRichText?.flushActive?.();
+        return done;
+      } finally {
+        session.commitInFlight = false;
+      }
+    },
+    done
+  };
+
+  registerActiveEditor(session);
+
+  let result = null;
+  try {
+    result = host
+      ? await FrameForgeRichText.inline({
+          element: host,
+          text: originalText,
+          runs: originalRuns,
+          title: label,
+          onTab: options.onTab,
+          onChange: ({ text: liveText, runs: liveRuns }) => {
+            scheduleEditorDraft({
+              projectId,
+              shotId,
+              field,
+              text: liveText,
+              runs: liveRuns,
+              baseRevision: shot.base_revision || shot.revision
+            });
+            refreshSaveStatus();
+          },
+          clientX: options.clientX,
+          clientY: options.clientY,
+          source: options.source
+        })
+      : await FrameForgeRichText.edit({
+          title: `SHOT ${shot.number} · ${label}`,
+          text: originalText,
+          runs: originalRuns
+        });
+
+    if (!result) {
+      // User explicitly cancelled the rich text editor — clear any pending draft
+      clearEditorDraft(projectId, shotId, field);
+      return;
+    }
+    if (state.bundle?.project?.id !== projectId) return;
+
+    const current = state.bundle.shots.find(item => item.id === shotId);
+    if (!current) {
+      scheduleEditorDraft({
+        projectId,
+        shotId,
+        field,
+        text: result.text,
+        runs: result.runs,
+        baseRevision: shot.base_revision || shot.revision
+      });
+      toast('该镜头已被移除，修改已保留在本地草稿中', true);
+      return;
+    }
+
+    const currentText = String(current[field] || '');
+    const currentRuns = current.rich_text_json?.[field] || [];
+    if (currentText !== originalText || JSON.stringify(currentRuns) !== originalMarks) {
+      scheduleEditorDraft({
+        projectId,
+        shotId,
+        field,
+        text: result.text,
+        runs: result.runs,
+        baseRevision: shot.base_revision || shot.revision
+      });
+      toast('该字段在编辑期间已发生变化，本地文本已保留，请处理同步冲突', true);
+      return;
+    }
+
+    if (result.text === originalText && JSON.stringify(result.runs) === originalMarks) return;
+
+    recordHistory();
+    current[field] = result.text;
+    current.rich_text_json = {
+      ...(current.rich_text_json || {}),
+      [field]: result.runs
+    };
+    markDirty();
+    renderProjectHeader();
+    if (state.inspector.targetShotId === shotId) renderInspector();
+  } finally {
+    session.closed = true;
+    unregisterActiveEditor(session);
+    reservation?.release();
+    resolveDone?.();
+    refreshSaveStatus();
+  }
 }
 function customTableFields() {
   return (state.bundle?.custom_fields || []).filter(field => field && field.is_active !== 0);
 }
 
+function importedTableFields() {
+  const keys = new Set();
+  (state.bundle?.shots || []).forEach(shot => Object.keys(shot.import_columns || {}).forEach(key => keys.add(String(key))));
+  return [...keys].sort((a, b) => a.localeCompare(b, 'zh-CN', { numeric: true }));
+}
+
+function archivedColumnSet() {
+  return new Set(state.tablePrefs.archived || []);
+}
+
+function purgedColumnSet() {
+  // Local storage and saved views own presentation only. The API owns tombstones.
+  return new Set((state.bundle?.column_preferences || [])
+    .filter(item => [true, 1, '1'].includes(item.permanently_deleted))
+    .map(item => item.column_key));
+}
+function isColumnArchived(field) { return archivedColumnSet().has(field); }
+function isColumnPurged(field) { return purgedColumnSet().has(field); }
+
 function tableColumnCatalogFields() {
   const core = Object.keys(TABLE_COLUMNS).filter(field => field !== 'actions');
-  return [...core, ...customTableFields().map(field => `custom:${field.key}`), 'actions'];
+  const custom = customTableFields().map(field => `custom:${field.key}`);
+  const imported = importedTableFields().map(key => `import:${key}`);
+  return [...core, ...custom, ...imported, 'actions'].filter(field => !isColumnPurged(field));
 }
 
 function tableColumnFields() {
-  const removed = new Set(state.tablePrefs.removed || []);
-  return tableColumnCatalogFields().filter(field => !removed.has(field));
+  return tableColumnCatalogFields().filter(field => !isColumnArchived(field));
 }
 
 function currentColumnOrder() {
@@ -337,6 +1022,7 @@ function tableColumnDefinition(field) {
 function tableColumnLabel(field) {
   if (TABLE_COLUMN_LABELS[field]) return TABLE_COLUMN_LABELS[field];
   if (field.startsWith('custom:')) return customTableFields().find(item => `custom:${item.key}` === field)?.label || field.slice(7);
+  if (field.startsWith('import:')) return field.slice(7);
   return field;
 }
 
@@ -350,7 +1036,7 @@ function isColumnWrapped(field) {
 }
 
 function setColumnHidden(field, hidden) {
-  if ((state.tablePrefs.removed || []).includes(field)) return;
+  if (isColumnArchived(field) || isColumnPurged(field)) return;
   const next = new Set(state.tablePrefs.hidden || []);
   if (hidden) next.add(field); else next.delete(field);
   // The selection column and actions remain available so the table never
@@ -361,22 +1047,59 @@ function setColumnHidden(field, hidden) {
   saveTablePrefs();
 }
 
-function setColumnRemoved(field, removed) {
-  if (!field || ['select', 'actions'].includes(field)) return;
-  const next = new Set(state.tablePrefs.removed || []);
-  if (removed) {
+function setColumnArchived(field, archived = true) {
+  if (!field || ['select', 'actions'].includes(field) || isColumnPurged(field)) return;
+  const next = archivedColumnSet();
+  if (archived) {
     next.add(field);
     state.tablePrefs.hidden = (state.tablePrefs.hidden || []).filter(item => item !== field);
   } else next.delete(field);
-  state.tablePrefs.removed = [...next];
+  state.tablePrefs.archived = [...next];
   saveTablePrefs();
+}
+
+function archiveColumn(field, { confirm = true } = {}) {
+  const label = tableColumnLabel(field);
+  if (!field || ['select', 'actions'].includes(field) || isColumnPurged(field)) return false;
+  if (confirm && !window.confirm(`归档列“${label}”？归档后将从表格、侧栏、卡片和导出中移除；可在列管理的“归档”中恢复或永久删除。`)) return false;
+  setColumnArchived(field, true);
+  renderCurrentView();
+  toast(`已归档列“${label}”`);
+  return true;
+}
+
+async function deleteArchivedColumnPermanently(field, { confirm = true } = {}) {
+  return purgeArchivedColumns([field], confirm);
+}
+
+async function purgeArchivedColumns(fields, confirm = true) {
+  const projectId = state.bundle?.project?.id;
+  fields = [...new Set(fields)].filter(isColumnArchived);
+  if (!projectId || !fields.length) return false;
+  if (confirm && !await confirmAction('永久删除归档列', `永久删除当前项目的 ${fields.length} 列及其活动数据？此操作不能撤销。镜号、时码和时长的内部计算保留；历史快照及备份不在本次清理范围。`)) return false;
+  try {
+    if (!await flushProjectBeforeLeaving() || state.bundle?.project?.id !== projectId) return false;
+    await waitUntil(() => !columnPreferenceWrites.has(projectId), {timeout:15000,errorMessage:'归档尚未同步，请稍后重试'});
+    const result = await api(`/api/projects/${encodeURIComponent(projectId)}/columns/purge`, {method:'DELETE',json:{fields}});
+    if (state.bundle?.project?.id !== projectId) return true;
+    state.bundle = adoptServerBundle(result.bundle);
+    applyColumnLifecycleProjection();
+    state.undoStack = []; state.redoStack = [];
+    localStorage.setItem(tablePrefsKey(), JSON.stringify(tablePresentationPrefs(state.tablePrefs)));
+    renderProjectHeader(); renderCurrentView(); renderInspector();
+    toast(`已永久删除 ${result.deleted.length} 列`);
+    return true;
+  } catch (err) {
+    toast(`永久删除列失败：${err.message}`, true);
+    return false;
+  }
 }
 
 function customFieldValue(shot, key) {
   return shot?.custom_fields?.[key] ?? '';
 }
 
-function tablePrefsKey(view = state.currentView) {
+function tablePrefsKey(view = state.view.current) {
   return `frameforge-table-prefs:${state.bundle?.project?.id || 'none'}:${view}`;
 }
 
@@ -385,15 +1108,16 @@ function columnPreferencePayload() {
   if (!state.bundle) return [];
   const catalog = tableColumnCatalogFields();
   const order = currentColumnOrder();
-  const removed = new Set(state.tablePrefs.removed || []);
+  const archived = archivedColumnSet();
   const hidden = new Set(state.tablePrefs.hidden || []);
-  return catalog.map((columnKey, index) => ({
+  const payload = catalog.map((columnKey, index) => ({
     column_key: columnKey,
-    state: removed.has(columnKey) ? 'removed' : hidden.has(columnKey) ? 'hidden' : 'visible',
+    state: archived.has(columnKey) ? 'removed' : hidden.has(columnKey) ? 'hidden' : 'visible',
     position: Math.max(0, order.indexOf(columnKey) >= 0 ? order.indexOf(columnKey) : index),
     width_px: state.tablePrefs.widths?.[columnKey] ?? null,
     wrap_text: isColumnWrapped(columnKey)
   }));
+  return payload;
 }
 
 function queueColumnPreferenceSync() {
@@ -403,7 +1127,6 @@ function queueColumnPreferenceSync() {
   clearTimeout(pending.timer);
   pending.preferences = columnPreferencePayload();
   columnPreferenceWrites.set(projectId, pending);
-  state.bundle.column_preferences = pending.preferences;
   pending.timer = window.setTimeout(async () => {
     if (pending.running) return;
     pending.running = true;
@@ -417,6 +1140,11 @@ function queueColumnPreferenceSync() {
         });
         if (pending.preferences === sent && state.bundle?.project?.id === projectId) {
           state.bundle.column_preferences = preferences;
+          const before = JSON.stringify([state.tablePrefs.archived, state.tablePrefs.purged]);
+          applyColumnLifecycleProjection(preferences);
+          if (before !== JSON.stringify([state.tablePrefs.archived, state.tablePrefs.purged])) {
+            renderCurrentView(); renderInspector();
+          }
         }
       } while (pending.preferences !== sent);
       clearTimeout(pending.timer);
@@ -429,37 +1157,54 @@ function queueColumnPreferenceSync() {
   }, 320);
 }
 
+function tablePresentationPrefs(saved = {}) {
+  return {
+    widths: saved.widths || {}, hidden: Array.isArray(saved.hidden) ? saved.hidden : [],
+    order: Array.isArray(saved.order) ? saved.order : [], sort: saved.sort || null,
+    wrap: saved.wrap || {}, rowHeight: saved.rowHeight || 'standard'
+  };
+}
+
+function applyColumnLifecycleProjection(preferences) {
+  const remote = preferences || columnPreferenceWrites.get(state.bundle?.project?.id)?.preferences
+    || state.bundle?.column_preferences || [];
+  const purged = purgedColumnSet();
+  state.tablePrefs.archived = remote.filter(item => item.state === 'removed' && !purged.has(item.column_key))
+    .map(item => item.column_key);
+  state.tablePrefs.purged = [...purged];
+  state.tablePrefs.hidden = (state.tablePrefs.hidden || []).filter(key => !purged.has(key));
+  state.tablePrefs.order = (state.tablePrefs.order || []).filter(key => !purged.has(key));
+  for (const key of purged) {
+    delete state.tablePrefs.widths[key]; delete state.tablePrefs.wrap[key];
+  }
+  if (purged.has(state.tablePrefs.sort?.field)) state.tablePrefs.sort = null;
+}
+
 function loadTablePrefs() {
   try {
-    const saved = JSON.parse(localStorage.getItem(tablePrefsKey()) || '{}');
-    state.tablePrefs = { widths: saved.widths || {}, hidden: Array.isArray(saved.hidden) ? saved.hidden : [], removed: Array.isArray(saved.removed) ? saved.removed : [], order: Array.isArray(saved.order) ? saved.order : [], sort: saved.sort || null, wrap: saved.wrap || {}, rowHeight: saved.rowHeight || 'standard' };
-  } catch (_) { state.tablePrefs = { widths: {}, hidden: [], removed: [], order: [], sort: null, wrap: {}, rowHeight: 'standard' }; }
+    state.tablePrefs = tablePresentationPrefs(JSON.parse(localStorage.getItem(tablePrefsKey()) || '{}'));
+  } catch (_) { state.tablePrefs = tablePresentationPrefs(); }
   const remote = columnPreferenceWrites.get(state.bundle?.project?.id)?.preferences
-    || (Array.isArray(state.bundle?.column_preferences) ? state.bundle.column_preferences : []);
-  if (remote.length) {
-    const remoteByKey = new Map(remote.map(item => [item.column_key, item]));
-    const remoteOrder = remote.slice().sort((a, b) => Number(a.position || 0) - Number(b.position || 0)).map(item => item.column_key);
-    state.tablePrefs.order = [...remoteOrder, ...(state.tablePrefs.order || []).filter(key => !remoteOrder.includes(key))];
-    const hidden = new Set(state.tablePrefs.hidden || []);
-    const removed = new Set(state.tablePrefs.removed || []);
-    remoteByKey.forEach((item, key) => {
-      hidden.delete(key); removed.delete(key);
-      if (item.state === 'hidden') hidden.add(key);
-      if (item.state === 'removed') removed.add(key);
-      if (item.width_px != null) state.tablePrefs.widths[key] = Number(item.width_px);
-      else delete state.tablePrefs.widths[key];
-      state.tablePrefs.wrap[key] = Boolean(item.wrap_text);
-    });
-    state.tablePrefs.hidden = [...hidden];
-    state.tablePrefs.removed = [...removed];
-  }
+    || state.bundle?.column_preferences || [];
+  const remoteOrder = remote.slice().sort((a, b) => Number(a.position || 0) - Number(b.position || 0)).map(item => item.column_key);
+  state.tablePrefs.order = [...remoteOrder, ...state.tablePrefs.order.filter(key => !remoteOrder.includes(key))];
+  const hidden = new Set(state.tablePrefs.hidden);
+  remote.forEach(item => {
+    hidden.delete(item.column_key);
+    if (item.state === 'hidden') hidden.add(item.column_key);
+    if (item.width_px != null) state.tablePrefs.widths[item.column_key] = Number(item.width_px);
+    else delete state.tablePrefs.widths[item.column_key];
+    state.tablePrefs.wrap[item.column_key] = Boolean(item.wrap_text);
+  });
+  state.tablePrefs.hidden = [...hidden];
+  applyColumnLifecycleProjection(remote);
   const select = $('#rowHeightSelect');
   if (select) select.value = state.tablePrefs.rowHeight;
 }
 
-function saveTablePrefs(view = state.currentView) {
-  localStorage.setItem(tablePrefsKey(view), JSON.stringify(state.tablePrefs));
-  if (view === VIEW.TABLE) queueColumnPreferenceSync();
+function saveTablePrefs(view = state.view.current) {
+  localStorage.setItem(tablePrefsKey(view), JSON.stringify(tablePresentationPrefs(state.tablePrefs)));
+  queueColumnPreferenceSync();
 }
 
 function autoFitTableColumns(table = $('#mainShotTable')) {
@@ -494,6 +1239,7 @@ function autoFitTableColumns(table = $('#mainShotTable')) {
 
 function shotColumnValue(shot, field) {
   if (field.startsWith('custom:')) return customFieldValue(shot, field.slice(7));
+  if (field.startsWith('import:')) return shot?.import_columns?.[field.slice(7)] ?? '';
   if (field === 'methods') return methodValues(shot).map(methodLabel).join(' ');
   if (field === 'thumb' || field === 'actions' || field === 'select') return '';
   return shot?.[field] ?? '';
@@ -529,11 +1275,14 @@ function columnCalculation(field) {
 
 function openColumnMenu(field, anchor = null) {
   const popover = $('#columnSettingsPopover');
+  tableContextMenu.close();
   if (popover) popover.onclick = null;
   if (!popover || ['select', 'actions'].includes(field)) return;
   const label = tableColumnLabel(field);
   const sort = state.tablePrefs.sort?.field === field ? state.tablePrefs.sort.direction : '';
-  popover.innerHTML = `<div class="column-settings-head"><div><b>${escapeHtml(label)}</b><small>当前视图列操作</small></div><button type="button" class="btn-ghost-icon" id="closeColumnSettings" aria-label="关闭列菜单">×</button></div><div class="column-menu-actions"><button type="button" class="column-menu-action" data-column-sort="asc"><span>↑</span><span>升序排序</span>${sort === 'asc' ? '<b>✓</b>' : ''}</button><button type="button" class="column-menu-action" data-column-sort="desc"><span>↓</span><span>降序排序</span>${sort === 'desc' ? '<b>✓</b>' : ''}</button><button type="button" class="column-menu-action" data-column-autofit><span>↔</span><span>按内容自动列宽</span></button><button type="button" class="column-menu-action" data-column-wrap><span>↕</span><span>${isColumnWrapped(field) ? '关闭文本换行' : '开启文本换行'}</span>${isColumnWrapped(field) ? '<b>✓</b>' : ''}</button><button type="button" class="column-menu-action" data-column-hide><span>◌</span><span>隐藏此列（可恢复）</span></button><button type="button" class="column-menu-action" data-column-remove><span>−</span><span>从当前列表删除（可添加）</span></button><button type="button" class="column-menu-action" data-column-clear-sort><span>×</span><span>清除排序</span></button></div><div class="column-calculation"><b>计算</b><span>${escapeHtml(columnCalculation(field))}</span></div><button type="button" class="btn btn-ghost column-menu-back" id="backToColumnSettings">返回全部列设置</button>`;
+  const removeAction = 'column-archive';
+  const removeLabel = '归档此列';
+  popover.innerHTML = `<div class="column-settings-head"><div><b>${escapeHtml(label)}</b><small>当前视图列操作</small></div><button type="button" class="btn-ghost-icon" id="closeColumnSettings" aria-label="关闭列菜单">×</button></div><div class="column-menu-actions"><button type="button" class="column-menu-action" data-column-sort="asc"><span>↑</span><span>升序排序</span>${sort === 'asc' ? '<b>✓</b>' : ''}</button><button type="button" class="column-menu-action" data-column-sort="desc"><span>↓</span><span>降序排序</span>${sort === 'desc' ? '<b>✓</b>' : ''}</button><button type="button" class="column-menu-action" data-column-autofit><span>↔</span><span>按内容自动列宽</span></button><button type="button" class="column-menu-action" data-column-wrap><span>↕</span><span>${isColumnWrapped(field) ? '关闭文本换行' : '开启文本换行'}</span>${isColumnWrapped(field) ? '<b>✓</b>' : ''}</button><button type="button" class="column-menu-action" data-column-hide><span>◌</span><span>隐藏此列（可恢复）</span></button><button type="button" class="column-menu-action" data-${removeAction}><span>−</span><span>${removeLabel}</span></button><button type="button" class="column-menu-action" data-column-clear-sort><span>×</span><span>清除排序</span></button></div><div class="column-calculation"><b>计算</b><span>${escapeHtml(columnCalculation(field))}</span></div>`;
   popover.classList.remove('hidden');
   if (anchor) requestAnimationFrame(() => positionPopoverNear(anchor, popover));
   $('#closeColumnSettings')?.addEventListener('click', () => popover.classList.add('hidden'));
@@ -543,10 +1292,9 @@ function openColumnMenu(field, anchor = null) {
   }));
   $('[data-column-clear-sort]', popover)?.addEventListener('click', () => { state.tablePrefs.sort = null; saveTablePrefs(); renderTableView(); renderColumnSettingsPopover(); });
   $('[data-column-hide]', popover)?.addEventListener('click', () => { setColumnHidden(field, true); popover.classList.add('hidden'); renderTableView(); });
-  $('[data-column-remove]', popover)?.addEventListener('click', () => { setColumnRemoved(field, true); popover.classList.add('hidden'); renderTableView(); toast(`已删除列“${label}”，可在列设置中重新添加`); });
+  $('[data-column-archive]', popover)?.addEventListener('click', () => { archiveColumn(field); popover.classList.add('hidden'); });
   $('[data-column-autofit]', popover)?.addEventListener('click', () => { popover.classList.add('hidden'); autoFitTableColumns(); });
   $('[data-column-wrap]', popover)?.addEventListener('click', () => { state.tablePrefs.wrap[field] = !isColumnWrapped(field); saveTablePrefs(); renderTableView(); openColumnMenu(field); });
-  $('#backToColumnSettings')?.addEventListener('click', () => renderColumnSettingsPopover());
 }
 
 function reorderTableColumns(table, order) {
@@ -566,54 +1314,151 @@ function reorderTableColumns(table, order) {
 }
 
 function columnManagerEntries(query = '', scope = 'visible') {
-  const removed = new Set(state.tablePrefs.removed || []);
+  const archived = archivedColumnSet();
   const needle = query.trim().toLocaleLowerCase();
   return tableColumnCatalogFields().map(field => ({
     field, label: tableColumnLabel(field),
     fixed: ['select', 'actions'].includes(field),
-    status: removed.has(field) ? 'removed' : isColumnHidden(field) ? 'hidden' : 'visible'
+    status: archived.has(field) ? 'archived' : isColumnHidden(field) ? 'hidden' : 'visible'
   })).filter(entry => (scope === 'all' || entry.status === scope) &&
     (!needle || entry.label.toLocaleLowerCase().includes(needle) || entry.field.toLocaleLowerCase().includes(needle)));
 }
 
+function setColumnManagerExpanded(open) {
+  const value = String(Boolean(open));
+  $('#columnSettingsBtn')?.setAttribute('aria-expanded', value);
+  document.querySelectorAll('[data-frameforge-column-manager-trigger="canonical"]').forEach(trigger => {
+    trigger.setAttribute('aria-expanded', value);
+  });
+}
+
 function closeColumnSettings(restoreFocus = false) {
   $('#columnSettingsPopover')?.classList.add('hidden');
-  $('#columnSettingsBtn')?.setAttribute('aria-expanded', 'false');
-  if (restoreFocus) $('#columnSettingsBtn')?.focus();
+  setColumnManagerExpanded(false);
+  if (restoreFocus) {
+    const visibleTrigger = Array.from(document.querySelectorAll('[data-frameforge-column-manager-trigger="canonical"]'))
+      .find(trigger => trigger.getClientRects().length);
+    (visibleTrigger || $('#columnSettingsBtn'))?.focus();
+  }
 }
+
+$('#columnSettingsPopover')?.addEventListener('keydown', event => {
+  if (event.key !== 'Escape') return;
+  event.preventDefault();
+  event.stopPropagation();
+  closeColumnSettings(true);
+}, true);
+
+function toggleCanonicalColumnManager(anchor = null) {
+  const popover = $('#columnSettingsPopover');
+  if (!popover || !state.bundle) return;
+  tableContextMenu.close();
+  $('#filterPopover')?.classList.add('hidden');
+  $('#filterPopoverBtn')?.setAttribute('aria-expanded', 'false');
+  setToolbarTools(false);
+
+  if (!popover.classList.contains('hidden')) {
+    closeColumnSettings(false);
+    return;
+  }
+
+  renderColumnSettingsPopover();
+  document.body.append(popover);
+  Object.assign(popover.style, {position:'fixed',right:'auto',maxWidth:'calc(100vw - 16px)',maxHeight:'calc(100dvh - 24px)',overflowY:'auto'});
+  popover.classList.remove('hidden');
+  setColumnManagerExpanded(true);
+
+  const target = anchor && anchor.getClientRects?.().length
+    ? anchor
+    : Array.from(document.querySelectorAll('[data-frameforge-column-manager-trigger="canonical"]'))
+      .find(trigger => trigger.getClientRects().length)
+      || $('#columnSettingsBtn');
+
+  requestAnimationFrame(() => {
+    if (popover.classList.contains('hidden')) return;
+    if (target?.getClientRects?.().length) positionPopoverNear(target, popover);
+    $('#columnManagerSearch')?.focus();
+  });
+}
+
+function legacyWorkspaceColumnTriggerFrom(target) {
+  const button = target?.closest?.('#workspaceToolbarV73 button');
+  if (!button || button.matches('[data-frameforge-column-manager-trigger="canonical"]')) return null;
+  const label = String(button.textContent || '').replace(/\s+/g, '').trim();
+  return label === '列' ? button : null;
+}
+
+function suppressLegacyWorkspaceColumnManager() {
+  let removed = false;
+  document.querySelectorAll('.ff73-columns').forEach(node => {
+    node.remove();
+    removed = true;
+  });
+  document.querySelectorAll('#workspaceToolbarV73 button').forEach(button => {
+    if (button.matches('[data-frameforge-column-manager-trigger="canonical"]')) return;
+    const label = String(button.textContent || '').replace(/\s+/g, '').trim();
+    if (label !== '列') return;
+    button.setAttribute('aria-expanded', 'false');
+    button.removeAttribute('data-state');
+  });
+  return removed;
+}
+
+// Compatibility firewall for an older cached workspace-v73.js. The legacy
+// React/Radix implementation used its own "显示 / 隐藏 / 已删除" popup. Capture
+// that toolbar click before React sees it and always open the canonical
+// "当前列 / 已隐藏 / 归档" manager owned by app.js instead.
+document.addEventListener('click', event => {
+  const legacyTrigger = legacyWorkspaceColumnTriggerFrom(event.target);
+  if (!legacyTrigger) return;
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation?.();
+  suppressLegacyWorkspaceColumnManager();
+  toggleCanonicalColumnManager(legacyTrigger);
+}, true);
+
+// If a stale bundle manages to portal the old manager by another path, remove
+// it immediately. This is deliberately limited to the old .ff73-columns portal.
+const legacyColumnManagerObserver = new MutationObserver(() => {
+  suppressLegacyWorkspaceColumnManager();
+});
+legacyColumnManagerObserver.observe(document.documentElement, { childList: true, subtree: true });
 
 function renderColumnSettingsPopover() {
   const popover = $('#columnSettingsPopover');
   if (!popover || !state.bundle) return;
+  tableContextMenu.close();
   const projectId = String(state.bundle.project.id);
   if (popover.dataset.projectId !== projectId) {
     popover.dataset.projectId = projectId;
     popover.dataset.scope = 'visible';
     popover.dataset.query = '';
   }
-  const scope = popover.dataset.scope || 'visible';
+  const scope = ['visible', 'hidden', 'archived'].includes(popover.dataset.scope) ? popover.dataset.scope : 'visible';
   const query = popover.dataset.query || '';
   const scrollTop = popover.querySelector('.column-settings-list')?.scrollTop || 0;
   const active = document.activeElement;
   const focusField = popover.contains(active) ? active?.dataset?.columnField : null;
   const focusScope = popover.contains(active) ? active?.dataset?.columnScope : null;
   const focusId = popover.contains(active) ? active?.id : null;
-  const counts = { visible: 0, hidden: 0, removed: 0 };
+  const counts = { visible: 0, hidden: 0, archived: 0 };
   columnManagerEntries('', 'all').forEach(entry => counts[entry.status]++);
   popover.innerHTML = `<div class="column-settings-head"><b>列管理</b><button type="button" class="btn-ghost-icon" id="closeColumnSettings" aria-label="关闭列管理">×</button></div>
     <input type="search" id="columnManagerSearch" class="column-manager-search" aria-label="搜索列名称" placeholder="搜索列名称" value="${escapeHtml(query)}">
-    <div class="column-manager-scopes" role="group" aria-label="列状态">${[['visible', '当前列'], ['hidden', '已隐藏'], ['removed', '已删除']].map(([value, label]) => `<button type="button" data-column-scope="${value}" aria-pressed="${scope === value}">${label}<span>${counts[value]}</span></button>`).join('')}</div>
+    <div class="column-manager-scopes" role="group" aria-label="列状态">${[['visible', '当前列'], ['hidden', '已隐藏'], ['archived', '归档']].map(([value, label]) => `<button type="button" data-column-scope="${value}" aria-pressed="${scope === value}">${label}<span>${counts[value]}</span></button>`).join('')}</div>
     <div class="column-settings-list"></div><p id="columnManagerHint" class="column-manager-hint"></p>
+    ${scope === 'archived' ? '<div class="column-settings-actions"><button type="button" class="btn btn-ghost" data-column-bulk="select">全选</button><button type="button" class="btn btn-danger" data-column-bulk="selected">删除所选</button><button type="button" class="btn btn-danger" data-column-bulk="all">清空归档</button></div>' : ''}
     <div class="column-settings-actions"><button type="button" class="btn btn-secondary" id="columnManagerAdd">新增自定义列</button><button type="button" class="btn btn-ghost" id="autoFitColumnsBtn">自动列宽</button><button type="button" class="btn btn-ghost" id="resetColumnPrefsBtn">重置列宽</button></div>`;
   const renderList = () => {
     const currentScope = popover.dataset.scope || 'visible';
     const entries = columnManagerEntries(popover.dataset.query || '', currentScope);
-    const empty = (popover.dataset.query || '').trim() ? '没有匹配的列，请换个名称搜索。' : currentScope === 'hidden' ? '没有隐藏列。' : currentScope === 'removed' ? '没有已删除的列。' : '当前没有显示列。';
+    const empty = (popover.dataset.query || '').trim() ? '没有匹配的列，请换个名称搜索。' : currentScope === 'hidden' ? '没有隐藏列。' : currentScope === 'archived' ? '没有归档列。' : '当前没有显示列。';
     popover.querySelector('.column-settings-list').innerHTML = entries.length ? entries.map(entry => `<div class="column-settings-item ${entry.fixed ? 'is-fixed' : ''}">
-      <span class="column-setting-label">${escapeHtml(entry.label)}</span>
-      ${entry.fixed ? '<small>固定操作列</small>' : entry.status === 'visible' ? `<button type="button" class="btn btn-ghost btn-small" data-column-action="hide" data-column-field="${escapeHtml(entry.field)}">隐藏</button><button type="button" class="btn btn-ghost btn-small column-remove-button" data-column-action="remove" data-column-field="${escapeHtml(entry.field)}" aria-label="删除列 ${escapeHtml(entry.label)}">删除</button>` : `<button type="button" class="btn btn-secondary btn-small" data-column-action="${entry.status === 'hidden' ? 'show' : 'restore'}" data-column-field="${escapeHtml(entry.field)}">${entry.status === 'hidden' ? '恢复显示' : '重新添加'}</button>`}
+      ${entry.status === 'archived' ? `<input type="checkbox" data-column-selected="${escapeHtml(entry.field)}" aria-label="选择 ${escapeHtml(entry.label)}">` : ''}<span class="column-setting-label">${escapeHtml(entry.label)}</span>
+      ${entry.fixed ? '<small>固定操作列</small>' : entry.status === 'visible' ? `<button type="button" class="btn btn-ghost btn-small" data-column-action="hide" data-column-field="${escapeHtml(entry.field)}">隐藏</button><button type="button" class="btn btn-ghost btn-small column-remove-button" data-column-action="archive" data-column-field="${escapeHtml(entry.field)}" aria-label="归档列 ${escapeHtml(entry.label)}">归档</button>` : entry.status === 'hidden' ? `<button type="button" class="btn btn-secondary btn-small" data-column-action="show" data-column-field="${escapeHtml(entry.field)}">恢复显示</button>` : `<button type="button" class="btn btn-secondary btn-small" data-column-action="restore-archive" data-column-field="${escapeHtml(entry.field)}">恢复归档</button><button type="button" class="btn btn-danger btn-small" data-column-action="purge" data-column-field="${escapeHtml(entry.field)}">永久删除</button>`}
       </div>`).join('') : `<div class="empty-state" role="status">${empty}</div>`;
-    $('#columnManagerHint').textContent = currentScope === 'removed' ? '重新添加后恢复到列表，已有单元格数据保留。' : currentScope === 'hidden' ? '隐藏只影响显示，可随时恢复。' : '隐藏与删除分开管理，不会清除已有单元格数据。';
+    $('#columnManagerHint').textContent = currentScope === 'archived' ? '归档列已从所有视图移除；可恢复归档，永久删除则不能撤销。' : currentScope === 'hidden' ? '隐藏只影响显示，可随时恢复。' : '归档会移出所有视图，可在归档区恢复或永久删除。';
   };
   renderList();
   popover.querySelector('.column-settings-list').scrollTop = scrollTop;
@@ -621,10 +1466,18 @@ function renderColumnSettingsPopover() {
     popover.dataset.query = event.target.value;
     renderList();
   });
-  popover.onclick = event => {
+  popover.onclick = async event => {
     // A rebuild detaches the clicked node. Do not let the document's outside
     // click handler mistake that detached target for a click outside this panel.
     event.stopPropagation();
+    const bulk = event.target.closest('[data-column-bulk]');
+    if (bulk) {
+      if(bulk.dataset.columnBulk === 'select') { popover.querySelectorAll('[data-column-selected]').forEach(input=>{input.checked=true;}); return; }
+      const fields = bulk.dataset.columnBulk === 'all' ? columnManagerEntries('', 'archived').map(e=>e.field) : Array.from(popover.querySelectorAll('[data-column-selected]:checked')).map(e=>e.dataset.columnSelected);
+      bulk.disabled=true;
+      await purgeArchivedColumns(fields);
+      renderColumnSettingsPopover(); return;
+    }
     const scopeButton = event.target.closest('[data-column-scope]');
     if (scopeButton) {
       popover.dataset.scope = scopeButton.dataset.columnScope;
@@ -636,8 +1489,23 @@ function renderColumnSettingsPopover() {
     const field = button.dataset.columnField;
     if (button.dataset.columnAction === 'hide') setColumnHidden(field, true);
     else if (button.dataset.columnAction === 'show') setColumnHidden(field, false);
-    else setColumnRemoved(field, button.dataset.columnAction === 'remove');
-    renderTableView();
+    else if (button.dataset.columnAction === 'restore-archive') {
+      setColumnArchived(field, false);
+      popover.dataset.scope = 'visible';
+      toast(`已恢复列“${tableColumnLabel(field)}”`);
+    }
+    else if (button.dataset.columnAction === 'archive') {
+      const archived = archiveColumn(field, { confirm: true });
+      if (archived) popover.dataset.scope = 'archived';
+      renderColumnSettingsPopover();
+      return;
+    } else if (button.dataset.columnAction === 'purge') {
+      await deleteArchivedColumnPermanently(field);
+      renderCurrentView();
+      renderColumnSettingsPopover();
+      return;
+    }
+    renderCurrentView();
     renderColumnSettingsPopover();
   };
   $('#closeColumnSettings').addEventListener('click', () => closeColumnSettings(true));
@@ -658,41 +1526,14 @@ function renderColumnSettingsPopover() {
   }
 }
 
-function closeTableContextMenu() {
-  const menu = $('#tableContextMenu');
-  if (!menu) return;
-  tableContextAnchor?.classList.remove('is-context-target');
-  tableContextAnchor = null;
-  menu.classList.add('hidden');
-  menu.innerHTML = '';
-  menu.removeAttribute('data-context-field');
-  menu.removeAttribute('data-context-shot');
-  menu.removeAttribute('data-context-x');
-  menu.removeAttribute('data-context-y');
-}
-
 function contextIcon(icon = 'description') {
   return `<svg class="g-icon" aria-hidden="true"><use href="#icon-${escapeHtml(icon)}"></use></svg>`;
-}
-
-function showTableContextMenu(items, x, y, metadata = {}) {
-  const menu = $('#tableContextMenu');
-  if (!menu) return;
-  menu.innerHTML = `${metadata.label ? `<div class="context-menu-heading"><span>${escapeHtml(metadata.kind || '快捷操作')}</span><b>${escapeHtml(metadata.label)}</b></div>` : ''}${items.map(item => item === 'separator' ? '<div class="context-menu-separator" role="separator"></div>' : `<button type="button" class="context-menu-item ${item.danger ? 'is-danger' : ''} ${item.checked ? 'is-checked' : ''}" role="menuitem" data-context-action="${escapeHtml(item.action)}" ${item.disabled ? 'disabled' : ''}><span class="context-menu-icon">${contextIcon(item.icon)}</span><span>${escapeHtml(item.label)}</span>${item.shortcut ? `<kbd>${escapeHtml(item.shortcut)}</kbd>` : ''}</button>`).join('')}`;
-  menu.dataset.contextField = metadata.field || '';
-  menu.dataset.contextShot = metadata.shotId || '';
-  menu.dataset.contextX = String(x);
-  menu.dataset.contextY = String(y);
-  menu.classList.remove('hidden');
-  positionPopoverAt(x, y, menu);
-  if (metadata.keyboard) menu.querySelector('[data-context-action]:not(:disabled)')?.focus();
 }
 
 function tableContextItems(target) {
   const header = target?.closest?.('th[data-column]');
   if (header && !['select', 'actions'].includes(header.dataset.column)) {
     const field = header.dataset.column;
-    const custom = field.startsWith('custom:') ? customTableFields().find(item => `custom:${item.key}` === field) : null;
     return {
       items: [
         { action: 'column-sort-asc', icon: 'arrow_upward', label: '升序排序' },
@@ -702,8 +1543,7 @@ function tableContextItems(target) {
         { action: 'column-autofit', icon: 'swap_horiz', label: '按内容自动列宽' },
         { action: 'column-wrap', icon: 'wrap_text', label: isColumnWrapped(field) ? '关闭文本换行' : '开启文本换行', checked: isColumnWrapped(field) },
         { action: 'column-hide', icon: 'visibility_off', label: '隐藏此列（可恢复）' },
-        { action: 'column-remove', icon: 'delete', label: '删除此列（可重新添加）', danger: true },
-        { action: 'column-settings', icon: 'visibility', label: '恢复隐藏列 / 重新添加列' },
+        { action: 'column-archive', icon: 'archive', label: '归档此列', danger: true },
         'separator',
         { action: 'column-add-custom', icon: 'add', label: '添加自定义列' }
       ],
@@ -715,7 +1555,7 @@ function tableContextItems(target) {
   const shotId = row.dataset.contextShotId || row.dataset.id;
   const shot = state.bundle?.shots?.find(item => item.id === shotId);
   if (!shot) return null;
-  const selectedIds = state.selectedShotIds.has(shotId) ? [...state.selectedShotIds] : [shotId];
+  const selectedIds = state.selection.selectedShotIds.has(shotId) ? [...state.selection.selectedShotIds] : [shotId];
   const selectedCount = selectedIds.filter(id => state.bundle.shots.some(item => item.id === id)).length;
   const isMulti = selectedCount > 1;
   return {
@@ -749,14 +1589,94 @@ function tableContextItems(target) {
   };
 }
 
-function openTableContextForTarget(target, x, y, keyboard = false) {
-  const config = tableContextItems(target);
-  if (!config) { closeTableContextMenu(); return false; }
-  tableContextAnchor = target.closest('th[data-column], [data-context-shot-id], tr[data-id]');
-  tableContextAnchor?.classList.add('is-context-target');
-  showTableContextMenu(config.items, x, y, { ...config.metadata, keyboard });
-  return true;
-}
+// The table menu owns its open state, anchor, focus return and dismissal.
+// Domain actions stay below; callers only request open or close.
+const tableContextMenu = (() => {
+  const menu = $('#tableContextMenu');
+  let anchor = null;
+  let returnFocus = null;
+  let temporaryTabIndex = false;
+  let openedWithKeyboard = false;
+  const isOpen = () => Boolean(menu && !menu.classList.contains('hidden'));
+
+  function close(restoreFocus = false) {
+    if (!menu) return;
+    const focusTarget = restoreFocus && returnFocus?.isConnected ? returnFocus : null;
+    const oldReturnFocus = returnFocus;
+    const removeTabIndex = temporaryTabIndex;
+    if (menu.contains(document.activeElement)) document.activeElement.blur?.();
+    anchor?.classList.remove('is-context-target');
+    anchor = null;
+    returnFocus = null;
+    temporaryTabIndex = false;
+    openedWithKeyboard = false;
+    menu.classList.add('hidden');
+    menu.replaceChildren();
+    ['contextField', 'contextShot', 'contextX', 'contextY'].forEach(key => { delete menu.dataset[key]; });
+    focusTarget?.focus?.({ preventScroll: true });
+    if (removeTabIndex && oldReturnFocus?.isConnected) oldReturnFocus.removeAttribute('tabindex');
+  }
+
+  function open(target, x, y, keyboard = false) {
+    const config = tableContextItems(target);
+    if (!config || !menu) { close(); return false; }
+    close();
+    closeColumnSettings();
+    anchor = target.closest('th[data-column], [data-context-shot-id], tr[data-id]');
+    anchor?.classList.add('is-context-target');
+    openedWithKeyboard = keyboard;
+    if (keyboard) {
+      const active = document.activeElement;
+      returnFocus = active instanceof HTMLElement && active !== document.body && target.contains(active) ? active : anchor;
+      if (returnFocus && !returnFocus.matches('button,input,select,textarea,a[href],[tabindex]')) {
+        returnFocus.setAttribute('tabindex', '-1');
+        temporaryTabIndex = true;
+      }
+    }
+    const metadata = config.metadata;
+    menu.innerHTML = `${metadata.label ? `<div class="context-menu-heading"><span>${escapeHtml(metadata.kind || '快捷操作')}</span><b>${escapeHtml(metadata.label)}</b></div>` : ''}${config.items.map(item => item === 'separator' ? '<div class="context-menu-separator" role="separator"></div>' : `<button type="button" class="context-menu-item ${item.danger ? 'is-danger' : ''} ${item.checked ? 'is-checked' : ''}" role="menuitem" data-context-action="${escapeHtml(item.action)}" ${item.disabled ? 'disabled' : ''}><span class="context-menu-icon">${contextIcon(item.icon)}</span><span>${escapeHtml(item.label)}</span>${item.shortcut ? `<kbd>${escapeHtml(item.shortcut)}</kbd>` : ''}</button>`).join('')}`;
+    menu.dataset.contextField = metadata.field || '';
+    menu.dataset.contextShot = metadata.shotId || '';
+    menu.dataset.contextX = String(x);
+    menu.dataset.contextY = String(y);
+    menu.classList.remove('hidden');
+    positionPopoverAt(x, y, menu);
+    if (keyboard) menu.querySelector('[data-context-action]:not(:disabled)')?.focus({ preventScroll: true });
+    return true;
+  }
+
+  function snapshot() {
+    return {
+      field: menu?.dataset.contextField || '',
+      shotId: menu?.dataset.contextShot || '',
+      x: Number(menu?.dataset.contextX),
+      y: Number(menu?.dataset.contextY),
+      anchor,
+      keyboard: openedWithKeyboard
+    };
+  }
+
+  menu?.addEventListener('keydown', event => {
+    const items = $$('[role="menuitem"]:not(:disabled)', menu);
+    const current = items.indexOf(document.activeElement);
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key) || !items.length) return;
+    event.preventDefault();
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : event.key === 'ArrowDown' ? (current + 1 + items.length) % items.length : (current - 1 + items.length) % items.length;
+    items[next]?.focus({ preventScroll: true });
+  });
+  window.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || !isOpen()) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    close(true);
+  });
+  document.addEventListener('click', event => {
+    if (isOpen() && !event.target.closest('#tableContextMenu')) close();
+  });
+  $('#tableScrollWrap')?.addEventListener('scroll', () => { if (isOpen()) close(); }, { passive: true });
+  window.addEventListener('resize', () => { if (isOpen()) close(); }, { passive: true });
+  return { open, close, snapshot, isOpen };
+})();
 
 function positionPopoverNear(anchor, popover, gap = 6) {
   if (!anchor || !popover) return;
@@ -786,17 +1706,11 @@ $('#tableContextMenu')?.addEventListener('click', async event => {
   event.preventDefault();
   event.stopPropagation();
   const action = button.dataset.contextAction;
-  const field = menu.dataset.contextField || '';
-  const shotId = menu.dataset.contextShot || '';
-  const contextX = Number(menu.dataset.contextX);
-  const contextY = Number(menu.dataset.contextY);
-  const actionAnchor = tableContextAnchor;
-  closeTableContextMenu();
+  const { field, shotId, x: contextX, y: contextY, anchor: actionAnchor, keyboard } = tableContextMenu.snapshot();
+  tableContextMenu.close(keyboard);
   if (action.startsWith('column-')) {
-    if (action === 'column-remove') {
-      setColumnRemoved(field, true);
-      renderTableView();
-      toast(`已删除列“${tableColumnLabel(field)}”，可从列管理重新添加`);
+    if (action === 'column-archive') {
+      archiveColumn(field);
     } else if (action === 'column-sort-asc' || action === 'column-sort-desc') {
       state.tablePrefs.sort = { field, direction: action.endsWith('asc') ? 'asc' : 'desc' };
       saveTablePrefs();
@@ -812,26 +1726,8 @@ $('#tableContextMenu')?.addEventListener('click', async event => {
       setColumnHidden(field, true);
       renderTableView();
       toast(`已隐藏列：${tableColumnLabel(field)}`);
-    } else if (action === 'column-delete-custom') {
-      const custom = customTableFields().find(item => `custom:${item.key}` === field);
-      if (!custom || !await confirmAction('删除自定义列', `确定删除“${custom.label}”吗？已有内容会保留在历史数据中，但不再显示。`)) return;
-      const previousFields = [...(state.bundle.custom_fields || [])];
-      state.bundle.custom_fields = previousFields.filter(item => item.id !== custom.id);
-      state.tablePrefs.hidden = (state.tablePrefs.hidden || []).filter(item => item !== field);
-      state.tablePrefs.order = (state.tablePrefs.order || []).filter(item => item !== field);
-      delete state.tablePrefs.widths[field];
-      delete state.tablePrefs.wrap[field];
-      saveTablePrefs();
-      renderTableView();
-      toast(`已删除列“${custom.label}”，正在同步`);
-      try {
-        await api(`/api/projects/${state.bundle.project.id}/custom-fields/${custom.id}`, { method: 'DELETE' });
-        toast(`自定义列“${custom.label}”已删除`);
-      } catch (err) {
-        state.bundle.custom_fields = previousFields;
-        renderTableView();
-        toast(err.message, true);
-      }
+    } else if (action === 'column-remove' || action === 'column-delete-custom') {
+      archiveColumn(field);
     } else if (action === 'column-clear-sort') {
       if (state.tablePrefs.sort?.field === field) state.tablePrefs.sort = null;
       saveTablePrefs();
@@ -846,19 +1742,19 @@ $('#tableContextMenu')?.addEventListener('click', async event => {
       renderColumnSettingsPopover();
       const popover = $('#columnSettingsPopover');
       popover?.classList.remove('hidden');
-      $('#columnSettingsBtn')?.setAttribute('aria-expanded', 'true');
+      setColumnManagerExpanded(true);
       if (popover && Number.isFinite(contextX) && Number.isFinite(contextY)) {
         positionPopoverAt(contextX, contextY, popover);
       }
     }
     return;
   }
-  const selectedForContext = state.selectedShotIds.has(shotId)
-    ? [...state.selectedShotIds].filter(id => state.bundle.shots.some(item => item.id === id))
+  const selectedForContext = state.selection.selectedShotIds.has(shotId)
+    ? [...state.selection.selectedShotIds].filter(id => state.bundle.shots.some(item => item.id === id))
     : [shotId];
-  if (selectedForContext.length && (!state.selectedShotIds.has(shotId) || action === 'row-select')) {
-    state.selectedShotIds = new Set(selectedForContext);
-    state.selectionAnchorShotId = shotId;
+  if (selectedForContext.length && (!state.selection.selectedShotIds.has(shotId) || action === 'row-select')) {
+    state.selection.selectedShotIds = new Set(selectedForContext);
+    state.selection.anchorShotId = shotId;
   }
   const shot = state.bundle.shots.find(item => item.id === shotId);
   if (!shot) return;
@@ -878,6 +1774,7 @@ $('#tableContextMenu')?.addEventListener('click', async event => {
       title: `${shot.title || `镜头 ${shot.number}`} 副本`,
       description: shot.description || '',
       voiceover: shot.voiceover || '',
+      dialogue: shot.dialogue || '',
       duration_frames: shot.duration_frames,
       duration_seconds: shot.duration_seconds,
       primary_method: shot.primary_method,
@@ -895,48 +1792,31 @@ $('#tableContextMenu')?.addEventListener('click', async event => {
   } else if (action === 'row-cut') {
     copySelectedShots('cut');
   } else if (action === 'row-bulk-clear') {
-    state.selectedShotIds.clear();
+    state.selection.selectedShotIds.clear();
     syncShotSelectionClasses();
     renderBulkActionBar();
   } else if (action === 'row-bulk-delete') {
     await deleteSelectedShots();
   } else if (action === 'row-paste') {
-    selectShot(shotId, { openInspector: false });
+    selectShot(shotId);
     await pasteShotClipboard();
   } else if (action === 'row-delete') {
     deleteShotById(shotId);
   }
 });
 
-$('#tableContextMenu')?.addEventListener('keydown', event => {
-  const menu = event.currentTarget;
-  const items = $$('[role="menuitem"]:not(:disabled)', menu);
-  const current = items.indexOf(document.activeElement);
-  if (event.key === 'Escape') {
-    event.preventDefault();
-    const anchor = tableContextAnchor;
-    closeTableContextMenu();
-    anchor?.focus?.();
-    return;
-  }
-  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key) || !items.length) return;
-  event.preventDefault();
-  const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : event.key === 'ArrowDown' ? (current + 1 + items.length) % items.length : (current - 1 + items.length) % items.length;
-  items[next]?.focus();
-});
-
 $('#tableScrollWrap')?.addEventListener('contextmenu', event => {
   if (!event.target.closest('#mainShotTable')) return;
-  if (openTableContextForTarget(event.target, event.clientX, event.clientY, false)) event.preventDefault();
+  if (tableContextMenu.open(event.target, event.clientX, event.clientY, false)) event.preventDefault();
 });
 
 $('#tableScrollWrap')?.addEventListener('keydown', event => {
   if (!(event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))) return;
-  const target = event.target.closest('th[data-column], tr[data-id]') || document.querySelector(`#mainShotTable tr[data-id="${CSS.escape(state.activeShotId || '')}"]`);
+  const target = event.target.closest('th[data-column], tr[data-id]') || document.querySelector(`#mainShotTable tr[data-id="${CSS.escape(state.selection.activeShotId || '')}"]`);
   if (!target) return;
   event.preventDefault();
   const rect = target.getBoundingClientRect();
-  openTableContextForTarget(target, rect.left + Math.min(48, rect.width / 2), rect.top + Math.min(30, rect.height / 2), true);
+  tableContextMenu.open(target, rect.left + Math.min(48, rect.width / 2), rect.top + Math.min(30, rect.height / 2), true);
 });
 
 $('#workspaceMain')?.addEventListener('contextmenu', event => {
@@ -944,7 +1824,7 @@ $('#workspaceMain')?.addEventListener('contextmenu', event => {
   if (event.target.closest('textarea, input, [contenteditable="true"]')) return;
   const target = event.target.closest('[data-context-shot-id]');
   if (!target) return;
-  if (openTableContextForTarget(target, event.clientX, event.clientY, false)) event.preventDefault();
+  if (tableContextMenu.open(target, event.clientX, event.clientY, false)) event.preventDefault();
 });
 
 $('#workspaceMain')?.addEventListener('keydown', event => {
@@ -954,7 +1834,7 @@ $('#workspaceMain')?.addEventListener('keydown', event => {
   if (!target) return;
   event.preventDefault();
   const rect = target.getBoundingClientRect();
-  openTableContextForTarget(target, rect.left + Math.min(48, rect.width / 2), rect.top + Math.min(30, rect.height / 2), true);
+  tableContextMenu.open(target, rect.left + Math.min(48, rect.width / 2), rect.top + Math.min(30, rect.height / 2), true);
 });
 
 function methodValues(shot) {
@@ -1046,6 +1926,7 @@ function openFieldEditor(title, value = '', multiline = false) {
     input.onkeydown = event => {
       if (event.key === 'Escape') { event.preventDefault(); finish(null); }
       if (event.key === 'Enter' && !multiline) { event.preventDefault(); finish(input.value); }
+      if (event.key === 'Enter' && multiline && (event.ctrlKey || event.metaKey)) { event.preventDefault(); finish(input.value); }
     };
   });
 }
@@ -1106,8 +1987,14 @@ function stopLoginCooldown() {
 }
 
 function updateAdminVisibility() {
+  const isAdmin = String(state.session?.role || '').toLowerCase() === 'admin';
   const button = $('#userAdminBtn');
-  if (button) button.classList.toggle('hidden', String(state.session?.role || '').toLowerCase() !== 'admin');
+  if (button) button.classList.toggle('hidden', !isAdmin);
+  const profileButton = $('#userProfileBtn');
+  if (profileButton) {
+    profileButton.title = isAdmin ? '打开管理员管理中心' : '修改头像和用户名';
+    profileButton.setAttribute('aria-label', isAdmin ? '管理员管理中心' : '个人信息与偏好设置');
+  }
 }
 
 function startLoginCooldown(seconds = 30) {
@@ -1134,13 +2021,19 @@ function startLoginCooldown(seconds = 30) {
 // --------------------------------------------------------------------------
 // 2. TOAST & API DISPATCHER
 // --------------------------------------------------------------------------
+let toastDismissTimer;
 function toast(message, bad = false) {
   const el = $('#toast');
   if (!el) return;
-  el.innerHTML = `<svg class="g-icon"><use href="#icon-${bad ? 'close' : 'check_circle'}"></use></svg><span>${escapeHtml(message)}</span>`;
-  el.style.borderColor = bad ? 'var(--danger)' : 'var(--success)';
+  const level = typeof bad === 'string' ? bad : bad ? 'error' : 'success';
+  const icons = {error:'error',warning:'warning',success:'check_circle',info:'info'};
+  el.dataset.level = icons[level] ? level : 'info';
+  el.setAttribute('role', level === 'error' ? 'alert' : 'status');
+  el.innerHTML = `<svg class="g-icon" aria-hidden="true"><use href="#icon-${icons[level] || 'info'}"></use></svg><span>${escapeHtml(message)}</span>`;
+  el.style.removeProperty('border-color');
   el.classList.add('show');
-  setTimeout(() => el.classList.remove('show'), 2600);
+  clearTimeout(toastDismissTimer);
+  toastDismissTimer = setTimeout(() => el.classList.remove('show'), level === 'error' ? 5000 : 3000);
 }
 
 function showConflictDialog(error) {
@@ -1199,7 +2092,7 @@ function showConflictDialog(error) {
       close();
       renderProjectHeader();
       renderCurrentView();
-      if (state.activeShotId) renderInspector();
+      if (state.selection.activeShotId) renderInspector();
       await saveProject({ automatic: false });
     } catch (err) { toast(err.message, true); }
     finally { delete dialog.dataset.resolving; }
@@ -1218,32 +2111,93 @@ async function api(path, options = {}) {
   if (options.method && options.method !== 'GET') {
     headers['X-CSRF-Token'] = state.csrf;
   }
+
+  const isUploadOrImport = path.includes('/upload') || path.includes('/import') || path.includes('/export') || options.body instanceof FormData;
+  const timeoutMs = options.timeout !== undefined
+    ? options.timeout
+    : isUploadOrImport
+      ? 0
+      : (path.includes('/shots') && options.method === 'PUT') ? 18000 : 15000;
+
+  let timer = null;
+  let controller = null;
+  let signal = options.signal;
+  let timedOut = false;
+  let externalAbortHandler = null;
+
+  const cleanup = () => {
+    if (timer) clearTimeout(timer);
+    if (externalAbortHandler && options.signal && !options.signal.aborted) {
+      try { options.signal.removeEventListener('abort', externalAbortHandler); } catch (_) {}
+    }
+  };
+
+  if (timeoutMs > 0) {
+    controller = new AbortController();
+    timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort(new Error(`API 请求超时 (${timeoutMs}ms): ${path}`));
+    }, timeoutMs);
+    if (options.signal) {
+      externalAbortHandler = () => controller.abort(options.signal.reason);
+      options.signal.addEventListener('abort', externalAbortHandler, { once: true });
+    }
+    signal = controller.signal;
+  }
+
   let res;
   try {
-    res = await fetch(path, { credentials: 'same-origin', ...options, headers });
+    res = await fetch(path, { credentials: 'same-origin', ...options, headers, signal });
   } catch (cause) {
+    cleanup();
+    // 1. Real timeout — the timer fired and aborted the controller
+    if (timedOut) {
+      noteNetworkFailure();
+      const err = new Error(`网络请求超时 (${timeoutMs}ms)，本地修改已保留`);
+      err.cause = cause;
+      err.isNetworkError = true;
+      err.isTimeout = true;
+      throw err;
+    }
+    // 2. Intentional external abort (watchdog, newer generation, etc.)
+    if (options.signal?.aborted || cause?.name === 'AbortError') {
+      const err = new Error('请求已取消');
+      err.cause = cause;
+      err.isAborted = true;
+      err.isNetworkError = false;
+      throw err;
+    }
+    // 3. Actual network transport failure
+    noteNetworkFailure();
     const err = new Error('无法连接服务器，请检查网络后重试');
     err.cause = cause;
     err.isNetworkError = true;
+    err.isTimeout = false;
     throw err;
   }
-  if (res.status === 204) return null;
-  const type = res.headers.get('content-type') || '';
-  const data = type.includes('json') ? await res.json() : await res.text();
-  if (res.status === 409) {
-    const err = new Error("并发冲突: 另一协作者已修改相同字段");
-    err.status = 409;
-    err.conflictData = data;
-    err.payload = data;
-    throw err;
+  try {
+    // Keep the same deadline active until the complete response body is read and parsed.
+    noteNetworkSuccess();
+    if (res.status === 204) return null;
+    const type = res.headers.get('content-type') || '';
+    const data = type.includes('json') ? await res.json() : await res.text();
+    if (res.status === 409) {
+      const err = new Error("并发冲突: 另一协作者已修改相同字段");
+      err.status = 409;
+      err.conflictData = data;
+      err.payload = data;
+      throw err;
+    }
+    if (!res.ok) {
+      const err = new Error(data?.error || `请求失败 (${res.status})`);
+      err.status = res.status;
+      err.payload = data;
+      throw err;
+    }
+    return normalizeBundlePayload(data);
+  } finally {
+    cleanup();
   }
-  if (!res.ok) {
-    const err = new Error(data.error || `请求失败 (${res.status})`);
-    err.status = res.status;
-    err.payload = data;
-    throw err;
-  }
-  return normalizeBundlePayload(data);
 }
 
 function normalizeShotRecord(shot) {
@@ -1338,7 +2292,7 @@ document.addEventListener('click', e => {
   } else if (type === 'delete-project' && action.dataset.projectId) {
     const project = state.projects.find(item => item.id === action.dataset.projectId);
     if (!project) return;
-    confirmAction('永久删除项目', `确定永久删除“${project.name}”吗？项目数据、媒体文件、历史版本、评论及分享链接将一并删除，无法撤回。`).then(async confirmed => {
+    confirmAction('永久删除项目', `将永久删除项目“${project.name}”及其镜头、媒体文件、历史版本、评论和分享链接。此操作无法撤回。`).then(async confirmed => {
       if (!confirmed) return;
       try {
         const result = await api(`/api/projects/${encodeURIComponent(project.id)}`, { method: 'DELETE' });
@@ -1366,7 +2320,7 @@ document.addEventListener('click', e => {
   } else if (type === 'upload-shot' && action.dataset.shotId) {
     triggerShotMediaUpload(action.dataset.shotId);
   } else if (type === 'open-pdf') {
-    $('#pdfExportModal')?.showModal();
+    openDocumentExportDialog();
   } else if (type === 'add-panel' && action.dataset.shotId) {
     const shot = state.bundle?.shots?.find(item => item.id === action.dataset.shotId);
     if (!shot) return;
@@ -1412,16 +2366,27 @@ document.addEventListener('click', e => {
 });
 
 document.addEventListener('change', async event => {
-  const input = event.target.closest('#backupUploadInput');
+  const input = event.target.closest('#backupUploadInput, #projectPdfImportInput');
   const file = input?.files?.[0];
   if (!file) return;
   try {
-    const payload = JSON.parse(await file.text());
-    if (!payload?.project || !Array.isArray(payload.shots)) throw new Error('备份文件格式无效');
-    const imported = await api('/api/projects/import-backup', { method: 'POST', json: payload });
+    const signature = new Uint8Array(await file.slice(0, 5).arrayBuffer());
+    const isPdf = signature.length === 5 && String.fromCharCode(...signature) === '%PDF-';
+    let imported;
+    if (isPdf) {
+      imported = await api('/api/projects/import-project-pdf', {
+        method: 'POST', headers: { 'Content-Type': 'application/pdf' }, body: file
+      });
+    } else {
+      if (file.name.toLowerCase().endsWith('.pdf')) throw new Error('所选文件不是有效 PDF');
+      const payload = JSON.parse(await file.text());
+      if (!payload?.project || !Array.isArray(payload.shots)) throw new Error('备份文件格式无效');
+      imported = await api('/api/projects/import-backup', { method: 'POST', json: payload });
+    }
     state.bundle = imported;
     await loadProjects();
     await openProject(imported.project.id);
+    if ($('#pdfExportModal')?.open) $('#pdfExportModal').close();
     toast(`备份已导入：${imported.project.name}`);
   } catch (err) { toast(`备份导入失败：${err.message}`, true); }
   input.value = '';
@@ -1448,14 +2413,13 @@ function applyTheme(theme) {
 // --------------------------------------------------------------------------
 function setAppContext(context) {
   state.context = context;
-  state.inspectorOpen = false;
+  closeInspector();
   document.body.dataset.context = context;
 
   renderSidebar();
 
   if (context === APP_CONTEXT.HUB) {
-    state.activeShotId = null;
-    state.inspectorOpen = false;
+    state.selection.activeShotId = null;
     state.shareViewToken = null;
     document.body.dataset.hasShot = 'false';
     $('#workspaceContentGrid')?.classList.remove('has-inspector');
@@ -1484,40 +2448,42 @@ function setAppContext(context) {
     $('#dashboardView')?.classList.add('hidden');
     $('#projectWorkView')?.classList.remove('hidden');
 
-    navigateToView(state.currentView || VIEW.TABLE);
+    navigateToView(state.view.current || VIEW.TABLE);
   }
 }
 
 async function navigateToView(view) {
   if (!Object.values(VIEW).includes(view)) return;
-  if (creativeBoardsMount && view !== state.currentView && !await flushCreativeBoards()) return;
-  state.currentView = view;
+  tableContextMenu.close();
+  if (creativeBoardsMount && view !== state.view.current && !await flushCreativeBoards()) return;
+  const changedView = view !== state.view.current;
+  state.view.current = view;
   const fullPageView = [VIEW.MOODBOARD, VIEW.LIGHTING, VIEW.METHOD, VIEW.ASSETS, VIEW.VOICEOVER, VIEW.REVIEW, VIEW.DELIVERABLES, VIEW.OVERVIEW].includes(view);
   $('.workspace-toolbar')?.classList.toggle('hidden', fullPageView);
 
-  // Full-page workspaces own their layout. Keep the selected shot, but do not
-  // let the table inspector reserve a second column on review/export pages.
-  if (fullPageView) {
-    state.inspectorOpen = false;
-    $('#workspaceContentGrid')?.classList.remove('has-inspector');
-    const slot = $('#inspectorSlot');
-    if (slot) slot.hidden = true;
+  // View changes dismiss the inspector while preserving the shot selection.
+  if (changedView) {
+    closeInspector();
   }
 
   updateSidebarActiveState();
   updateBreadcrumb();
   renderCurrentView();
+  // A cursor may be mounted in the previous view's clipped host. Reposition
+  // immediately after the new view is mounted so it cannot remain visible in
+  // a stale host until the next presence poll or scroll event.
+  positionRemotePresenceCursors();
   queuePresenceHeartbeat(true);
 }
 
 function updateSidebarActiveState() {
   publishWorkspaceUI();
   $$('.nav-item', $('#appSidebar')).forEach(item => {
-    const active = item.dataset.view === state.currentView || (item.dataset.view === VIEW.TABLE && [VIEW.CARDS, VIEW.WALL, VIEW.TIMELINE].includes(state.currentView));
+    const active = item.dataset.view === state.view.current || (item.dataset.view === VIEW.TABLE && [VIEW.CARDS, VIEW.WALL, VIEW.TIMELINE].includes(state.view.current));
     item.classList.toggle('is-active', active);
     item.setAttribute('aria-current', active ? 'page' : 'false');
   });
-  $$('[data-workspace-view]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.workspaceView === state.currentView)));
+  $$('[data-workspace-view]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.workspaceView === state.view.current)));
 }
 
 $('#workspaceViewTabs')?.addEventListener('click', event => {
@@ -1527,7 +2493,7 @@ $('#workspaceViewTabs')?.addEventListener('click', event => {
 
 function updateBreadcrumb() {
   if (state.context === APP_CONTEXT.PROJECT && $('#crumbView')) {
-    $('#crumbView').textContent = VIEW_TITLES[state.currentView] || '镜头制作表';
+    $('#crumbView').textContent = VIEW_TITLES[state.view.current] || '镜头制作表';
   }
 }
 
@@ -1652,7 +2618,7 @@ $('#appSidebar')?.addEventListener('click', e => {
 
 function renderCurrentView() {
   syncDerivedTimeline();
-  const view = state.currentView;
+  const view = state.view.current;
   $$('.view-content').forEach(v => v.classList.add('hidden'));
 
   if (view === VIEW.TABLE) {
@@ -1782,11 +2748,15 @@ function syncDerivedTimeline() {
 // 会话检查必须有上限：请求挂起时不能把用户永久留在启动层
 // —— 那样既进不去应用，也看不到登录页，页面像是坏了。
 const SESSION_TIMEOUT_MS = 8000;
-function withTimeout(promise, ms) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error('session-timeout')), ms)),
-  ]);
+function withTimeout(promise, ms, controller) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      controller?.abort(new Error('session-timeout'));
+      reject(new Error('session-timeout'));
+    }, ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 async function boot() {
@@ -1802,7 +2772,8 @@ async function boot() {
   }
 
   try {
-    state.session = await withTimeout(api('/api/session'), SESSION_TIMEOUT_MS);
+    const sessionController = new AbortController();
+    state.session = await withTimeout(api('/api/session', { signal: sessionController.signal }), SESSION_TIMEOUT_MS, sessionController);
   } catch (err) {
     console.warn('session check failed:', err);
     state.session = null;
@@ -1854,6 +2825,14 @@ function installCursorSystem() {
 }
 
 function installCollaborationPresence() {
+  globalThis.FrameForgePresenceUI?.install({
+    context: () => ({userId: state.session?.user_id, view: state.view.current, shotId: state.selection.activeShotId}),
+    navigate: navigateToView,
+    select: id => selectShot(id),
+    notice: message => toast(message),
+    changed: () => queuePresenceHeartbeat(true),
+    label: person => VIEW_TITLES[person.workspace] || person.workspace || '镜头表'
+  });
   if ($('#remotePresenceLayer')) return;
   const layer = document.createElement('div');
   layer.id = 'remotePresenceLayer';
@@ -1865,14 +2844,12 @@ function installCollaborationPresence() {
     if (event.pointerType && !['mouse', 'pen'].includes(event.pointerType)) return;
     if (!state.presenceProjectId || state.context !== APP_CONTEXT.PROJECT) return;
     const host = presenceModuleHost(event.target);
-    const rect = host?.getBoundingClientRect();
-    if (!rect || rect.width <= 0 || rect.height <= 0) return;
-    const inside = event.clientX >= rect.left && event.clientX <= rect.right
-      && event.clientY >= rect.top && event.clientY <= rect.bottom;
-    const next = inside
+    const point = presencePoint(host, event.clientX, event.clientY);
+    if (!point) return;
+    const next = point.inside
       ? {
-          x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
-          y: Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height)),
+          x: point.x,
+          y: point.y,
           visible: true,
           module: host.dataset.presenceModule || host.id
         }
@@ -1905,6 +2882,13 @@ function installCollaborationPresence() {
 
 function presenceModuleHost(target) {
   const element = target instanceof Element ? target : null;
+  const table = element?.closest('#mainShotTable');
+  if (table) {
+    const wrap = table.closest('#tableScrollWrap');
+    if (wrap) { wrap.dataset.presenceModule = 'table-scroll'; return wrap; }
+    table.dataset.presenceModule = 'main-shot-table';
+    return table;
+  }
   const view = element?.closest('.view-content:not(.hidden)');
   if (view) return view;
   const inspector = element?.closest('#inspectorSlot:not([hidden])');
@@ -1916,6 +2900,7 @@ function presenceModuleHost(target) {
 
 function getPresenceModule(moduleId) {
   if (!moduleId) return null;
+  if (moduleId === 'table-scroll') return $('#tableScrollWrap');
   if (moduleId === 'workspace-toolbar') return $('.workspace-toolbar:not(.hidden)');
   const candidate = document.getElementById(moduleId);
   return candidate && !candidate.classList.contains('hidden') && !candidate.hidden ? candidate : null;
@@ -1925,10 +2910,22 @@ function safePresenceColor(value) {
   return /^#[0-9a-f]{6}$/i.test(String(value || '')) ? String(value) : '#5B8DEF';
 }
 
+function presencePoint(host, clientX, clientY) {
+  const rect = host?.getBoundingClientRect();
+  if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+  const contentWidth = Math.max(rect.width, host.scrollWidth || rect.width);
+  const contentHeight = Math.max(rect.height, host.scrollHeight || rect.height);
+  const contentX = clientX - rect.left + (host.scrollLeft || 0);
+  const contentY = clientY - rect.top + (host.scrollTop || 0);
+  return {
+    x: Math.max(0, Math.min(1, contentX / contentWidth)),
+    y: Math.max(0, Math.min(1, contentY / contentHeight)),
+    inside: clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom
+  };
+}
+
 function activePresenceField() {
-  const active = document.activeElement;
-  if (!active || active.matches('body, html')) return null;
-  return active.closest?.('[data-column]')?.dataset.column || active.getAttribute?.('name') || null;
+  return activeEditorsForCurrentProject().at(-1)?.field || null;
 }
 
 function queuePresenceHeartbeat(immediate = false) {
@@ -1941,17 +2938,115 @@ function queuePresenceHeartbeat(immediate = false) {
 
 let presenceResponseSequence = 0;
 let presenceAppliedSequence = 0;
-let presencePollInFlight = false;
 function applyPresenceResponse(projectId, sequence, people) {
   if (state.presenceProjectId !== projectId || sequence < presenceAppliedSequence) return;
   presenceAppliedSequence = sequence;
+  globalThis.FrameForgePresenceUI?.connection(true);
   renderPresence(Array.isArray(people) ? people : []);
 }
 
+function checkSyncWatchdog() {
+  const now = Date.now();
+
+  // 1. Recover stale project save (>30s)
+  if (state.saveInFlight && state.saveStartedAt && (now - state.saveStartedAt > 30000)) {
+    console.warn?.('[sync] recovered stale saveInFlight', {
+      duration: now - state.saveStartedAt,
+      dirty: state.dirty
+    });
+    saveRequestToken++;
+    state.currentSaveToken = saveRequestToken;
+    if (state.saveAbortController) {
+      try {
+        state.saveAbortController.abort(new Error('Stalled save aborted by watchdog'));
+      } catch (_) {}
+      state.saveAbortController = null;
+    }
+    state.saveInFlight = false;
+    state.saveStartedAt = null;
+    state.dirty = true;
+    state.lastSaveError = new Error('检测到上次保存请求卡死，已自动恢复并重试');
+    refreshSaveStatus();
+    scheduleAutoSave(1000);
+  }
+
+  // 2. Recover stale presence poll (>20s)
+  if (state.presencePollInFlight && state.presencePollStartedAt && (now - state.presencePollStartedAt > 20000)) {
+    console.warn?.('[sync] recovered stale presencePollInFlight');
+    state.presencePollInFlight = false;
+    state.presencePollStartedAt = null;
+  }
+
+  // 3. Recover stale remote refresh (>20s)
+  if (state.remoteRefreshInFlight && state.remoteRefreshStartedAt && (now - state.remoteRefreshStartedAt > 20000)) {
+    console.warn?.('[sync] recovered stale remoteRefreshInFlight');
+    state.remoteRefreshInFlight = false;
+    state.remoteRefreshStartedAt = null;
+  }
+}
+window.checkSyncWatchdog = checkSyncWatchdog;
+
+let wakeRecoveryTimer = null;
+let lastWakeRecoveryAt = 0;
+
+async function triggerWakeRecovery({ reason = 'wake' } = {}) {
+  const now = Date.now();
+  if (now - lastWakeRecoveryAt < 1000) return; // Debounce 1000ms
+  clearTimeout(wakeRecoveryTimer);
+  wakeRecoveryTimer = setTimeout(async () => {
+    wakeRecoveryTimer = null;
+    lastWakeRecoveryAt = Date.now();
+    state.wakeRecoveryCount = (state.wakeRecoveryCount || 0) + 1;
+    console.debug?.(`[sync] running foreground/wake recovery (reason: ${reason})`);
+
+    // 1. Verify and recover any stale save / poll in flight state
+    checkSyncWatchdog();
+
+    // 2. Flush any pending editor drafts to localStorage
+    flushAllPendingEditorDraftsSync();
+
+    // 3. Send immediate presence heartbeat
+    queuePresenceHeartbeat(true);
+
+    // 4. Run one presence poll
+    pollPresence().catch(() => {});
+
+    // 5. Run one project sync check
+    pollProjectSync().catch(() => {});
+
+    // 6. Schedule autosave immediately when local dirty data exists
+    if (state.dirty) {
+      scheduleAutoSave(0);
+    }
+  }, 100);
+}
+window.triggerWakeRecovery = triggerWakeRecovery;
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    triggerWakeRecovery({ reason: 'visibility' });
+  } else if (document.visibilityState === 'hidden') {
+    flushAllPendingEditorDraftsSync();
+  }
+});
+window.addEventListener('pagehide', () => {
+  flushAllPendingEditorDraftsSync();
+});
+window.addEventListener('focus', () => {
+  triggerWakeRecovery({ reason: 'focus' });
+});
+window.addEventListener('online', () => {
+  // navigator/browser online is only a hint.
+  // Only a successful real FRAMEFORGE HTTP request may call noteNetworkSuccess().
+  triggerWakeRecovery({ reason: 'online' });
+});
+
 async function sendPresenceHeartbeat() {
   const projectId = state.presenceProjectId;
-  if (!projectId || state.presenceSendInFlight) return;
+  if (!projectId) return;
+  if (state.presenceSendInFlight) { state.presenceSendQueued = true; return; }
   state.presenceSendInFlight = true;
+  const editor = activeEditorsForCurrentProject().at(-1);
   const sequence = ++presenceResponseSequence;
   state.presenceLastSentAt = Date.now();
   try {
@@ -1959,12 +3054,14 @@ async function sendPresenceHeartbeat() {
       method: 'POST',
       json: {
         production_id: projectId,
-        workspace: state.currentView || VIEW.TABLE,
+        workspace: state.view.current || VIEW.TABLE,
         module: state.presencePointer.module || '',
-        shot_id: state.activeShotId,
+        shot_id: editor?.shotId || state.selection.activeShotId,
         field: activePresenceField(),
+        presence_state: document.hidden ? 'idle' : editor ? 'editing' : 'viewing',
         cursor: state.presencePointer
-      }
+      },
+      timeout: 10000
     });
     applyPresenceResponse(projectId, sequence, data?.presence);
   } catch (_) {
@@ -1972,18 +3069,27 @@ async function sendPresenceHeartbeat() {
     // during a transient polling or network failure.
   } finally {
     state.presenceSendInFlight = false;
+    if (state.presenceSendQueued) {
+      state.presenceSendQueued = false;
+      queuePresenceHeartbeat(true);
+    }
   }
 }
 
 async function pollPresence() {
+  checkSyncWatchdog();
   const projectId = state.presenceProjectId;
-  if (!projectId || presencePollInFlight) return;
-  presencePollInFlight = true;
+  if (!projectId || state.presencePollInFlight) return;
+  state.presencePollInFlight = true;
+  state.presencePollStartedAt = Date.now();
   const sequence = ++presenceResponseSequence;
   try {
-    const people = await api(`/api/v1/productions/${encodeURIComponent(projectId)}/presence`);
+    const people = await api(`/api/v1/productions/${encodeURIComponent(projectId)}/presence`, { timeout: 10000 });
     applyPresenceResponse(projectId, sequence, people);
-  } catch (_) {} finally { presencePollInFlight = false; }
+  } catch (_) {} finally {
+    state.presencePollInFlight = false;
+    state.presencePollStartedAt = null;
+  }
 }
 
 // 任何进行中的编辑都必须挡住远程刷新与页面导航：否则 DOM 被重建时，
@@ -1991,31 +3097,121 @@ async function pollPresence() {
 // 新增编辑态时务必把 class 加到这里（此前就是因为漏了 .is-rich-editing 才被轮询冲掉内容）。
 const ACTIVE_EDIT_SELECTOR = '.is-text-editing, .inline-edit-input, .inline-cell-editor, .has-active-editor, .is-rich-editing';
 
+// Presentation only: never serialize motion state or await it in a save path.
+const collaborativeMotionAnimations = new Set();
+function motionAllowed() {
+  return !matchMedia('(prefers-reduced-motion: reduce)').matches && document.body.dataset.effects !== 'reduced';
+}
+function cancelCollaborativeAnimations(element = null) {
+  for (const animation of collaborativeMotionAnimations) {
+    if (!element || animation.effect?.target === element) {
+      animation.cancel();
+      collaborativeMotionAnimations.delete(animation);
+    }
+  }
+}
+const collaborativeMotionPreference = matchMedia('(prefers-reduced-motion: reduce)');
+collaborativeMotionPreference.addEventListener?.('change', event => { if (event.matches) cancelCollaborativeAnimations(); });
+new MutationObserver(records => {
+  if (records.some(record => record.attributeName === 'data-effects') && document.body.dataset.effects === 'reduced') cancelCollaborativeAnimations();
+}).observe(document.body, {attributes:true, attributeFilter:['data-effects']});
+const collaborativeMotionTableView = document.querySelector('#viewTable');
+if (collaborativeMotionTableView) new MutationObserver(() => {
+  if (collaborativeMotionTableView.classList.contains('hidden')) cancelCollaborativeAnimations();
+}).observe(collaborativeMotionTableView, {attributes:true, attributeFilter:['class']});
+function animateElement(element, keyframes, duration = 200) {
+  if (!element?.isConnected || !motionAllowed() || !element.animate) return Promise.resolve();
+  cancelCollaborativeAnimations(element);
+  const animation = element.animate(keyframes, {duration, easing:'cubic-bezier(.2,0,0,1)', id:'ff-collab-update'});
+  collaborativeMotionAnimations.add(animation);
+  return animation.finished.catch(() => {}).finally(() => collaborativeMotionAnimations.delete(animation));
+}
+function visibleMotionElements(selector) {
+  const clip = $('#tableScrollWrap')?.getBoundingClientRect();
+  return $$(selector).filter(el => {
+    const r = el.getBoundingClientRect();
+    return r.width && r.height && r.bottom > Math.max(0,clip?.top || 0) && r.top < Math.min(innerHeight,clip?.bottom || innerHeight) && r.right > 0 && r.left < innerWidth;
+  }).slice(0, 100);
+}
+function captureRowRects() {
+  return new Map(visibleMotionElements('#mainShotTable tr[data-id]').map(el => [el.dataset.id, el.getBoundingClientRect()]));
+}
+function animateRowFlip(before) {
+  if (!motionAllowed()) return;
+  visibleMotionElements('#mainShotTable tr[data-id]').forEach(el => {
+    const old = before.get(el.dataset.id);
+    if (!old) return;
+    const dy = old.top - el.getBoundingClientRect().top;
+    if (Math.abs(dy) > 1) void animateElement(el, [{transform:`translateY(${dy}px)`},{transform:'translateY(0)'}]);
+  });
+}
+function diffCollaborativeBundle(before, after) {
+  const previous = new Map((before?.shots || []).map(s => [s.id,s]));
+  const next = new Set((after?.shots || []).map(s => s.id));
+  const patch = {changedCells:[], insertedShotIds:[], removedShotIds:[...previous.keys()].filter(id => !next.has(id))};
+  for (const shot of after?.shots || []) {
+    const old = previous.get(shot.id);
+    if (!old) { patch.insertedShotIds.push(shot.id); continue; }
+    for (const field of COLLAB_SYNC_FIELDS.filter(f => !['number','is_deleted','rich_text_json'].includes(f))) {
+      if (JSON.stringify(old[field]) !== JSON.stringify(shot[field])) patch.changedCells.push({shotId:shot.id,field:field === 'duration_frames' ? 'duration_seconds' : field});
+    }
+    for (const key of new Set([...Object.keys(old.custom_fields || {}),...Object.keys(shot.custom_fields || {})])) {
+      if (JSON.stringify(old.custom_fields?.[key]) !== JSON.stringify(shot.custom_fields?.[key])) patch.changedCells.push({shotId:shot.id,field:`custom:${key}`});
+    }
+  }
+  return patch;
+}
+function animateCollaborativePatch(patch, rects) {
+  if (!motionAllowed()) return;
+  // New remote state supersedes the previous highlight/FLIP; never stack motion
+  // across successive polls, especially when the same cell changes repeatedly.
+  cancelCollaborativeAnimations();
+  animateRowFlip(rects);
+  for (const id of patch.insertedShotIds) {
+    visibleMotionElements(`#mainShotTable tr[data-id="${CSS.escape(id)}"]`).forEach(el => void animateElement(el,[{opacity:.4,transform:'translateY(4px)'},{opacity:1,transform:'translateY(0)'}]));
+  }
+  for (const {shotId,field} of patch.changedCells) {
+    const selector = `#mainShotTable td[data-shot-id="${CSS.escape(shotId)}"][data-field="${CSS.escape(field)}"]`;
+    const cells = visibleMotionElements(selector);
+    if (state.inspector.open && state.inspector.targetShotId === shotId) cells.push(...$$(`#inspectorSlot [data-field="${CSS.escape(field)}"]`));
+    for (const cell of cells) {
+      if (cell.querySelector('input,textarea,[contenteditable="true"]')) continue;
+      void animateElement(cell,[{backgroundColor:'color-mix(in srgb, var(--accent) 18%, transparent)'},{backgroundColor:'transparent'}],700);
+    }
+  }
+}
+
 async function pollProjectSync() {
+  checkSyncWatchdog();
   const projectId = state.presenceProjectId;
-  const blocked = () => state.dirty || state.saveInFlight || state.saveConflict || state.projectNavigationInFlight || columnPreferenceWrites.has(projectId) || shotReorderInFlight || document.body.classList.contains('is-reordering') || document.querySelector(ACTIVE_EDIT_SELECTOR);
+  const blocked = () => state.dirty || state.saveInFlight || state.saveConflict || state.projectNavigationInFlight || columnPreferenceWrites.has(projectId) || shotReorderInFlight || document.body.classList.contains('is-reordering') || document.querySelector(ACTIVE_EDIT_SELECTOR) || hasDirtyActiveEditor() || state.saveRefreshInFlight;
   if (!projectId || state.remoteRefreshInFlight || blocked()) return;
   state.remoteRefreshInFlight = true;
+  state.remoteRefreshStartedAt = Date.now();
   const versionAtStart = state.changeVersion;
   const columnsAtStart = state.bundle?.column_preferences;
   try {
-    const sync = await api(`/api/projects/${encodeURIComponent(projectId)}/sync-state`);
+    const sync = await api(`/api/projects/${encodeURIComponent(projectId)}/sync-state`, { timeout: 10000 });
     if (!sync?.updated_at || sync.updated_at === state.lastServerUpdatedAt) return;
     if (state.presenceProjectId !== projectId || blocked() || state.changeVersion !== versionAtStart) return;
-    const activeShotId = state.activeShotId;
-    const latest = await api(`/api/projects/${encodeURIComponent(projectId)}`);
+    const activeShotId = state.selection.activeShotId;
+    const latest = await api(`/api/projects/${encodeURIComponent(projectId)}`, { timeout: 12000 });
     if (state.presenceProjectId !== projectId || state.bundle?.project?.id !== projectId || blocked() || state.changeVersion !== versionAtStart || state.bundle.column_preferences !== columnsAtStart) return;
+    const patch = diffCollaborativeBundle(state.bundle, latest);
+    const rects = captureRowRects();
     state.bundle = adoptServerBundle(latest);
     state.lastServerUpdatedAt = latest.project.updated_at || sync.updated_at;
-    state.activeShotId = latest.shots.some(shot => shot.id === activeShotId) ? activeShotId : (latest.shots[0]?.id || null);
+    state.selection.activeShotId = latest.shots.some(shot => shot.id === activeShotId) ? activeShotId : (latest.shots[0]?.id || null);
     renderProjectHeader();
     renderCurrentView();
-    if (state.inspectorOpen && state.activeShotId) selectShot(state.activeShotId, { openInspector: true });
-    setSaveStatus('● 已同步', '');
+    if (state.inspector.open) renderInspector();
+    animateCollaborativePatch(patch, rects);
+    refreshSaveStatus();
   } catch (_) {
     // Background sync must never interrupt local editing.
   } finally {
     state.remoteRefreshInFlight = false;
+    state.remoteRefreshStartedAt = null;
   }
 }
 
@@ -2027,9 +3223,9 @@ function startPresenceSync(projectId) {
   clearInterval(state.presencePollTimer);
   clearInterval(state.presenceHeartbeatTimer);
   clearInterval(state.projectSyncTimer);
-  state.presencePollTimer = window.setInterval(pollPresence, 650);
+  state.presencePollTimer = window.setInterval(pollPresence, 1000);
   state.presenceHeartbeatTimer = window.setInterval(() => queuePresenceHeartbeat(true), 8000);
-  state.projectSyncTimer = window.setInterval(pollProjectSync, 1400);
+  state.projectSyncTimer = window.setInterval(pollProjectSync, 2200);
   queuePresenceHeartbeat(true);
 }
 
@@ -2064,6 +3260,7 @@ function stopPresenceSync({ notify = false } = {}) {
 
 function renderPresence(people) {
   state.presence = Array.isArray(people) ? [...people].sort((a, b) => String(a.user_id).localeCompare(String(b.user_id))) : [];
+  globalThis.FrameForgePresenceUI?.update(state.presence);
   const ownId = String(state.session?.user_id || '');
   const collaborators = state.presence.filter(person => String(person.user_id) !== ownId);
   const participants = state.presence.length ? state.presence : (state.session?.authenticated ? [{
@@ -2072,7 +3269,7 @@ function renderPresence(people) {
     status: 'active',
     color: state.session.color,
     avatar_url: state.session.avatar_url,
-    workspace: state.currentView
+    workspace: state.view.current
   }] : []);
   const cluster = $('#presenceCluster');
   if (cluster) {
@@ -2131,7 +3328,10 @@ function renderPresence(people) {
 
   const layer = $('#remotePresenceLayer');
   if (!layer) return;
-  const existing = new Map($$('[data-presence-user]', layer).map(cursor => [cursor.dataset.presenceUser, cursor]));
+  // Cursors are re-parented into the active module's clipped layer during
+  // positioning. Query only cursor nodes here so presence avatars in the HUD
+  // are not mistaken for canvas overlays.
+  const existing = new Map($$('.remote-presence-cursor[data-presence-user]').map(cursor => [cursor.dataset.presenceUser, cursor]));
   const activeIds = new Set();
   collaborators.forEach(person => {
     const userId = String(person.user_id || '');
@@ -2160,27 +3360,52 @@ function positionRemotePresenceCursors() {
   const layer = $('#remotePresenceLayer');
   if (!layer) return;
   const ownId = String(state.session?.user_id || '');
-  const modalOpen = Boolean(document.querySelector('dialog[open]'));
   state.presence.filter(person => String(person.user_id) !== ownId).forEach(person => {
-    const cursor = $$('[data-presence-user]', layer).find(item => item.dataset.presenceUser === String(person.user_id));
+    // Cursors move into a module-local clipped layer after their first
+    // position. Searching only inside #remotePresenceLayer therefore loses
+    // the same cursor on its next update.
+    const cursor = $$('.remote-presence-cursor[data-presence-user]').find(item => item.dataset.presenceUser === String(person.user_id));
     if (!cursor) return;
     const x = Number(person.cursor_x);
     const y = Number(person.cursor_y);
     const host = getPresenceModule(person.module);
     const rect = host?.getBoundingClientRect();
-    const visible = !modalOpen
-      && state.context === APP_CONTEXT.PROJECT
-      && person.workspace === state.currentView
-      && person.module === state.presencePointer.module
+    const visible = state.context === APP_CONTEXT.PROJECT
+      && person.workspace === state.view.current
       && person.cursor_visible
       && Number.isFinite(x)
       && Number.isFinite(y)
       && rect
       && rect.width > 0
       && rect.height > 0;
-    cursor.classList.toggle('is-visible', Boolean(visible));
+    const contentWidth = Math.max(rect?.width || 0, host?.scrollWidth || rect?.width || 0);
+    const contentHeight = Math.max(rect?.height || 0, host?.scrollHeight || rect?.height || 0);
+    // The cursor lives inside a module-local clipped layer. The layer itself
+    // scrolls with its host, so keep the transform in content coordinates and
+    // apply the host scroll offset only when deciding whether it is visible.
+    // Subtracting scrollLeft/scrollTop here would double-subtract the scroll.
+    const px = rect ? contentWidth * x : 0;
+    const py = rect ? contentHeight * y : 0;
+    const clip = host?.getBoundingClientRect();
+    const scrollLeft = host?.scrollLeft || 0;
+    const scrollTop = host?.scrollTop || 0;
+    const clientWidth = host?.clientWidth || rect?.width || 0;
+    const clientHeight = host?.clientHeight || rect?.height || 0;
+    const inside = !clip || (px >= scrollLeft && px <= scrollLeft + clientWidth && py >= scrollTop && py <= scrollTop + clientHeight);
+    cursor.classList.toggle('is-visible', Boolean(visible && inside));
     if (visible) {
-      const nextTransform = `translate3d(${Math.round(rect.left + rect.width * x)}px, ${Math.round(rect.top + rect.height * y)}px, 0)`;
+      let cursorLayer = host?.querySelector(':scope > .remote-presence-host-layer');
+      if (host && !cursorLayer) {
+        cursorLayer = document.createElement('div');
+        cursorLayer.className = 'remote-presence-host-layer';
+        if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+        host.appendChild(cursorLayer);
+      }
+      if (cursorLayer && cursor.parentElement !== cursorLayer) cursorLayer.appendChild(cursor);
+      // Counter-scroll the clipped viewport layer, not the cursor content.
+      // Its extent stays <= the existing scroll extent (no scroll feedback).
+      Object.assign(cursorLayer.style, {inset:'auto',left:'0',top:'0',width:`${clientWidth}px`,height:`${clientHeight}px`,transform:`translate(${scrollLeft}px, ${scrollTop}px)`});
+      const nextTransform = `translate3d(${Math.round(px-scrollLeft)}px, ${Math.round(py-scrollTop)}px, 0)`;
       const firstPosition = !cursor.classList.contains('is-positioned');
       cursor.style.transform = nextTransform;
       if (firstPosition) {
@@ -2232,11 +3457,32 @@ function bindImageLoadFeedback(image) {
   const clear = () => { clearTimeout(timer); timer = null; visibility?.disconnect(); visibility = null; };
   const loaded = () => {
     clear();
+    delete image.dataset.mediaRetry;
     image.classList.remove('is-media-loading', 'is-media-error');
     image.classList.add('is-media-loaded');
     updateMediaHost(host);
   };
   const failed = () => {
+    const source = image.currentSrc || image.src || '';
+    const isStoryboardMedia = source.includes('/media/');
+    const retryCount = Number(image.dataset.mediaRetry || 0);
+    if (isStoryboardMedia && navigator.onLine !== false && retryCount < 2) {
+      image.dataset.mediaRetry = String(retryCount + 1);
+      clear();
+      image.classList.remove('is-media-error', 'is-media-loaded');
+      image.classList.add('is-media-loading');
+      updateMediaHost(host);
+      window.setTimeout(() => {
+        if (!image.isConnected) return;
+        try {
+          const retryUrl = new URL(source, location.href);
+          retryUrl.searchParams.set('_retry', String(Date.now()));
+          image.src = retryUrl.href;
+        } catch (_) { image.src = source; }
+        start();
+      }, 350 * (retryCount + 1));
+      return;
+    }
     clear();
     image.classList.remove('is-media-loading', 'is-media-loaded');
     image.classList.add('is-media-error');
@@ -2351,25 +3597,58 @@ $('#registerForm')?.addEventListener('submit', async event => {
   } catch (err) { if (error) error.textContent = err.message; }
 });
 
-async function openUserAdmin() {
+async function openAdminCenter() {
+  if (String(state.session?.role || '').toLowerCase() !== 'admin') return;
   const modal = $('#userAdminModal');
   const list = $('#userAdminList');
   if (!modal || !list) return;
-  modal.showModal();
+  if (!modal.open) modal.showModal();
   try {
     const users = await api('/api/admin/users');
-    list.innerHTML = users.map(user => `<article class="user-admin-row"><div><b>${escapeHtml(user.display_name || user.username)}</b><span>${escapeHtml(user.username)} · ${escapeHtml(user.role)} · ${escapeHtml(user.status)}</span></div><div class="user-admin-actions">${user.status === 'PENDING' ? `<button class="btn btn-primary" data-admin-action="approve" data-user-id="${escapeHtml(user.id)}">批准</button><button class="btn btn-ghost" data-admin-action="reject" data-user-id="${escapeHtml(user.id)}">驳回</button>` : ''}${user.status === 'ACTIVE' && user.id !== state.session?.user_id ? `<button class="btn btn-ghost" data-admin-action="suspend" data-user-id="${escapeHtml(user.id)}">停用</button>` : ''}${user.status === 'SUSPENDED' ? `<button class="btn btn-secondary" data-admin-action="reactivate" data-user-id="${escapeHtml(user.id)}">恢复</button>` : ''}</div></article>`).join('') || '<div class="empty-state">暂无用户</div>';
+    list.innerHTML = users.map(user => `<article class="user-admin-row" data-account-status="${escapeHtml(user.status)}"><div><b>${escapeHtml(user.display_name || user.username)}</b><span>${escapeHtml(user.username)} · ${escapeHtml(user.role)} · ${escapeHtml(user.status)}</span></div><div class="user-admin-actions">${user.status === 'PENDING' ? `<button class="btn btn-primary" data-admin-action="approve" data-user-id="${escapeHtml(user.id)}">批准</button><button class="btn btn-ghost" data-admin-action="reject" data-user-id="${escapeHtml(user.id)}">驳回</button>` : ''}${user.status === 'ACTIVE' && user.id !== state.session?.user_id ? `<button class="btn btn-ghost" data-admin-action="suspend" data-user-id="${escapeHtml(user.id)}">停用</button>` : ''}${user.status === 'SUSPENDED' ? `<button class="btn btn-secondary" data-admin-action="reactivate" data-user-id="${escapeHtml(user.id)}">恢复</button>` : ''}</div></article>`).join('') || '<div class="empty-state">暂无账户</div>';
     $$('[data-admin-action]', list).forEach(button => button.addEventListener('click', async () => {
       const action = button.dataset.adminAction;
       if (['reject', 'suspend'].includes(action) && !await confirmAction('确认用户操作', `确定执行“${action === 'reject' ? '驳回' : '停用'}”吗？`)) return;
-      try { await api(`/api/admin/users/${encodeURIComponent(button.dataset.userId)}/${action}`, { method: 'POST', json: {} }); await openUserAdmin(); toast('用户状态已更新'); } catch (err) { toast(err.message, true); }
+      try { await api(`/api/admin/users/${encodeURIComponent(button.dataset.userId)}/${action}`, { method: 'POST', json: {} }); await openAdminCenter(); toast('用户状态已更新'); } catch (err) { toast(err.message, true); }
     }));
   } catch (err) { list.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`; }
 }
 
-$('#userAdminBtn')?.addEventListener('click', openUserAdmin);
-
+$('#userAdminBtn')?.addEventListener('click', openAdminCenter);
 $('#userProfileBtn')?.addEventListener('click', () => {
+  if (String(state.session?.role || '').toLowerCase() === 'admin') openAdminCenter();
+  else openUserProfile();
+});
+$('#adminProfileBtn')?.addEventListener('click', () => {
+  $('#userAdminModal')?.close();
+  openUserProfile();
+});
+$('#adminBackupBtn')?.addEventListener('click', async event => {
+  const button = event.currentTarget;
+  if (String(state.session?.role || '').toLowerCase() !== 'admin' || button.disabled) return;
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/admin/backup', { credentials: 'same-origin', cache: 'no-store' });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.error || `备份下载失败（${response.status}）`);
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    const filename = response.headers.get('Content-Disposition')?.match(/filename="?([^";]+)"?/i)?.[1];
+    anchor.href = url;
+    anchor.download = filename || 'frameforge_backup.db';
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast('数据库备份已下载');
+  } catch (err) { toast(err.message, true); }
+  finally { button.disabled = false; }
+});
+
+function openUserProfile() {
   const form = $('#userProfileForm');
   if (!form || !state.session) return;
   form.elements.username.value = state.session.username || '';
@@ -2378,7 +3657,7 @@ $('#userProfileBtn')?.addEventListener('click', () => {
   const name = state.session.display_name || state.session.username || '用户';
   if (preview) preview.innerHTML = state.session.avatar_url ? `<img src="${escapeHtml(state.session.avatar_url)}" alt="">` : escapeHtml(Array.from(name)[0] || '用');
   $('#userProfileModal')?.showModal();
-});
+}
 
 $('.profile-avatar-picker')?.addEventListener('click', () => $('#profileAvatarInput')?.click());
 $('#profileAvatarInput')?.addEventListener('change', event => {
@@ -2432,15 +3711,22 @@ async function flushProjectBeforeLeaving() {
   if (!await flushCreativeBoards()) return false;
   const projectId = state.bundle?.project?.id;
   if (!projectId) return true;
+  if (!await flushActiveEditors({ timeout: 5000 })) return false;
   document.activeElement?.blur?.();
   if (state.pendingUploads > 0 || document.querySelector(ACTIVE_EDIT_SELECTOR)) {
     toast('请先完成当前编辑或上传，再离开项目。', true);
     return false;
   }
-  while (state.saveInFlight || shotReorderInFlight) {
-    await new Promise(resolve => setTimeout(resolve, 25));
-    if (state.bundle?.project?.id !== projectId) return false;
+  try {
+    await waitUntil(
+      () => !state.saveInFlight && !shotReorderInFlight,
+      { timeout: 22000, interval: 25, errorMessage: '等待当前同步完成超时' }
+    );
+  } catch (_) {
+    toast('等待同步完成超时，本地内容已保留', true);
+    return false;
   }
+  if (state.bundle?.project?.id !== projectId) return false;
   while (state.dirty) {
     if (!await saveProject({ automatic: false })) return false;
     if (state.bundle?.project?.id !== projectId) return false;
@@ -2458,7 +3744,7 @@ async function showDashboard() {
   clearTimeout(state.autoSaveTimer);
   state.autoSaveTimer = null;
   state.bundle = null;
-  state.activeShotId = null;
+  state.selection.activeShotId = null;
   state.dirty = false;
   state.undoStack = [];
   state.redoStack = [];
@@ -2504,9 +3790,28 @@ function projectCoverMarkup(p) {
   const mono = name ? (isCJK ? name.slice(0, 1) : name.slice(0, 2).toUpperCase()) : '#';
   let hue = 0;
   for (let i = 0; i < name.length; i++) hue = (hue * 31 + name.charCodeAt(i)) % 360;
-  return '<div class="project-cover" aria-hidden="true" style="--cover-h:' + hue + '">'
+  const coverUrl = p?.cover_media_id ? getMediaUrl(p.cover_media_id) : '';
+  const image = coverUrl ? '<img class="project-cover-image" src="' + escapeHtml(coverUrl) + '" alt="" loading="lazy" decoding="async">' : '';
+  return '<div class="project-cover ' + (coverUrl ? 'has-image' : 'is-fallback') + '" aria-hidden="true" style="--cover-h:' + hue + '">'
+       + image + '<span class="project-cover-wash"></span>'
        + '<span class="project-cover-monogram">' + escapeHtml(mono) + '</span>'
        + '</div>';
+}
+
+function hydrateProjectCover(row, project) {
+  if (!row || project?.cover_media_id) return;
+  const cover = row.querySelector('.project-cover');
+  if (!cover || cover.querySelector('img')) return;
+  api(`/api/projects/${encodeURIComponent(project.id)}`).then(bundle => {
+    const shot = (bundle?.shots || []).find(item => getShotPrimaryMedia(item));
+    const url = shot && getShotPrimaryMedia(shot);
+    if (!url || !cover.isConnected || cover.querySelector('img')) return;
+    const image = document.createElement('img');
+    image.className = 'project-cover-image'; image.alt = ''; image.loading = 'lazy'; image.decoding = 'async';
+    image.addEventListener('error', () => { image.remove(); cover.classList.remove('has-image'); cover.classList.add('is-fallback'); }, {once:true});
+    image.src = url;
+    cover.classList.remove('is-fallback'); cover.classList.add('has-image'); cover.prepend(image);
+  }).catch(() => {});
 }
 
 function renderProjectsGrid() {
@@ -2553,12 +3858,14 @@ function renderProjectsGrid() {
         <button type="button" class="project-row-delete btn-ghost-icon" data-action="delete-project" data-project-id="${escapeHtml(p.id)}" title="删除项目"><svg class="g-icon"><use href="#icon-delete"></use></svg></button>
       </div>
     `;
+    row.querySelector('.project-cover-image')?.addEventListener('error', event => {
+      event.target.remove();
+      const cover = row.querySelector('.project-cover');
+      cover?.classList.remove('has-image'); cover?.classList.add('is-fallback');
+    }, {once:true});
+    // /api/projects already supplies cover_media_id; never fetch a full bundle for a cover.
     row.tabIndex = 0;
     row.setAttribute('role', 'button');
-    row.onpointerenter = () => {
-      if (state.projectBundleCache.has(p.id)) return;
-      api(`/api/projects/${encodeURIComponent(p.id)}`).then(bundle => state.projectBundleCache.set(p.id, adoptServerBundle(bundle))).catch(() => {});
-    };
     row.onclick = event => { if (!event.target.closest('[data-action]')) openProject(p.id); };
     row.onkeydown = event => { if ((event.key === 'Enter' || event.key === ' ') && !event.target.closest('[data-action]')) { event.preventDefault(); openProject(p.id); } };
     grid.append(row);
@@ -2625,18 +3932,18 @@ async function openProject(id) {
   state.historyDeletedShots.clear();
   state.historyOrder = null;
   state.saveConflict = null;
-  state.selectedShotIds.clear();
+  state.selection.selectedShotIds.clear();
   state.bulkColumn = null;
-  state.selectionAnchorShotId = null;
-  state.activeShotId = state.bundle.shots[0]?.id || null;
+  state.selection.anchorShotId = null;
+  state.selection.activeShotId = state.bundle.shots[0]?.id || null;
   state.shareToken = state.bundle.project.share_token;
   state.lastServerUpdatedAt = state.bundle.project.updated_at || '';
 
   setAppContext(APP_CONTEXT.PROJECT);
   renderProjectHeader();
   renderCurrentView();
-  if (state.activeShotId) {
-    selectShot(state.activeShotId, { openInspector: window.innerWidth >= 1280 });
+  if (state.selection.activeShotId) {
+    selectShot(state.selection.activeShotId);
   }
   startPresenceSync(id);
   return true;
@@ -2837,15 +4144,14 @@ window.addEventListener('beforeunload', event => {
 
 function getShotPrimaryMedia(shot) {
   if (!shot) return null;
-  if (shot.panels && shot.panels.length > 0) {
-    // An explicitly cleared panel (including undo) must not resurrect a
-    // historical reference asset through the legacy fallback below.
-    return shot.panels[0].media_id ? getMediaUrl(shot.panels[0].media_id) : null;
-  }
-  if (shot.assets && shot.assets.length > 0) {
-    return getMediaUrl(shot.assets[0].id);
-  }
-  return null;
+  // The storyboard thumbnail is owned by the primary Panel only.
+  //
+  // Do NOT fall back to shot.assets here. shot.assets is the project's asset
+  // association/history layer; after a Panel is deleted that association may
+  // legitimately outlive the Panel. Falling back to it resurrects an image
+  // even though the inspector correctly reports 0 storyboard frames.
+  const primaryPanel = Array.isArray(shot.panels) ? shot.panels[0] : null;
+  return primaryPanel?.media_id ? getMediaUrl(primaryPanel.media_id) : null;
 }
 
 function shotCommentBadge(shot) {
@@ -2877,7 +4183,7 @@ async function copySelectedShots(mode = 'copy', explicitId = null) {
   if (!state.bundle) return false;
   if (shotClipboardCopyInFlight) { toast('正在保存复制内容，请稍后重试', true); return false; }
   const sourceProjectId = state.bundle.project.id;
-  const ids = explicitId ? [explicitId] : (state.selectedShotIds.size ? [...state.selectedShotIds] : [state.activeShotId].filter(Boolean));
+  const ids = explicitId ? [explicitId] : (state.selection.selectedShotIds.size ? [...state.selection.selectedShotIds] : [state.selection.activeShotId].filter(Boolean));
   if (!ids.length) return false;
   shotClipboardCopyInFlight = true;
   try {
@@ -2909,7 +4215,7 @@ async function pasteShotClipboard() {
     toast('剪贴板中没有有效镜头，请重新复制', true); return false;
   }
   const targetProjectId = state.bundle.project.id;
-  const anchorShotId = state.activeShotId;
+  const anchorShotId = state.selection.activeShotId;
   shotClipboardPasteInFlight = true;
   try {
     while (state.saveInFlight) await new Promise(resolve => setTimeout(resolve, 25));
@@ -3017,7 +4323,7 @@ async function commitShotReorder(sourceId, targetId, insertAfter, { respectTable
   });
   syncDerivedTimeline();
   renderCurrentView();
-  selectShot(sourceId, { openInspector: false });
+  selectShot(sourceId);
     const result = await api(`/api/projects/${projectId}/shots/reorder`, { method: 'POST', json: { shot_ids: all.map(shot => shot.id), base_order: baseOrder } });
     if (state.bundle?.project?.id !== projectId) return true;
     if (state.changeVersion === versionAtStart) state.bundle = adoptServerBundle(result);
@@ -3025,7 +4331,7 @@ async function commitShotReorder(sourceId, targetId, insertAfter, { respectTable
     state.playIndex = Math.max(0, result.shots.findIndex(shot => shot.id === sourceId));
     renderProjectHeader();
     renderCurrentView();
-    selectShot(sourceId, { openInspector: false });
+    selectShot(sourceId);
     setSaveStatus(state.dirty ? '● 待同步' : '● 已同步', state.dirty ? 'dirty' : '');
     toast('镜头顺序已保存');
     return true;
@@ -3105,7 +4411,7 @@ function wirePointerShotReorder(container, itemSelector, idFor = item => item.da
     if (!handle || !source || drag || shotReorderInFlight || source.querySelector('.inline-cell-editor, .is-editing')) return;
     const sourceId = idFor(source);
     if (!sourceId) return;
-    const selected = (state.bundle?.shots || []).filter(shot => state.selectedShotIds.has(shot.id)).map(shot => shot.id);
+    const selected = (state.bundle?.shots || []).filter(shot => state.selection.selectedShotIds.has(shot.id)).map(shot => shot.id);
     const groupIds = selected.includes(sourceId) && selected.length > 1 ? selected : [sourceId];
     event.preventDefault();
     event.stopPropagation();
@@ -3354,18 +4660,20 @@ function renderTableView() {
   const columnButton = $('#columnSettingsBtn');
   if (columnButton) {
     const hiddenCount = (state.tablePrefs.hidden || []).length;
-    const removedCount = (state.tablePrefs.removed || []).length;
-    columnButton.textContent = `列管理${hiddenCount || removedCount ? ` · 隐藏 ${hiddenCount} / 删除 ${removedCount}` : ''}`;
-    columnButton.title = '显示、隐藏、删除列，或恢复隐藏列与重新添加已删除列';
+    const archivedCount = archivedColumnSet().size;
+    columnButton.innerHTML = `<svg class="g-icon" aria-hidden="true"><use href="#icon-archive"></use></svg><span>列管理${hiddenCount || archivedCount ? ` · 隐藏 ${hiddenCount} / 归档 ${archivedCount}` : ''}</span>`;
+    columnButton.title = '显示、隐藏、归档列；归档列只能在归档区永久删除，不能恢复';
   }
 
   const shots = sortTableShots(filterShots(state.bundle.shots));
   const shotsById = new Map(shots.map(shot => [String(shot.id), shot]));
   const customFields = customTableFields();
+  const importedFields = importedTableFields();
   const dynamicColumns = currentColumnOrder();
   const width = field => isColumnHidden(field) ? 28 : (state.tablePrefs.widths[field] ?? TABLE_COLUMNS[field]?.[1] ?? 100);
-  const th = (field, label) => { const sort = state.tablePrefs.sort?.field === field ? (state.tablePrefs.sort.direction === 'asc' ? ' ↑' : ' ↓') : ''; return `<th data-column="${field}" draggable="true" class="${field === 'department' || field.startsWith('custom:') ? 'pro-only ' : ''}${isColumnHidden(field) ? 'is-column-hidden' : ''}" style="width:${width(field)}px" title="${isColumnHidden(field) ? `列已隐藏：${escapeHtml(label)}，点击图标恢复` : `拖动列头调整顺序，点击列名打开菜单，双击分隔线自动列宽`}" aria-label="${escapeHtml(label)}"><span class="column-label">${escapeHtml(label)}${sort}</span><button type="button" class="column-hidden-toggle" data-show-column="${escapeHtml(field)}" aria-label="恢复列：${escapeHtml(label)}" title="恢复列：${escapeHtml(label)}"><svg class="g-icon"><use href="#icon-visibility"></use></svg></button><span class="column-resize-handle" data-resize-column="${escapeHtml(field)}" title="拖动调整列宽"></span></th>`; };
+  const th = (field, label) => { const sort = state.tablePrefs.sort?.field === field ? (state.tablePrefs.sort.direction === 'asc' ? ' ↑' : ' ↓') : ''; return `<th data-column="${field}" draggable="true" tabindex="0" aria-haspopup="menu" class="${field === 'department' || field.startsWith('custom:') ? 'pro-only ' : ''}${isColumnHidden(field) ? 'is-column-hidden' : ''}" style="width:${width(field)}px" title="${isColumnHidden(field) ? `列已隐藏：${escapeHtml(label)}，点击图标恢复` : `拖动列头调整顺序，点击列名打开菜单，双击分隔线自动列宽`}" aria-label="${escapeHtml(label)}"><span class="column-label">${escapeHtml(label)}${sort}</span><button type="button" class="column-hidden-toggle" data-show-column="${escapeHtml(field)}" aria-label="恢复列：${escapeHtml(label)}" title="恢复列：${escapeHtml(label)}"><svg class="g-icon"><use href="#icon-visibility"></use></svg></button><span class="column-resize-handle" data-resize-column="${escapeHtml(field)}" title="拖动调整列宽"></span></th>`; };
   const customHeaders = customFields.map(field => th(`custom:${field.key}`, field.label)).join('');
+  const importedHeaders = importedFields.map(key => th(`import:${key}`, key)).join('');
 
   let html = `
     <table class="shot-table" id="mainShotTable">
@@ -3373,25 +4681,25 @@ function renderTableView() {
       <thead>
         <tr>
           <th data-column="select" style="width:${width('select')}px"><input class="shot-select" data-all="true" type="checkbox" aria-label="全选当前镜头"></th>
-          ${th('number', '镜头')}${th('thumb', '分镜画面')}${th('tc', '时码 TC')}${th('duration', '时长')}${th('title', '镜头标题')}${th('chapter', '篇章')}${th('scene', '场景/地点')}${th('panel_frame', '分镜图框')}${th('shot_size', '景别')}${th('lens', '焦段')}${th('movement', '运镜')}${th('angle', '机位角度')}${th('description', '画面描述')}${th('voiceover', '对应旁白')}${th('methods', '制作方式')}${th('status', '状态')}${th('department', '责任部门')}${customHeaders}${th('actions', '操作')}
+          ${th('number', '镜头')}${th('thumb', '分镜画面')}${th('tc', '时码 TC')}${th('duration', '时长')}${th('title', '镜头标题')}${th('chapter', '篇章')}${th('scene', '场景/地点')}${th('panel_frame', '分镜图框')}${th('shot_size', '景别')}${th('lens', '焦段')}${th('movement', '运镜')}${th('angle', '机位角度')}${th('description', '画面描述')}${th('voiceover', '对应旁白')}${th('methods', '制作方式')}${th('status', '状态')}${th('department', '责任部门')}${customHeaders}${importedHeaders}${th('actions', '操作')}
         </tr>
       </thead>
       <tbody>
   `;
 
   shots.forEach(shot => {
-    const isSel = shot.id === state.activeShotId || state.selectedShotIds.has(shot.id);
+    const isSel = shot.id === state.selection.activeShotId || state.selection.selectedShotIds.has(shot.id);
     const mediaUrl = getShotPrimaryMedia(shot);
     const statusClass = (shot.status || 'Draft').toLowerCase().replace(/\s+/g, '');
     const statusName = STATUS_LABELS[shot.status] || shot.status || '草稿';
 
     html += `
       <tr class="${isSel ? 'is-selected' : ''}" data-id="${shot.id}" data-context-shot-id="${shot.id}" title="按住拖动手柄调整镜头顺序">
-        <td><input class="shot-select" data-shot-id="${shot.id}" type="checkbox" aria-label="选择 SHOT ${escapeHtml(shot.number)}" ${state.selectedShotIds.has(shot.id) ? 'checked' : ''}></td>
+        <td><input class="shot-select" data-shot-id="${shot.id}" type="checkbox" aria-label="选择 SHOT ${escapeHtml(shot.number)}" ${state.selection.selectedShotIds.has(shot.id) ? 'checked' : ''}></td>
         <td><div class="shot-number-cell"><span class="shot-drag-handle" data-shot-drag-handle role="button" aria-label="拖动 SHOT ${escapeHtml(shot.number)}" title="按住拖动镜头；多选时拖动整组"><svg class="g-icon"><use href="#icon-drag_indicator"></use></svg></span><span class="shot-number tnum">SHOT ${escapeHtml(shot.number)}</span>${shotCommentBadge(shot)}</div></td>
-        <td>
+        <td class="shot-media-cell" data-shot-id="${shot.id}" data-field="thumb">
           <div class="shot-thumb" data-shot-id="${shot.id}" title="点击上传或替换分镜图片">
-            ${mediaUrl ? `<img src="${mediaUrl}" alt="SHOT ${shot.number}">` : `<span class="meta-text" style="font-size:10px;color:var(--text-muted);">16:9</span>`}
+            ${mediaUrl ? `<img src="${mediaUrl}" loading="lazy" decoding="async" alt="SHOT ${shot.number}">` : `<span class="meta-text" style="font-size:10px;color:var(--text-muted);">16:9</span>`}
             ${mediaUploadIndicator(shot)}
             <div class="media-hover-actions">↑ 上传</div>
           </div>
@@ -3444,6 +4752,7 @@ function renderTableView() {
           const editor = field.field_type === 'textarea' ? 'textarea' : field.field_type === 'number' ? 'number' : field.field_type === 'boolean' ? 'boolean' : 'text';
           return `<td class="pro-only editable-cell" data-shot-id="${shot.id}" data-field="custom:${escapeHtml(field.key)}" data-editor="${editor}"><div class="cell-display cell-clamp-2">${escapeHtml(value === true ? '是' : value === false ? '否' : String(value || '—'))}</div></td>`;
         }).join('')}
+        ${importedFields.map(key => `<td class="editable-cell imported-column-cell" data-shot-id="${shot.id}" data-field="import:${escapeHtml(key)}" data-editor="textarea"><div class="cell-display cell-clamp-2">${escapeHtml(String(shot.import_columns?.[key] ?? '—'))}</div></td>`).join('')}
         <td class="shot-actions"><button type="button" class="btn-ghost-icon row-delete-shot" data-delete-shot="${shot.id}" title="删除当前镜头" aria-label="删除 SHOT ${escapeHtml(shot.number)}"><svg class="g-icon"><use href="#icon-delete"></use></svg></button></td>
       </tr>
     `;
@@ -3463,7 +4772,7 @@ function renderTableView() {
     if (!target) return;
     const field = target.dataset.column;
     state.bulkColumn = field === 'duration_seconds' ? 'duration' : field;
-    if (state.selectedShotIds.size >= 2 && bulkColumnField(state.bulkColumn)) {
+    if (state.selection.selectedShotIds.size >= 2 && bulkColumnField(state.bulkColumn)) {
       event.preventDefault();
       event.stopImmediatePropagation();
       renderBulkActionBar();
@@ -3474,7 +4783,7 @@ function renderTableView() {
     header.setAttribute('aria-haspopup', 'menu');
   });
   table.querySelectorAll('tbody tr[data-id]').forEach(row => {
-    row.tabIndex = row.dataset.id === state.activeShotId ? 0 : -1;
+    row.tabIndex = row.dataset.id === state.selection.activeShotId ? 0 : -1;
     row.setAttribute('aria-haspopup', 'menu');
   });
   syncShotSelectionClasses(table);
@@ -3516,8 +4825,13 @@ function renderTableView() {
   // drift away from their real boundaries. Column settings remains the single
   // restore path, so the preference itself is retained.
   const hiddenFields = new Set((state.tablePrefs.hidden || []).filter(field => !['select', 'actions'].includes(field)));
-  const removedFields = new Set((state.tablePrefs.removed || []).filter(field => !['select', 'actions'].includes(field)));
-  const omittedFields = new Set([...hiddenFields, ...removedFields]);
+  const archivedFields = new Set([...archivedColumnSet()].filter(field => !['select', 'actions'].includes(field)));
+  // Core columns are rendered from the fixed table template before preferences
+  // are applied. A permanently deleted (purged) core column therefore also has
+  // to be removed from the rendered DOM, otherwise its header/body cells survive
+  // without a matching colgroup/order entry and appear as an unusable ghost column.
+  const purgedFields = new Set([...purgedColumnSet()].filter(field => !['select', 'actions'].includes(field)));
+  const omittedFields = new Set([...hiddenFields, ...archivedFields, ...purgedFields]);
   table.querySelectorAll('[data-column]').forEach(node => {
     if (omittedFields.has(node.dataset.column)) node.remove();
   });
@@ -3616,8 +4930,8 @@ function renderTableView() {
   table.addEventListener('dblclick', onTableDoubleClick);
   table.addEventListener('click', event => {
     const checkbox = event.target.closest('.shot-select:not([data-all])');
-    if (!checkbox || !event.shiftKey || !state.selectionAnchorShotId) return;
-    const anchor = shots.findIndex(shot => shot.id === state.selectionAnchorShotId);
+    if (!checkbox || !event.shiftKey || !state.selection.anchorShotId) return;
+    const anchor = shots.findIndex(shot => shot.id === state.selection.anchorShotId);
     const target = shots.findIndex(shot => shot.id === checkbox.dataset.shotId);
     if (anchor < 0 || target < 0) return;
     const [start, end] = anchor < target ? [anchor, target] : [target, anchor];
@@ -3626,7 +4940,7 @@ function renderTableView() {
     // the visible checkbox instead of clearing the range in reverse.
     const select = checkbox.checked;
     shots.slice(start, end + 1).forEach(shot => {
-      if (select) state.selectedShotIds.add(shot.id); else state.selectedShotIds.delete(shot.id);
+      if (select) state.selection.selectedShotIds.add(shot.id); else state.selection.selectedShotIds.delete(shot.id);
       const item = table.querySelector(`.shot-select[data-shot-id="${CSS.escape(shot.id)}"]`);
       if (item) item.checked = select;
     });
@@ -3638,14 +4952,14 @@ function renderTableView() {
     const checkbox = event.target.closest('.shot-select');
     if (!checkbox) return;
     if (checkbox.dataset.all) {
-      shots.forEach(shot => checkbox.checked ? state.selectedShotIds.add(shot.id) : state.selectedShotIds.delete(shot.id));
-      state.selectionAnchorShotId = shots.at(-1)?.id || null;
+      shots.forEach(shot => checkbox.checked ? state.selection.selectedShotIds.add(shot.id) : state.selection.selectedShotIds.delete(shot.id));
+      state.selection.anchorShotId = shots.at(-1)?.id || null;
     } else if (checkbox.checked) {
-      state.selectedShotIds.add(checkbox.dataset.shotId);
-      state.selectionAnchorShotId = checkbox.dataset.shotId;
+      state.selection.selectedShotIds.add(checkbox.dataset.shotId);
+      state.selection.anchorShotId = checkbox.dataset.shotId;
     } else {
-      state.selectedShotIds.delete(checkbox.dataset.shotId);
-      state.selectionAnchorShotId = checkbox.dataset.shotId;
+      state.selection.selectedShotIds.delete(checkbox.dataset.shotId);
+      state.selection.anchorShotId = checkbox.dataset.shotId;
     }
     syncShotSelectionClasses(table);
     renderBulkActionBar();
@@ -3663,7 +4977,7 @@ function renderTableView() {
   });
   $$('[data-shot-comments]', wrap).forEach(button => button.addEventListener('click', event => {
     event.stopPropagation();
-    selectShot(button.dataset.shotComments, { openInspector: false });
+    selectShot(button.dataset.shotComments);
     navigateToView(VIEW.REVIEW);
   }));
   renderBulkActionBar();
@@ -3785,8 +5099,8 @@ function renderBulkActionBar() {
     bar.replaceChildren();
     return;
   }
-  const selected = [...state.selectedShotIds].filter(id => state.bundle.shots.some(shot => shot.id === id));
-  state.selectedShotIds = new Set(selected);
+  const selected = [...state.selection.selectedShotIds].filter(id => state.bundle.shots.some(shot => shot.id === id));
+  state.selection.selectedShotIds = new Set(selected);
   const isBulk = selected.length >= 2;
   bar.hidden = !isBulk;
   if (!isBulk) {
@@ -3836,7 +5150,7 @@ function renderBulkActionBar() {
     }
     recordHistory();
     state.bundle.shots.forEach(shot => {
-      if (!state.selectedShotIds.has(shot.id)) return;
+      if (!state.selection.selectedShotIds.has(shot.id)) return;
       if (field.startsWith('custom:')) {
         shot.custom_fields = shot.custom_fields || {};
         shot.custom_fields[field.slice(7)] = value;
@@ -3853,7 +5167,7 @@ function renderBulkActionBar() {
   $('#bulkDeleteBtn')?.addEventListener('click', async () => {
     await deleteSelectedShots();
   });
-  $('#bulkClearBtn')?.addEventListener('click', () => { state.selectedShotIds.clear(); renderCurrentView(); });
+  $('#bulkClearBtn')?.addEventListener('click', () => { state.selection.selectedShotIds.clear(); renderCurrentView(); });
 }
 
 function syncFilterControls() {
@@ -3921,9 +5235,13 @@ function focusNextEditableCell(cell, shift) {
 function onTableDoubleClick(event) {
   cancelPendingSelection();
   const cell = event.target.closest('.editable-cell');
-  if (!cell) return;
+  if (!cell) {
+    const row = event.target.closest('tr[data-id]');
+    if (row) inspectShot(row.dataset.id);
+    return;
+  }
   // P0-SEL-01: Bulk edit only when AT LEAST 2 shots are selected and this shot is in selection
-  if (state.selectedShotIds.size > 1 && state.selectedShotIds.has(cell.dataset.shotId)) {
+  if (state.selection.selectedShotIds.size > 1 && state.selection.selectedShotIds.has(cell.dataset.shotId)) {
     const column = cell.dataset.field === 'duration_seconds' ? 'duration' : cell.dataset.field;
     if (bulkColumnField(column)) {
       event.preventDefault();
@@ -3949,13 +5267,14 @@ async function openInlineEditor(cell, options = {}) {
   const shotId = cell.dataset.shotId;
   const field = cell.dataset.field;
   const customKey = field.startsWith('custom:') ? field.slice(7) : '';
+  const importKey = field.startsWith('import:') ? field.slice(7) : '';
   const customDef = customKey ? customTableFields().find(item => item.key === customKey) : null;
   const editorType = customDef?.field_type || cell.dataset.editor;
 
   const display = cell.querySelector('.cell-display');
   const row = cell.closest('tr[data-id]');
   const shot = state.bundle?.shots?.find(s => s.id === shotId);
-  const originalValue = shot ? (customKey ? customFieldValue(shot, customKey) : (shot[field] ?? '')) : (display?.textContent ?? '');
+  const originalValue = shot ? (customKey ? customFieldValue(shot, customKey) : importKey ? (shot.import_columns?.[importKey] ?? '') : (shot[field] ?? '')) : (display?.textContent ?? '');
   if (shot && RICH_TEXT_FIELDS.has(field)) {
     if (display) {
       // 原位编辑：表格里直接改，格式从选区浮窗或右键菜单取，不弹大窗口。
@@ -3984,9 +5303,9 @@ async function openInlineEditor(cell, options = {}) {
     return;
   }
 
+  const reservation = shot ? createSoftReservationSession(shotId, field) : null;
   cell.classList.add('is-editing');
   row?.classList.add('has-active-editor');
-  if (row) row.classList.add('has-active-editor');
 
   const editor = editorType === 'textarea'
     ? document.createElement('textarea')
@@ -4023,7 +5342,6 @@ async function openInlineEditor(cell, options = {}) {
       editor.style.height = editor.scrollHeight + 'px';
     };
     editor.addEventListener('input', autoGrow);
-    // Run after DOM paint so scrollHeight is accurate
     requestAnimationFrame(autoGrow);
   }
 
@@ -4033,9 +5351,64 @@ async function openInlineEditor(cell, options = {}) {
     editor.setSelectionRange(caret, caret);
   }
 
+  const editorId = nextEditorSessionId('inline');
+  let resolveDone;
+  const done = new Promise(resolve => { resolveDone = resolve; });
+
+  const session = {
+    id: editorId,
+    type: 'inline',
+    projectId: state.bundle?.project?.id,
+    shotId,
+    field,
+    composing: false,
+    commitInFlight: false,
+    closed: false,
+    isDirty() {
+      if (session.closed) return false;
+      const currentVal = editorType === 'boolean' ? editor.checked : editor.value;
+      return String(currentVal).trim() !== String(originalValue).trim();
+    },
+    async waitForCompositionEnd() {
+      if (!session.composing) return;
+      await waitUntil(() => !session.composing, { timeout: 5000, errorMessage: '等待输入法完成超时' });
+    },
+    async commit() {
+      if (session.closed || session.commitInFlight) return done;
+      session.commitInFlight = true;
+      try {
+        await session.waitForCompositionEnd();
+        await commit();
+        return done;
+      } finally {
+        session.commitInFlight = false;
+      }
+    },
+    done
+  };
+  registerActiveEditor(session);
+
   let composing = false;
-  editor.addEventListener('compositionstart', () => { composing = true; });
-  editor.addEventListener('compositionend', () => { composing = false; });
+  const onTyping = () => {
+    if (shot && !['boolean', 'methods', 'preset'].includes(editorType)) {
+      scheduleEditorDraft({
+        projectId: state.bundle?.project?.id,
+        shotId,
+        field,
+        text: editor.value,
+        baseRevision: shot.base_revision || shot.revision
+      });
+      refreshSaveStatus();
+    }
+  };
+
+  editor.addEventListener('input', onTyping);
+  editor.addEventListener('compositionstart', () => { session.composing = true; composing = true; });
+  editor.addEventListener('compositionend', () => {
+    session.composing = false;
+    composing = false;
+    onTyping();
+  });
 
   let committed = false;
   const commit = async () => {
@@ -4052,6 +5425,9 @@ async function openInlineEditor(cell, options = {}) {
         if (customKey) {
           shot.custom_fields = shot.custom_fields || {};
           shot.custom_fields[customKey] = editorType === 'number' ? (parseFloat(newValue) || 0) : newValue;
+        } else if (importKey) {
+          shot.import_columns = shot.import_columns || {};
+          shot.import_columns[importKey] = newValue;
         } else if (editorType === 'number') {
           const num = parseFloat(newValue) || 0;
           shot[field] = num;
@@ -4069,7 +5445,7 @@ async function openInlineEditor(cell, options = {}) {
       display.title = String(newValue);
       closeEditor();
       if (field === 'duration_seconds' || field === 'shot_size' || field === 'lens') renderTableView();
-      if (state.activeShotId === shotId) renderInspector();
+      if (state.inspector.targetShotId === shotId) renderInspector();
     } catch (err) {
       toast('保存失败: ' + err.message, true);
       committed = false;
@@ -4078,11 +5454,15 @@ async function openInlineEditor(cell, options = {}) {
   };
 
   const closeEditor = () => {
+    session.closed = true;
+    unregisterActiveEditor(session);
+    reservation?.release();
+    resolveDone?.();
     editor.remove();
     display.hidden = false;
     cell.classList.remove('is-editing');
     row?.classList.remove('has-active-editor');
-    row?.classList.remove('has-active-editor');
+    refreshSaveStatus();
   };
 
   editor.addEventListener('blur', commit);
@@ -4106,6 +5486,10 @@ async function openInlineEditor(cell, options = {}) {
     } else if (e.key === 'Escape') {
       e.preventDefault();
       committed = true;
+      // User explicitly cancelled — clear any pending draft for this field
+      if (shot && state.bundle?.project?.id) {
+        clearEditorDraft(state.bundle.project.id, shotId, field);
+      }
       closeEditor();
     }
   });
@@ -4122,7 +5506,8 @@ function shotExtendedEntries(shot) {
     sound: '声音', owner: '负责人', transition: '剪辑/转场', approval_version: '审批版本'
   };
   const entries = Object.entries(labels).map(([key, label]) => [label, shot?.[key]]);
-  customTableFields().forEach(field => entries.push([field.label, customFieldValue(shot, field.key)]));
+  customTableFields().filter(field => !isColumnArchived(`custom:${field.key}`) && !isColumnPurged(`custom:${field.key}`)).forEach(field => entries.push([field.label, customFieldValue(shot, field.key)]));
+  Object.entries(shot?.import_columns || {}).filter(([key]) => !isColumnArchived(`import:${key}`) && !isColumnPurged(`import:${key}`)).forEach(([key, value]) => entries.push([key, value]));
   return entries.filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== '');
 }
 
@@ -4140,7 +5525,7 @@ function renderCardsView() {
 
   shots.forEach(shot => {
     const card = document.createElement('article');
-    const isSel = shot.id === state.activeShotId || state.selectedShotIds.has(shot.id);
+    const isSel = shot.id === state.selection.activeShotId || state.selection.selectedShotIds.has(shot.id);
     card.className = `shot-card ${isSel ? 'is-selected' : ''}`;
     card.dataset.id = shot.id;
     card.dataset.contextShotId = shot.id;
@@ -4153,11 +5538,11 @@ function renderCardsView() {
 
     card.innerHTML = `
       <div class="shot-card-header">
-        <span class="shot-card-identity"><span class="shot-drag-handle" data-shot-drag-handle role="button" aria-label="拖动 SHOT ${escapeHtml(shot.number)}" title="按住拖动镜头；多选时拖动整组"><svg class="g-icon"><use href="#icon-drag_indicator"></use></svg></span><span class="shot-number tnum">SHOT ${escapeHtml(shot.number)}</span><span class="shot-selection-mark" aria-hidden="true">${state.selectedShotIds.has(shot.id) ? '✓' : ''}</span></span>
+        <span class="shot-card-identity"><span class="shot-drag-handle" data-shot-drag-handle role="button" aria-label="拖动 SHOT ${escapeHtml(shot.number)}" title="按住拖动镜头；多选时拖动整组"><svg class="g-icon"><use href="#icon-drag_indicator"></use></svg></span><span class="shot-number tnum">SHOT ${escapeHtml(shot.number)}</span><span class="shot-selection-mark" aria-hidden="true">${state.selection.selectedShotIds.has(shot.id) ? '✓' : ''}</span></span>
         <span class="timecode tnum">${shot.tc_in || '00:00:00:00'}</span>
       </div>
-      <div class="storyboard-media" data-shot-id="${shot.id}">
-        ${mediaUrl ? `<img src="${mediaUrl}" alt="SHOT ${shot.number}">` : `<span style="font-size:11px;color:var(--text-muted);">暂无分镜</span>`}
+      <div class="storyboard-media" data-shot-id="${shot.id}" data-field="thumb">
+        ${mediaUrl ? `<img src="${mediaUrl}" loading="lazy" decoding="async" alt="SHOT ${shot.number}">` : `<span style="font-size:11px;color:var(--text-muted);">暂无分镜</span>`}
         ${shotCommentBadge(shot)}
         ${mediaUploadIndicator(shot)}
         <div class="media-hover-actions">↑ 上传 / 替换</div>
@@ -4197,7 +5582,7 @@ function renderCardsView() {
       const commentBadge = e.target.closest('[data-shot-comments]');
       if (commentBadge) {
         e.stopPropagation();
-        selectShot(shot.id, { openInspector: false });
+        selectShot(shot.id);
         navigateToView(VIEW.REVIEW);
         return;
       }
@@ -4205,10 +5590,16 @@ function renderCardsView() {
       if (e.shiftKey || e.ctrlKey || e.metaKey) {
         toggleShotSelection(shot.id, e, shots);
       } else {
-        state.selectedShotIds.clear();
-        state.selectionAnchorShotId = shot.id;
+        state.selection.selectedShotIds.clear();
+        state.selection.anchorShotId = shot.id;
         selectShot(shot.id);
       }
+    });
+    card.addEventListener('dblclick', event => {
+      if (event.target.closest('[data-card-copy], .storyboard-media, [data-shot-comments]')) return;
+      event.preventDefault();
+      event.stopPropagation();
+      inspectShot(shot.id);
     });
 
     const mediaFrame = $('.storyboard-media', card);
@@ -4247,13 +5638,13 @@ function renderWallView() {
     item.tabIndex = 0;
     item.setAttribute('aria-haspopup', 'menu');
     item.innerHTML = `
-      <div class="wall-media" data-shot-id="${shot.id}">
-        ${mediaUrl ? `<img src="${mediaUrl}" alt="SHOT ${shot.number}">` : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:11px;">SHOT ${shot.number}</div>`}
+      <div class="wall-media" data-shot-id="${shot.id}" data-field="thumb">
+        ${mediaUrl ? `<img src="${mediaUrl}" loading="lazy" decoding="async" alt="SHOT ${shot.number}">` : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:11px;">SHOT ${shot.number}</div>`}
         ${mediaUploadIndicator(shot)}
         <div class="media-hover-actions">↑ 替换</div>
       </div>
       <div class="wall-caption">
-        <span class="shot-card-identity"><span class="shot-drag-handle" data-shot-drag-handle role="button" aria-label="拖动 SHOT ${escapeHtml(shot.number)}" title="按住拖动镜头；多选时拖动整组"><svg class="g-icon"><use href="#icon-drag_indicator"></use></svg></span><span class="shot-number tnum">SHOT ${escapeHtml(shot.number)}</span><span class="shot-selection-mark" aria-hidden="true">${state.selectedShotIds.has(shot.id) ? '✓' : ''}</span>${shotCommentBadge(shot)}</span>
+        <span class="shot-card-identity"><span class="shot-drag-handle" data-shot-drag-handle role="button" aria-label="拖动 SHOT ${escapeHtml(shot.number)}" title="按住拖动镜头；多选时拖动整组"><svg class="g-icon"><use href="#icon-drag_indicator"></use></svg></span><span class="shot-number tnum">SHOT ${escapeHtml(shot.number)}</span><span class="shot-selection-mark" aria-hidden="true">${state.selection.selectedShotIds.has(shot.id) ? '✓' : ''}</span>${shotCommentBadge(shot)}</span>
         <span class="timecode tnum">${shot.duration_seconds}s</span>
       </div>
     `;
@@ -4262,7 +5653,7 @@ function renderWallView() {
       if (Date.now() < suppressShotActivationUntil) { e.preventDefault(); return; }
       if (e.target.closest('[data-shot-comments]')) {
         e.stopPropagation();
-        selectShot(shot.id, { openInspector: false });
+        selectShot(shot.id);
         navigateToView(VIEW.REVIEW);
       } else if (e.target.closest('.media-hover-actions')) {
         triggerShotMediaUpload(shot.id);
@@ -4270,8 +5661,8 @@ function renderWallView() {
         if (e.shiftKey || e.ctrlKey || e.metaKey) {
           toggleShotSelection(shot.id, e, shots);
         } else {
-          state.selectedShotIds.clear();
-          state.selectionAnchorShotId = shot.id;
+          state.selection.selectedShotIds.clear();
+          state.selection.anchorShotId = shot.id;
           selectShot(shot.id);
           navigateToView(VIEW.CARDS);
         }
@@ -4288,7 +5679,7 @@ function renderWallView() {
 // 11. TIMELINE & ANIMATIC VIEWER
 // --------------------------------------------------------------------------
 function renderTimelineView() {
-  const activeIndex = state.bundle?.shots?.findIndex(shot => shot.id === state.activeShotId) ?? -1;
+  const activeIndex = state.bundle?.shots?.findIndex(shot => shot.id === state.selection.activeShotId) ?? -1;
   if (!state.isPlaying && activeIndex >= 0) state.playIndex = activeIndex;
   renderAnimaticScreen();
   renderTimelineLanes();
@@ -4332,7 +5723,7 @@ function updateTimelineSelection({ reveal = false } = {}) {
   const current = shots[state.playIndex];
   $$('.timeline-clip').forEach(clip => {
     const active = clip.dataset.id === current?.id;
-    const selected = state.selectedShotIds.has(clip.dataset.id);
+    const selected = state.selection.selectedShotIds.has(clip.dataset.id);
     clip.classList.toggle('is-selected', active || selected);
     clip.classList.toggle('is-multi-selected', selected);
     const mark = clip.querySelector('.shot-selection-mark');
@@ -4347,7 +5738,7 @@ function jumpTimelineTo(index, { stop = true, reveal = true } = {}) {
   if (!shots.length) return;
   if (stop) stopTimelinePlayback();
   state.playIndex = Math.max(0, Math.min(Number(index) || 0, shots.length - 1));
-  selectShot(shots[state.playIndex].id, { openInspector: false });
+  selectShot(shots[state.playIndex].id);
   renderAnimaticScreen();
   updateTimelineSelection({ reveal });
 }
@@ -4418,18 +5809,23 @@ function renderTimelineLanes() {
     group.shots.forEach(({ shot, idx }) => {
       const clip = document.createElement('button');
       clip.type = 'button';
-      clip.className = `timeline-clip ${idx === state.playIndex || state.selectedShotIds.has(shot.id) ? 'is-selected' : ''}`;
+      clip.className = `timeline-clip ${idx === state.playIndex || state.selection.selectedShotIds.has(shot.id) ? 'is-selected' : ''}`;
       clip.dataset.id = shot.id;
       clip.dataset.contextShotId = shot.id;
       clip.setAttribute('aria-haspopup', 'menu');
       clip.style.flex = `${shot.duration_frames} 0 auto`;
       clip.style.minWidth = '78px';
       clip.title = `${shot.tc_in || ''} · ${shot.duration_seconds}s`;
-      clip.innerHTML = `<span class="timeline-clip-title"><span class="shot-drag-handle" data-shot-drag-handle role="button" aria-label="拖动 SHOT ${escapeHtml(shot.number)}" title="按住拖动镜头；多选时拖动整组"><svg class="g-icon"><use href="#icon-drag_indicator"></use></svg></span><b class="tnum">SHOT ${escapeHtml(shot.number)}</b><span class="shot-selection-mark" aria-hidden="true">${state.selectedShotIds.has(shot.id) ? '✓' : ''}</span></span><span class="tnum" style="color:var(--text-muted);">${escapeHtml(String(shot.duration_seconds || 0))}s</span>`;
+      clip.innerHTML = `<span class="timeline-clip-title"><span class="shot-drag-handle" data-shot-drag-handle role="button" aria-label="拖动 SHOT ${escapeHtml(shot.number)}" title="按住拖动镜头；多选时拖动整组"><svg class="g-icon"><use href="#icon-drag_indicator"></use></svg></span><b class="tnum">SHOT ${escapeHtml(shot.number)}</b><span class="shot-selection-mark" aria-hidden="true">${state.selection.selectedShotIds.has(shot.id) ? '✓' : ''}</span></span><span class="tnum" style="color:var(--text-muted);">${escapeHtml(String(shot.duration_seconds || 0))}s</span>`;
       clip.onclick = event => {
         if (Date.now() < suppressShotActivationUntil) return;
         if (event.shiftKey || event.ctrlKey || event.metaKey) toggleShotSelection(shot.id, event, shots);
-        else { state.selectedShotIds.clear(); state.selectionAnchorShotId = shot.id; jumpTimelineTo(idx, { reveal: false }); }
+        else { state.selection.selectedShotIds.clear(); state.selection.anchorShotId = shot.id; jumpTimelineTo(idx, { reveal: false }); }
+      };
+      clip.ondblclick = event => {
+        event.preventDefault();
+        event.stopPropagation();
+        inspectShot(shot.id);
       };
       lane.append(clip);
     });
@@ -4457,7 +5853,7 @@ function startTimelinePlayback() {
     if (!state.isPlaying) return;
     const shot = state.bundle.shots[state.playIndex];
     if (!shot) { stopTimelinePlayback(); return; }
-    selectShot(shot.id, { openInspector: false });
+    selectShot(shot.id);
     renderAnimaticScreen();
     updateTimelineSelection({ reveal: true });
     const status = $('#timelinePlaybackStatus');
@@ -4486,14 +5882,14 @@ $('#timelineAutoPart')?.addEventListener('change', event => { state.timelineAuto
 // 12. NOTION DATABASE PAGE PROPERTY INSPECTOR
 // --------------------------------------------------------------------------
 function syncShotSelectionClasses(root = document) {
-  const selected = state.selectedShotIds || new Set();
+  const selected = state.selection.selectedShotIds || new Set();
   const isMulti = selected.size >= 2;
   const isSingle = selected.size === 1;
 
   $$('[data-context-shot-id], tr[data-id]', root).forEach(item => {
     const id = item.dataset.contextShotId || item.dataset.id;
     if (!id) return;
-    const isActive = id === state.activeShotId;
+    const isActive = id === state.selection.activeShotId;
     const isItemSelected = selected.has(id);
     const itemMulti = isMulti && isItemSelected;
     const itemSingle = (isSingle && isItemSelected) || (selected.size === 0 && isActive);
@@ -4508,7 +5904,7 @@ function syncShotSelectionClasses(root = document) {
   $$('.shot-selection-mark', root).forEach(mark => {
     const owner = mark.closest('[data-context-shot-id], [data-id]');
     const id = owner?.dataset.contextShotId || owner?.dataset.id;
-    mark.textContent = id && selected.has(id) ? '✓' : '';
+    mark.innerHTML = id && selected.has(id) ? '<svg class="g-icon" aria-hidden="true"><use href="#icon-check"></use></svg>' : '';
   });
   const all = $('#mainShotTable .shot-select[data-all]');
   if (all) {
@@ -4520,7 +5916,7 @@ function syncShotSelectionClasses(root = document) {
 }
 
 function selectionRangeIds(shotId, items = filterShots(state.bundle?.shots || [])) {
-  const anchorId = state.selectionAnchorShotId || state.activeShotId;
+  const anchorId = state.selection.anchorShotId || state.selection.activeShotId;
   const anchor = items.findIndex(shot => shot.id === anchorId);
   const target = items.findIndex(shot => shot.id === shotId);
   if (anchor < 0 || target < 0) return [shotId];
@@ -4540,56 +5936,56 @@ function cancelPendingSelection() {
 function activateShotForPointer(shotId, event, items = filterShots(state.bundle?.shots || [])) {
   if (!shotId) return;
   cancelPendingSelection();
-  if (event?.shiftKey && (state.selectionAnchorShotId || state.activeShotId)) {
+  if (event?.shiftKey && (state.selection.anchorShotId || state.selection.activeShotId)) {
     const range = selectionRangeIds(shotId, items);
-    state.selectedShotIds = new Set(range);
-    state.activeShotId = shotId;
+    state.selection.selectedShotIds = new Set(range);
+    state.selection.activeShotId = shotId;
     syncShotSelectionClasses();
     renderBulkActionBar();
   } else if (event?.ctrlKey || event?.metaKey) {
-    if (state.selectedShotIds.has(shotId)) {
-      state.selectedShotIds.delete(shotId);
-      state.activeShotId = [...state.selectedShotIds].at(-1) || null;
+    if (state.selection.selectedShotIds.has(shotId)) {
+      state.selection.selectedShotIds.delete(shotId);
+      state.selection.activeShotId = [...state.selection.selectedShotIds].at(-1) || null;
     } else {
-      state.selectedShotIds.add(shotId);
-      state.activeShotId = shotId;
+      state.selection.selectedShotIds.add(shotId);
+      state.selection.activeShotId = shotId;
     }
-    state.selectionAnchorShotId = shotId;
+    state.selection.anchorShotId = shotId;
     syncShotSelectionClasses();
-    if (state.selectedShotIds.size >= 2) {
-      state.inspectorOpen = false;
+    if (state.selection.selectedShotIds.size >= 2) {
+      closeInspector();
       document.body.dataset.hasShot = 'false';
       $('#workspaceContentGrid')?.classList.remove('has-inspector');
       $('#inspectorSlot')?.setAttribute('hidden', '');
       renderBulkActionBar();
     } else {
       renderBulkActionBar();
-      if (state.activeShotId) {
-        selectShot(state.activeShotId, { openInspector: true });
+      if (state.selection.activeShotId) {
+        selectShot(state.selection.activeShotId);
       }
     }
   } else {
-    if (state.selectedShotIds.size > 1 && state.selectedShotIds.has(shotId)) {
-      state.activeShotId = shotId;
+    if (state.selection.selectedShotIds.size > 1 && state.selection.selectedShotIds.has(shotId)) {
+      state.selection.activeShotId = shotId;
       syncShotSelectionClasses();
       pendingSelectionTimer = setTimeout(() => {
         pendingSelectionTimer = null;
-        state.selectedShotIds = new Set([shotId]);
-        state.activeShotId = shotId;
-        state.selectionAnchorShotId = shotId;
+        state.selection.selectedShotIds = new Set([shotId]);
+        state.selection.activeShotId = shotId;
+        state.selection.anchorShotId = shotId;
         syncShotSelectionClasses();
         renderBulkActionBar();
-        selectShot(shotId, { openInspector: true });
+        selectShot(shotId);
       }, 220);
       return;
     }
 
-    state.selectedShotIds = new Set([shotId]);
-    state.activeShotId = shotId;
-    state.selectionAnchorShotId = shotId;
+    state.selection.selectedShotIds = new Set([shotId]);
+    state.selection.activeShotId = shotId;
+    state.selection.anchorShotId = shotId;
     syncShotSelectionClasses();
     renderBulkActionBar();
-    selectShot(shotId, { openInspector: true });
+    selectShot(shotId);
   }
 }
 
@@ -4599,16 +5995,22 @@ function toggleShotSelection(shotId, event, items = filterShots(state.bundle?.sh
 
 async function deleteSelectedShots() {
   if (!state.bundle) return false;
-  const ids = [...state.selectedShotIds].filter(id => state.bundle.shots.some(shot => shot.id === id));
+  const ids = [...state.selection.selectedShotIds].filter(id => state.bundle.shots.some(shot => shot.id === id));
   if (!ids.length) return false;
-  if (!await confirmAction('删除选中镜头', `确定将 ${ids.length} 个镜头移入废纸篓吗？`)) return false;
+  const selectedLabels = ids.map(id => {
+    const shot = state.bundle.shots.find(item => item.id === id);
+    return `SHOT ${shot?.number || '—'} · ${shot?.title || '未命名'}`;
+  });
+  const shotScope = selectedLabels.length <= 5 ? selectedLabels.join('、') : `${selectedLabels.slice(0, 5).join('、')} 等 ${selectedLabels.length} 个镜头`;
+  if (!await confirmAction('移入镜头废纸篓', `将以下 ${ids.length} 个镜头移入废纸篓：${shotScope}。可在 30 天内恢复。`)) return false;
   recordHistory();
   const before = { ...state.bundle, shots: cloneShots(state.bundle.shots) };
   const projectId = before.project.id;
   state.bundle = { ...before, shots: before.shots.filter(shot => !ids.includes(shot.id)) };
+  if (state.inspector.open && ids.includes(state.inspector.targetShotId)) closeInspector();
   state.bundle.shots.forEach((shot, index) => { shot.position = index; shot.sort_index = index; shot.number = String(index + 1).padStart(3, '0'); });
-  state.selectedShotIds.clear();
-  state.activeShotId = state.bundle.shots[0]?.id || null;
+  state.selection.selectedShotIds.clear();
+  state.selection.activeShotId = state.bundle.shots[0]?.id || null;
   renderProjectHeader();
   renderCurrentView();
   try {
@@ -4616,48 +6018,80 @@ async function deleteSelectedShots() {
     if (state.bundle?.project?.id !== projectId) return true;
     state.bundle = adoptServerBundle(deletedBundle);
     state.lastServerUpdatedAt = state.bundle.project.updated_at || state.lastServerUpdatedAt;
-    state.activeShotId = state.bundle.shots[0]?.id || null;
+    state.selection.activeShotId = state.bundle.shots[0]?.id || null;
     renderProjectHeader();
     renderCurrentView();
+    if (state.inspector.open) renderInspector();
     toast(`已删除 ${ids.length} 个镜头`);
     return true;
   } catch (err) {
     if (state.bundle?.project?.id !== projectId) return false;
     state.bundle = before;
-    state.selectedShotIds = new Set(ids);
+    state.selection.selectedShotIds = new Set(ids);
     renderProjectHeader();
     renderCurrentView();
+    if (state.inspector.open) renderInspector();
     toast(`删除失败，已恢复选择：${err.message}`, true);
     return false;
   }
 }
 
-function selectShot(shotId, { openInspector = true } = {}) {
-  state.activeShotId = shotId;
+function updateShotSelection(shotId) {
+  if (shotId && !state.bundle?.shots?.some(shot => shot.id === shotId)) shotId = null;
+  state.selection.activeShotId = shotId;
   if (shotId) {
-    if (state.selectedShotIds.size <= 1) {
-      state.selectedShotIds = new Set([shotId]);
-      state.selectionAnchorShotId = shotId;
+    if (state.selection.selectedShotIds.size <= 1) {
+      state.selection.selectedShotIds = new Set([shotId]);
+      state.selection.anchorShotId = shotId;
     }
   } else {
-    state.selectedShotIds.clear();
-    state.selectionAnchorShotId = null;
+    state.selection.selectedShotIds.clear();
+    state.selection.anchorShotId = null;
   }
   const hasShot = shotId !== null;
-  state.inspectorOpen = hasShot && openInspector;
   document.body.dataset.hasShot = hasShot ? 'true' : 'false';
-
-  const grid = $('#workspaceContentGrid');
-  const slot = $('#inspectorSlot');
-  if (grid) grid.classList.toggle('has-inspector', hasShot && state.inspectorOpen);
-  if (slot) slot.hidden = !(hasShot && state.inspectorOpen);
-  $('#toggleInspectorBtn')?.setAttribute('aria-expanded',String(hasShot && state.inspectorOpen));
-
   syncShotSelectionClasses();
-
-  if (hasShot) renderInspector();
   renderBulkActionBar();
   queuePresenceHeartbeat(true);
+}
+
+function selectShot(shotId) {
+  updateShotSelection(shotId);
+  publishWorkspaceUI();
+}
+
+function syncInspectorVisibility() {
+  const targetExists = state.bundle?.shots?.some(shot => shot.id === state.inspector.targetShotId);
+  const visible = Boolean(state.inspector.open && targetExists);
+  if (!visible) { state.inspector.open = false; state.inspector.targetShotId = null; }
+  $('#workspaceContentGrid')?.classList.toggle('has-inspector', visible);
+  const slot = $('#inspectorSlot');
+  if (slot) slot.hidden = !visible;
+  const trigger = $('#toggleInspectorBtn');
+  if (trigger) {
+    trigger.setAttribute('aria-expanded', String(visible));
+    trigger.setAttribute('aria-pressed', String(visible));
+    trigger.setAttribute('aria-label', '详情');
+    trigger.setAttribute('title', visible ? '收起镜头详情' : '打开镜头详情');
+  }
+}
+
+function closeInspector() {
+  state.inspector.open = false;
+  state.inspector.targetShotId = null;
+  syncInspectorVisibility();
+  publishWorkspaceUI();
+}
+
+function inspectShot(shotId) {
+  if (!state.bundle?.shots?.some(shot => shot.id === shotId)) return false;
+  updateShotSelection(shotId);
+  state.inspector.targetShotId = shotId;
+  state.inspector.open = true;
+  syncInspectorVisibility();
+  renderInspector();
+  publishWorkspaceUI();
+  return true;
 }
 
 const REVIEW_COMPARE_FIELDS = [
@@ -4772,14 +6206,15 @@ function openShotReview(shotId, tab = 'comments', versionId = '') {
     if (versionId) container.dataset.reviewVersionId = versionId;
     else delete container.dataset.reviewVersionId;
   }
-  selectShot(shotId, { openInspector: false });
+  selectShot(shotId);
   navigateToView(VIEW.REVIEW);
 }
 
 function renderInspector() {
-  const shot = state.bundle?.shots?.find(s => s.id === state.activeShotId);
+  const shot = state.bundle?.shots?.find(s => s.id === state.inspector.targetShotId);
   const scroll = $('#inspectorScroll');
-  if (!shot || !scroll) return;
+  if (!shot) { if (state.inspector.open) closeInspector(); return; }
+  if (!scroll) return;
 
   const latestVersion = shot.versions?.[0] || null;
   const latestSnapshot = versionSnapshot(latestVersion);
@@ -4839,9 +6274,9 @@ function renderInspector() {
       <div class="inspector-steps">${(shot.steps || []).map((step, index) => `<div class="inspector-step editable-step" draggable="true" data-step-id="${escapeHtml(step.id)}"><span class="step-handle" title="拖动排序">⋮⋮</span><b class="step-name">${String(index + 1).padStart(2, '0')} · ${escapeHtml(step.name || '未命名步骤')}</b><button class="step-status" data-step-status="${escapeHtml(step.id)}">${escapeHtml(step.status || '未开始')}</button><button class="btn-ghost-icon step-delete" data-action="delete-step" data-step-id="${escapeHtml(step.id)}" title="删除步骤">×</button><div class="step-fields"><button data-step-field="type" data-label="类型"><span>类型</span><b>${escapeHtml(stepTypeLabel(step.type))}</b></button><button data-step-field="department" data-label="责任部门"><span>部门</span><b>${escapeHtml(stepDepartmentLabel(step.department))}</b></button><button data-step-field="owner" data-label="负责人"><span>负责人</span><b>${escapeHtml(step.owner || '—')}</b></button><button data-step-field="input_asset" data-label="输入素材"><span>输入</span><b>${escapeHtml(step.input_asset || '—')}</b></button><button data-step-field="output_asset" data-label="输出素材"><span>输出</span><b>${escapeHtml(step.output_asset || '—')}</b></button><button data-step-field="notes" data-label="步骤备注"><span>备注</span><b>${escapeHtml(step.notes || '—')}</b></button></div></div>`).join('') || '<div class="config-empty">暂无制作步骤</div>'}</div>
     </section>
 
-    ${(state.bundle.custom_fields || []).length ? `<section class="inspector-section pro-only"><div class="inspector-section-title">自定义字段</div>${state.bundle.custom_fields.map(field => `<div class="property-row" data-field="custom:${escapeHtml(field.key)}"><span class="property-label">${escapeHtml(field.label)}</span><span class="property-value">${escapeHtml(String(shot.custom_fields?.[field.key] ?? '—'))}</span></div>`).join('')}</section>` : ''}
+    ${customTableFields().filter(field => !isColumnArchived(`custom:${field.key}`) && !isColumnPurged(`custom:${field.key}`)).length ? `<section class="inspector-section pro-only"><div class="inspector-section-title">自定义字段</div>${customTableFields().filter(field => !isColumnArchived(`custom:${field.key}`) && !isColumnPurged(`custom:${field.key}`)).map(field => `<div class="property-row" data-field="custom:${escapeHtml(field.key)}"><span class="property-label">${escapeHtml(field.label)}</span><span class="property-value">${escapeHtml(String(shot.custom_fields?.[field.key] ?? '—'))}</span></div>`).join('')}</section>` : ''}
 
-    ${Object.keys(shot.import_columns || {}).length ? `<section class="inspector-section"><div class="inspector-section-title">导入原始列（${Object.keys(shot.import_columns).length}）</div>${Object.entries(shot.import_columns).map(([label, value]) => `<div class="property-row imported-property" data-field="import:${escapeHtml(label)}" tabindex="0" title="双击修改"><span class="property-label">${escapeHtml(label)}</span><span class="property-value">${escapeHtml(String(value || '—'))}</span></div>`).join('')}</section>` : ''}
+    ${Object.entries(shot.import_columns || {}).filter(([label]) => !isColumnArchived(`import:${label}`) && !isColumnPurged(`import:${label}`)).length ? `<section class="inspector-section"><div class="inspector-section-title">导入原始列（${Object.entries(shot.import_columns || {}).filter(([label]) => !isColumnArchived(`import:${label}`) && !isColumnPurged(`import:${label}`)).length}）</div>${Object.entries(shot.import_columns || {}).filter(([label]) => !isColumnArchived(`import:${label}`) && !isColumnPurged(`import:${label}`)).map(([label, value]) => `<div class="property-row imported-property" data-field="import:${escapeHtml(label)}" tabindex="0" title="双击修改"><span class="property-label">${escapeHtml(label)}</span><span class="property-value">${escapeHtml(String(value || '—'))}</span></div>`).join('')}</section>` : ''}
 
     <!-- Section 3: 摄影核心 (两种模式均完整呈现) -->
     <section class="inspector-section">
@@ -4934,7 +6369,7 @@ function renderInspector() {
     </section>
   `;
 
-  const beginInspectorInlineEdit = (host, currentValue, { multiline = false, numeric = false, onCommit } = {}) => {
+  const beginInspectorInlineEdit = (host, currentValue, { multiline = false, numeric = false, field = null, onCommit } = {}) => {
     if (!host || host.querySelector('.property-inline-editor')) return;
     const original = String(currentValue ?? '');
     const editor = document.createElement(multiline ? 'textarea' : 'input');
@@ -4954,12 +6389,77 @@ function renderInspector() {
     }
     editor.focus();
     if (!numeric && editor.setSelectionRange) editor.setSelectionRange(editor.value.length, editor.value.length);
+
+    const reservation = field && shot?.id ? createSoftReservationSession(shot.id, field) : null;
+    const editorId = nextEditorSessionId('inspector');
+    let resolveDone;
+    const done = new Promise(resolve => { resolveDone = resolve; });
+
     let finished = false;
+    const session = {
+      id: editorId,
+      type: 'inspector',
+      projectId: state.bundle?.project?.id,
+      shotId: shot?.id,
+      field,
+      composing: false,
+      commitInFlight: false,
+      closed: false,
+      isDirty() {
+        if (session.closed) return false;
+        return editor.value.trim() !== original.trim();
+      },
+      async waitForCompositionEnd() {
+        if (!session.composing) return;
+        await waitUntil(() => !session.composing, { timeout: 5000, errorMessage: '等待输入法完成超时' });
+      },
+      async commit() {
+        if (session.closed || session.commitInFlight) return done;
+        session.commitInFlight = true;
+        try {
+          await session.waitForCompositionEnd();
+          finish(true);
+          return done;
+        } finally {
+          session.commitInFlight = false;
+        }
+      },
+      done
+    };
+    registerActiveEditor(session);
+
+    const onTyping = () => {
+      if (field && shot?.id && !numeric) {
+        scheduleEditorDraft({
+          projectId: state.bundle?.project?.id,
+          shotId: shot.id,
+          field,
+          text: editor.value,
+          baseRevision: shot.base_revision || shot.revision
+        });
+        refreshSaveStatus();
+      }
+    };
+
+    editor.addEventListener('input', onTyping);
+    editor.addEventListener('compositionstart', () => { session.composing = true; });
+    editor.addEventListener('compositionend', () => {
+      session.composing = false;
+      onTyping();
+    });
+
     const finish = save => {
       if (finished) return;
       finished = true;
+      session.closed = true;
+      unregisterActiveEditor(session);
+      reservation?.release();
+      resolveDone?.();
       const next = editor.value.trim();
-      if (save && next !== original.trim()) onCommit?.(next);
+      if (save && next !== original.trim()) {
+        onCommit?.(next);
+      }
+      refreshSaveStatus();
       renderInspector();
     };
     editor.addEventListener('click', event => event.stopPropagation());
@@ -4967,12 +6467,19 @@ function renderInspector() {
     editor.addEventListener('blur', () => finish(true), { once: true });
     editor.addEventListener('keydown', event => {
       event.stopPropagation();
-      if (event.key === 'Escape') { event.preventDefault(); finish(false); }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        // User explicitly cancelled — clear any pending draft for this field
+        if (field && shot?.id && state.bundle?.project?.id) {
+          clearEditorDraft(state.bundle.project.id, shot.id, field);
+        }
+        finish(false);
+      }
       if (event.key === 'Enter' && (!multiline || event.ctrlKey || event.metaKey)) { event.preventDefault(); finish(true); }
     });
   };
 
-  scroll.insertAdjacentHTML('afterbegin', `<section class="inspector-section"><div class="inspector-section-title">剧本</div>${Object.entries(SCRIPT_COLUMNS).filter(([field])=>!(state.tablePrefs.removed||[]).includes(field)).map(([field,label])=>`<div class="property-row" data-field="${field}"><span class="property-label">${label}</span><span class="property-value">${formattedShotField(shot,field)}</span></div>`).join('')}</section>`);
+  scroll.insertAdjacentHTML('afterbegin', `<section class="inspector-section"><div class="inspector-section-title">剧本</div>${Object.entries(SCRIPT_COLUMNS).filter(([field])=>!isColumnArchived(field) && !isColumnPurged(field)).map(([field,label])=>`<div class="property-row" data-field="${field}"><span class="property-label">${label}</span><span class="property-value">${formattedShotField(shot,field)}</span></div>`).join('')}</section>`);
   $$('.inspector-text-block-value[data-field]', scroll).forEach(block=>{block.innerHTML=formattedShotField(shot,block.dataset.field,'双击输入…');});
   // Every visible property supports deliberate double-click editing. A single
   // click remains available for text selection and panel navigation.
@@ -5002,7 +6509,7 @@ function renderInspector() {
       if (field.startsWith('import:')) {
         const key = field.slice(7);
         const currentVal = shot.import_columns?.[key] ?? '';
-        beginInspectorInlineEdit(row.querySelector('.property-value'), currentVal, { multiline: true, onCommit: next => {
+        beginInspectorInlineEdit(row.querySelector('.property-value'), currentVal, { multiline: true, field, onCommit: next => {
             recordHistory();
             shot.import_columns = { ...(shot.import_columns || {}), [key]: next };
             markDirty();
@@ -5012,7 +6519,7 @@ function renderInspector() {
       if (field?.startsWith('custom:')) {
         const key = field.slice(7);
         const currentVal = shot.custom_fields?.[key] ?? '';
-        beginInspectorInlineEdit(row.querySelector('.property-value'), currentVal, { multiline: true, onCommit: next => {
+        beginInspectorInlineEdit(row.querySelector('.property-value'), currentVal, { multiline: true, field, onCommit: next => {
             recordHistory();
             shot.custom_fields = { ...(shot.custom_fields || {}), [key]: next };
             markDirty();
@@ -5022,7 +6529,7 @@ function renderInspector() {
       if (['secondary_methods', 'production_steps'].includes(field)) return;
       const currentVal = shot[field] || '';
       const multiline = ['description', 'voiceover', 'action', 'performance', 'composition', 'director_notes', 'notes', 'dialogue', 'subtitle', 'music', 'sound'].includes(field);
-      beginInspectorInlineEdit(row.querySelector('.property-value'), currentVal, { multiline, numeric: field === 'duration_seconds', onCommit: next => {
+      beginInspectorInlineEdit(row.querySelector('.property-value'), currentVal, { multiline, numeric: field === 'duration_seconds', field, onCommit: next => {
           recordHistory();
           if (field === 'duration_seconds') {
             const seconds = Math.max(0, Number.parseFloat(next) || 0);
@@ -5081,11 +6588,77 @@ function renderInspector() {
       ta.focus();
       ta.setSelectionRange(ta.value.length, ta.value.length);
 
+      const reservation = shot?.id && field ? createSoftReservationSession(shot.id, field) : null;
+      const editorId = nextEditorSessionId('inspector-text');
+      let resolveDone;
+      const done = new Promise(resolve => { resolveDone = resolve; });
+
       let saved = false;
+      const session = {
+        id: editorId,
+        type: 'inspector-text',
+        projectId: state.bundle?.project?.id,
+        shotId: shot?.id,
+        field,
+        composing: false,
+        commitInFlight: false,
+        closed: false,
+        isDirty() {
+          if (session.closed) return false;
+          return ta.value.trim() !== String(currentVal).trim();
+        },
+        async waitForCompositionEnd() {
+          if (!session.composing) return;
+          await waitUntil(() => !session.composing, { timeout: 5000, errorMessage: '等待输入法完成超时' });
+        },
+        async commit() {
+          if (session.closed || session.commitInFlight) return done;
+          session.commitInFlight = true;
+          try {
+            await session.waitForCompositionEnd();
+            save();
+            return done;
+          } finally {
+            session.commitInFlight = false;
+          }
+        },
+        done
+      };
+      registerActiveEditor(session);
+
+      const onTyping = () => {
+        if (shot?.id && field) {
+          scheduleEditorDraft({
+            projectId: state.bundle?.project?.id,
+            shotId: shot.id,
+            field,
+            text: ta.value,
+            baseRevision: shot.base_revision || shot.revision
+          });
+          refreshSaveStatus();
+        }
+      };
+
+      ta.addEventListener('input', onTyping);
+      ta.addEventListener('compositionstart', () => { session.composing = true; });
+      ta.addEventListener('compositionend', () => {
+        session.composing = false;
+        onTyping();
+      });
+
+      const closeSession = () => {
+        session.closed = true;
+        unregisterActiveEditor(session);
+        reservation?.release();
+        resolveDone?.();
+        refreshSaveStatus();
+      };
+
       const save = () => {
         if (saved) return;
         saved = true;
         const newVal = ta.value;
+        closeSession();
         block.classList.remove('is-text-editing');
         if (newVal.trim() !== String(currentVal).trim()) {
           recordHistory();
@@ -5098,6 +6671,7 @@ function renderInspector() {
       const cancel = () => {
         if (saved) return;
         saved = true;
+        closeSession();
         block.classList.remove('is-text-editing');
         renderInspector();
       };
@@ -5254,25 +6828,18 @@ function syncTableCell(shotId, field, value) {
   }
 }
 
-$('#inspCloseBtn')?.addEventListener('click', () => {
-  // Closing the inspector is not the same as deselecting the row.
-  state.inspectorOpen = false;
-  $('#workspaceContentGrid')?.classList.remove('has-inspector');
-  const slot = $('#inspectorSlot');
-  if (slot) slot.hidden = true;
-  $('#toggleInspectorBtn')?.setAttribute('aria-expanded','false');
-});
+$('#inspCloseBtn')?.addEventListener('click', closeInspector);
 $('#toggleInspectorBtn')?.addEventListener('click',()=>{
-  if(state.inspectorOpen){$('#inspCloseBtn')?.click();return;}
-  const shot=state.bundle?.shots?.find(item=>item.id===state.activeShotId)||state.bundle?.shots?.[0];
+  const shot=state.bundle?.shots?.find(item=>item.id===state.selection.activeShotId)||state.bundle?.shots?.[0];
   if(!shot){toast('先添加一个镜头');return;}
-  selectShot(shot.id,{openInspector:true});
+  if(state.inspector.open && state.inspector.targetShotId===shot.id){closeInspector();return;}
+  inspectShot(shot.id);
 });
 
 let previousViewportWidth = window.innerWidth;
 window.addEventListener('resize', () => {
   const currentWidth = window.innerWidth;
-  if (previousViewportWidth >= 768 && currentWidth < 768 && state.inspectorOpen) {
+  if (previousViewportWidth >= 768 && currentWidth < 768 && state.inspector.open) {
     $('#inspCloseBtn')?.click();
   }
   previousViewportWidth = currentWidth;
@@ -5280,13 +6847,20 @@ window.addEventListener('resize', () => {
 
 async function deleteShotById(deletedId) {
   if (!deletedId || !state.bundle) return;
+  const wasInspected = state.inspector.open && state.inspector.targetShotId === deletedId;
   recordHistory();
   const before = { ...state.bundle, shots: cloneShots(state.bundle.shots) };
   const projectId = before.project.id;
   state.bundle = { ...before, shots: before.shots.filter(shot => shot.id !== deletedId) };
+  const remainingShotIds = new Set(state.bundle.shots.map(shot => shot.id));
+  state.selection.selectedShotIds = new Set([...state.selection.selectedShotIds].filter(id => remainingShotIds.has(id)));
+  if (state.selection.selectedShotIds.size === 0 && state.bundle.shots[0]) state.selection.selectedShotIds.add(state.bundle.shots[0].id);
+  state.selection.anchorShotId = state.bundle.shots[0]?.id || null;
   state.bundle.shots.forEach((shot, index) => { shot.position = index; shot.sort_index = index; shot.number = String(index + 1).padStart(3, '0'); });
-  state.activeShotId = state.bundle.shots[0]?.id || null;
-  state.inspectorOpen = Boolean(state.activeShotId);
+  state.selection.activeShotId = state.bundle.shots[0]?.id || null;
+  if (wasInspected) closeInspector();
+  selectShot(state.selection.activeShotId);
+  if (state.inspector.open) renderInspector();
   renderProjectHeader();
   renderCurrentView();
   setSaveStatus('↻ 删除同步中…', 'syncing');
@@ -5294,27 +6868,36 @@ async function deleteShotById(deletedId) {
     const deletedBundle = await api(`/api/projects/${projectId}/shots/bulk-delete`, { method: 'POST', json: { shot_ids: [deletedId] } });
     if (state.bundle?.project?.id !== projectId) return;
     state.bundle = adoptServerBundle(deletedBundle);
-    state.activeShotId = state.bundle.shots[0]?.id || null;
-    state.inspectorOpen = Boolean(state.activeShotId);
+    state.selection.activeShotId = state.bundle.shots[0]?.id || null;
+    state.selection.selectedShotIds = new Set(state.bundle.shots.slice(0, 1).map(shot => shot.id));
+    state.selection.anchorShotId = state.selection.activeShotId;
+    if (wasInspected) closeInspector();
     renderProjectHeader();
     renderCurrentView();
-    if (state.activeShotId) selectShot(state.activeShotId);
+    if (state.selection.activeShotId) selectShot(state.selection.activeShotId);
     else $('#inspCloseBtn')?.click();
+    if (state.inspector.open) renderInspector();
     setSaveStatus('● 已同步', '');
     toast('镜头已移入废纸篓');
   } catch (err) {
     if (state.bundle?.project?.id !== projectId) return;
     state.bundle = before;
-    state.activeShotId = deletedId;
+    state.selection.activeShotId = deletedId;
+    state.selection.selectedShotIds = new Set([deletedId]);
+    state.selection.anchorShotId = deletedId;
     renderProjectHeader(); renderCurrentView(); selectShot(deletedId);
+    if (wasInspected) inspectShot(deletedId);
+    else if (state.inspector.open) renderInspector();
     setSaveStatus('! 删除同步失败', 'error');
     toast(`删除失败，已恢复：${err.message}`, true);
   }
 }
 
 $('#inspTrashBtn')?.addEventListener('click', async () => {
-  if (!await confirmAction('移入废纸篓', '确定将当前镜头移入废纸篓吗？')) return;
-  await deleteShotById(state.activeShotId);
+  const shot = state.bundle?.shots.find(item => item.id === state.inspector.targetShotId);
+  if (!shot) return;
+  if (!await confirmAction('移入镜头废纸篓', `将 SHOT ${shot.number || '—'} · ${shot.title || '未命名'} 移入废纸篓，可在 30 天内恢复。`)) return;
+  await deleteShotById(shot.id);
 });
 
 // --------------------------------------------------------------------------
@@ -5341,22 +6924,103 @@ function canvasBlob(canvas, type, quality) {
   });
 }
 
-async function compressImage(file) {
-  const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, 2560 / Math.max(bitmap.width, bitmap.height));
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-  canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  bitmap.close();
-  // Preserve PNG alpha and crisp line art. Photographic inputs use the
-  // smaller WebP proxy required by the private-storage baseline.
-  if (file.type === 'image/png') {
-    const blob = await canvasBlob(canvas, 'image/png');
-    return new File([blob], `${file.name.replace(/\.[^.]+$/, '')}.png`, { type: 'image/png' });
+// Browser-side image compression.
+//
+// RULE:
+// - Compression may reduce resolution / change codec.
+// - Compression MUST NOT change image geometry.
+// - The fixed 16:9 storyboard crop belongs to the DISPLAY layer only.
+//
+// Keep stored proxies at the source aspect ratio. A previous implementation
+// rendered images into a fixed-ratio canvas, mixing storage with presentation.
+const MAX_CLIENT_IMAGE_BYTES = 80 * 1024 * 1024;
+const MAX_CLIENT_IMAGE_EDGE = 2048;
+const MAX_UNCOMPRESSED_FALLBACK_BYTES = 80 * 1024 * 1024;
+const IMAGE_ASPECT_TOLERANCE = 0.005; // 0.5%
+
+async function decodeImageBitmap(file, label = '图片') {
+  try {
+    return await createImageBitmap(file);
+  } catch (error) {
+    throw new Error(`${label}解码失败，请换用 JPG、PNG 或 WebP 后重试`, { cause: error });
   }
-  const blob = await canvasBlob(canvas, 'image/webp', 0.88);
-  return new File([blob], `${file.name.replace(/\.[^.]+$/, '')}.webp`, { type: 'image/webp' });
+}
+
+async function imageGeometry(file) {
+  const bitmap = await decodeImageBitmap(file);
+  try {
+    return {
+      width: bitmap.width,
+      height: bitmap.height,
+      aspect: bitmap.width / Math.max(1, bitmap.height)
+    };
+  } finally {
+    bitmap.close();
+  }
+}
+
+async function compressImage(file) {
+  if (file.size > MAX_CLIENT_IMAGE_BYTES) {
+    throw new Error('图片超过 80MB，请先压缩后再上传');
+  }
+
+  const bitmap = await decodeImageBitmap(file);
+  try {
+    const sourceWidth = Math.max(1, bitmap.width);
+    const sourceHeight = Math.max(1, bitmap.height);
+    const scale = Math.min(1, MAX_CLIENT_IMAGE_EDGE / Math.max(sourceWidth, sourceHeight));
+    const outputWidth = Math.max(1, Math.round(sourceWidth * scale));
+    const outputHeight = Math.max(1, Math.round(sourceHeight * scale));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = outputWidth;
+    canvas.height = outputHeight;
+
+    const context = canvas.getContext('2d', { alpha: true, willReadFrequently: false });
+    if (!context) throw new Error('当前浏览器无法创建图片画布');
+
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = 'high';
+    context.clearRect(0, 0, outputWidth, outputHeight);
+    context.drawImage(bitmap, 0, 0, outputWidth, outputHeight);
+
+    const blob = await canvasBlob(canvas, 'image/webp', 0.88);
+    const proxy = new File(
+      [blob],
+      `${file.name.replace(/\.[^.]+$/, '')}.webp`,
+      { type: 'image/webp' }
+    );
+
+    console.debug?.('[FrameForge media] compressed image', {
+      source: `${sourceWidth}x${sourceHeight}`,
+      proxy: `${outputWidth}x${outputHeight}`,
+      sourceAspect: sourceWidth / sourceHeight,
+      proxyAspect: outputWidth / outputHeight
+    });
+
+    return proxy;
+  } finally {
+    bitmap.close();
+  }
+}
+
+async function verifyCompressedImageGeometry(sourceFile, proxyFile) {
+  const [source, proxy] = await Promise.all([
+    imageGeometry(sourceFile),
+    imageGeometry(proxyFile)
+  ]);
+
+  const relativeDrift =
+    Math.abs(proxy.aspect - source.aspect) /
+    Math.max(source.aspect, Number.EPSILON);
+
+  if (relativeDrift > IMAGE_ASPECT_TOLERANCE) {
+    throw new Error(
+      `图片压缩比例异常：原图 ${source.width}×${source.height}，压缩后 ${proxy.width}×${proxy.height}`
+    );
+  }
+
+  return { source, proxy, relativeDrift };
 }
 
 async function compressVideo(file) {
@@ -5414,6 +7078,15 @@ _fileInput.addEventListener('change', async e => {
   const temporaryMediaId = `local-upload-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const previewUrl = URL.createObjectURL(file);
   state.mediaCache.set(temporaryMediaId, previewUrl);
+  const uploadPresenceSession = {
+    id: nextEditorSessionId('media-upload'),
+    projectId,
+    shotId: targetShotId,
+    field: 'thumb',
+    isDirty: true,
+    closed: false,
+    commit: async () => true
+  };
   if (localShot) {
     localShot.panels = localShot.panels || [];
     localShot.panels[0] = { ...(localShot.panels[0] || {}), media_id: temporaryMediaId };
@@ -5421,15 +7094,27 @@ _fileInput.addEventListener('change', async e => {
     renderCurrentView();
   }
   state.pendingUploads += 1;
+  registerActiveEditor(uploadPresenceSession);
   try {
     toast('本地预览已显示，正在后台压缩并同步…');
     let compressed = file;
     try {
-      compressed = file.type.startsWith('image/') ? await compressImage(file) : await compressVideo(file);
+      if (file.type.startsWith('image/')) {
+        compressed = await compressImage(file);
+        await verifyCompressedImageGeometry(file, compressed);
+      } else {
+        compressed = await compressVideo(file);
+      }
     } catch (compressionError) {
-      // A browser may lack video decode/capture support. Keep the original
-      // file rather than making an otherwise valid upload fail silently.
-      toast('浏览器压缩不可用，将保留原文件上传');
+      // Correct geometry is more important than proxy size. If compression
+      // fails or changes aspect ratio, upload the original bytes instead.
+      if (file.type.startsWith('image/') && file.size <= MAX_UNCOMPRESSED_FALLBACK_BYTES) {
+        compressed = file;
+        console.warn?.('[FrameForge media] proxy rejected; uploading original', compressionError);
+        toast('图片压缩未通过比例校验，已自动改为原图上传');
+      } else {
+        throw compressionError;
+      }
     }
     const query = new URLSearchParams({ shot_id: targetShotId, filename: compressed.name });
     if (targetAssetId) query.set('asset_id', targetAssetId);
@@ -5477,6 +7162,8 @@ _fileInput.addEventListener('change', async e => {
     }
     toast(err.message, true);
   } finally {
+    uploadPresenceSession.closed = true;
+    unregisterActiveEditor(uploadPresenceSession);
     const stalePreview = state.mediaCache.get(temporaryMediaId);
     if (stalePreview?.startsWith('blob:')) URL.revokeObjectURL(stalePreview);
     state.mediaCache.delete(temporaryMediaId);
@@ -5582,13 +7269,13 @@ function applyHistorySnapshot(snapshot) {
     changed = true;
   }
   if (!changed) return false;
-  if (!state.bundle.shots.some(shot => shot.id === state.activeShotId)) {
-    state.activeShotId = state.bundle.shots[0]?.id || null;
+  if (!state.bundle.shots.some(shot => shot.id === state.selection.activeShotId)) {
+    state.selection.activeShotId = state.bundle.shots[0]?.id || null;
   }
   markDirty();
   renderProjectHeader();
   renderCurrentView();
-  if (state.activeShotId) renderInspector();
+  if (state.selection.activeShotId) renderInspector();
   return true;
 }
 
@@ -5623,17 +7310,20 @@ function redoLastChange() {
   toast('已重做');
 }
 
-function setSaveStatus(text, tone = '') {
-  const indicator = $('#saveProjectBtn');
-  if (!indicator) return;
-  indicator.textContent = text;
-  indicator.classList.toggle('dirty', tone === 'dirty');
-  indicator.classList.toggle('is-syncing', tone === 'syncing');
-  indicator.classList.toggle('is-error', tone === 'error');
+const AUTO_SAVE_RETRY = [2000, 4000, 8000, 15000, 30000];
+
+function autoSaveRetryDelay() {
+  const index = Math.min(state.autoSaveRetryAttempt || 0, AUTO_SAVE_RETRY.length - 1);
+  const base = AUTO_SAVE_RETRY[index];
+  const jitter = 0.9 + Math.random() * 0.2;
+  return Math.round(base * jitter);
 }
 
-function scheduleAutoSave(delay = 400) {
+function scheduleAutoSave(delay = 160) {
   if (!state.bundle?.project?.id || !state.dirty || state.saveConflict) return;
+  if (hasDirtyActiveEditor()) {
+    delay = Math.max(delay, 600);
+  }
   clearTimeout(state.autoSaveTimer);
   state.autoSaveTimer = setTimeout(() => {
     state.autoSaveTimer = null;
@@ -5647,16 +7337,15 @@ function markDirty() {
   if (history && !history._after) history._after = cloneShots(state.bundle.shots);
   state.dirty = true;
   state.changeVersion += 1;
-  if (state.bundle?.project?.id) {
-    try { localStorage.setItem(`frameforge-draft:${state.bundle.project.id}`, JSON.stringify({ savedAt: Date.now(), shots: state.bundle.shots })); } catch (_) { /* quota is non-fatal */ }
-  }
-  setSaveStatus('● 待同步', 'dirty');
+  scheduleProjectDraft();
+  refreshSaveStatus();
   scheduleAutoSave();
 }
 
-async function saveProject({ automatic = false } = {}) {
+async function saveProject({ automatic = false, timeout = 18000 } = {}) {
   window.saveProject = saveProject;
   if (!state.bundle?.project?.id) return false;
+  if (reviewStatusInFlight) { if (automatic) scheduleAutoSave(150); return false; }
   // A temporary media ID exists only in this browser. The upload finalizer
   // resumes pending edits after it has installed a durable ID or rolled back.
   if (state.pendingUploads > 0) return false;
@@ -5665,25 +7354,76 @@ async function saveProject({ automatic = false } = {}) {
     return false;
   }
   if (shotReorderInFlight) { scheduleAutoSave(150); return false; }
+
+  // 1. Watchdog check
+  checkSyncWatchdog();
+
+  // 2. Concurrency check
+  if (state.saveInFlight) {
+    state.saveQueued = true;
+    console.debug?.('[save] queued because saveInFlight');
+    return false;
+  }
+
+  // 3. Dirty check
   syncDerivedTimeline();
-  if (state.saveInFlight) { state.saveQueued = true; return false; }
-  if (!state.dirty) return true;
+  if (!state.dirty) {
+    if (hasDirtyActiveEditor()) {
+      refreshSaveStatus();
+      return false;
+    }
+    refreshSaveStatus();
+    return true;
+  }
+
+  const projectId = state.bundle.project.id;
+  const order = state.historyOrder;
+  const hasReorder = order?.projectId === projectId;
+  const columnsWerePending = columnPreferenceWrites.has(projectId);
+  const columnsAtStart = state.bundle.column_preferences;
+
+  // 4. Compute outbound changes BEFORE setting saveInFlight
+  const outboundShots = structuredClone(prepareCollaborativeShots(state.bundle)).filter(
+    shot => Array.isArray(shot.changed_fields) && shot.changed_fields.length > 0
+  );
+
+  // If dirty was set but no diff exists and no reorder / column changes are pending:
+  if (!outboundShots.length && !hasReorder && !columnsWerePending) {
+    state.dirty = false;
+    state.saveQueued = false;
+    state.lastSaveError = null;
+    clearTimeout(state.autoSaveTimer);
+    state.autoSaveTimer = null;
+    console.debug?.('[save] dirty state normalized to clean; no outbound fields');
+    refreshSaveStatus();
+    return true;
+  }
+
+  // 5. Only now set saveInFlight and begin try/finally
   clearTimeout(state.autoSaveTimer);
   state.autoSaveTimer = null;
   state.saveInFlight = true;
+  state.saveStartedAt = Date.now();
+  state.lastSaveAttemptAt = Date.now();
+  const currentToken = ++saveRequestToken;
+  state.currentSaveToken = currentToken;
+  if (state.saveAbortController) {
+    try { state.saveAbortController.abort(new Error('Superseeded by new save')); } catch (_) {}
+  }
+  const saveAbortController = new AbortController();
+  state.saveAbortController = saveAbortController;
+
   const versionAtStart = state.changeVersion;
-  const projectId = state.bundle.project.id;
-  const outboundShots = structuredClone(prepareCollaborativeShots(state.bundle));
   const sentById = new Map(outboundShots.map(shot => [shot.id, shot]));
-  const columnsAtStart = state.bundle.column_preferences;
-  const columnsWerePending = columnPreferenceWrites.has(projectId);
-  setSaveStatus('↻ 同步中…', 'syncing');
+  refreshSaveStatus();
+
   try {
-    const order = state.historyOrder;
-    if (order?.projectId === projectId) {
+    if (hasReorder) {
       try {
         await api(`/api/projects/${projectId}/shots/reorder`, {
-          method: 'POST', json: { shot_ids: order.shotIds, base_order: order.baseOrder }
+          method: 'POST', json: { shot_ids: order.shotIds, base_order: order.baseOrder },
+          timeout: 15000,
+          signal: saveAbortController.signal
         });
       } catch (err) {
         if (state.bundle?.project?.id === projectId && state.historyOrder === order) {
@@ -5696,8 +7436,14 @@ async function saveProject({ automatic = false } = {}) {
     }
     const savedBundle = adoptServerBundle(await api(`/api/projects/${projectId}/shots`, {
       method: 'PUT',
-      json: { shots: outboundShots, restore_order: false }
+      json: { shots: outboundShots, restore_order: false },
+      timeout,
+      signal: saveAbortController.signal
     }));
+    if (state.currentSaveToken !== currentToken) {
+      console.debug?.('[save] ignored response from stale save generation', { currentToken, activeToken: state.currentSaveToken });
+      return false;
+    }
     // A request can finish after the user has switched projects. Never let a
     // response for the previous project overwrite the newly opened bundle.
     if (state.bundle?.project?.id !== projectId) return true;
@@ -5705,13 +7451,18 @@ async function saveProject({ automatic = false } = {}) {
       savedBundle.column_preferences = structuredClone(columnPreferenceWrites.get(projectId)?.preferences || state.bundle.column_preferences || []);
     }
     if (savedBundle?.project?.updated_at) state.lastServerUpdatedAt = savedBundle.project.updated_at;
+    state.lastSaveCompletedAt = Date.now();
+
     if (versionAtStart === state.changeVersion) {
       state.bundle = savedBundle;
       state.historyForceFields.clear();
       state.historyDeletedShots.clear();
       state.dirty = false;
+      state.lastSaveError = null;
+      state.autoSaveRetryAttempt = 0;
+      clearAcknowledgedEditorDrafts(projectId, savedBundle);
       try { localStorage.removeItem(`frameforge-draft:${projectId}`); } catch (_) { /* ignore cache cleanup failure */ }
-      setSaveStatus('● 已同步', '');
+      refreshSaveStatus();
       if (!automatic) toast('项目已同步');
     } else {
       // Preserve edits made while the request was in flight, while advancing
@@ -5733,29 +7484,220 @@ async function saveProject({ automatic = false } = {}) {
       });
       state.dirty = true;
       state.saveQueued = true;
-      setSaveStatus('● 待同步', 'dirty');
+      state.lastSaveError = null;
+      state.autoSaveRetryAttempt = 0;
+      clearAcknowledgedEditorDrafts(projectId, savedBundle);
+      refreshSaveStatus();
     }
     return true;
   } catch (err) {
+    // Stale save generation: another save has superseded this one.
+    // Do NOT corrupt state or show errors for an obsolete request.
+    if (state.currentSaveToken !== currentToken) {
+      console.debug?.('[save] ignored error from stale save generation', {
+        currentToken,
+        activeToken: state.currentSaveToken
+      });
+      return false;
+    }
     if (state.bundle?.project?.id !== projectId) return false;
     state.dirty = true;
-    setSaveStatus('! 同步失败', 'error');
+    state.lastSaveError = err;
+    refreshSaveStatus();
     if (err.status === 409) {
       const conflict = err.conflictData || err.payload || {};
       if (conflict.your_version?.id) showConflictDialog(err);
     }
     toast(err.message, true);
-    if (automatic && err.status !== 409) scheduleAutoSave(2500);
+    if (automatic && err.status !== 409) {
+      const delay = autoSaveRetryDelay();
+      state.autoSaveRetryAttempt = (state.autoSaveRetryAttempt || 0) + 1;
+      scheduleAutoSave(delay);
+    }
     return false;
   } finally {
-    state.saveInFlight = false;
-    if (state.saveQueued) {
+    if (state.currentSaveToken === currentToken) {
+      state.saveInFlight = false;
+      state.saveStartedAt = null;
+      state.saveAbortController = null;
+      refreshSaveStatus();
+    }
+    if (state.currentSaveToken === currentToken && state.saveQueued) {
       state.saveQueued = false;
       scheduleAutoSave(60);
     }
   }
 }
 window.saveProject = saveProject;
+
+async function saveCurrentProjectManually() {
+  const flushed = await flushActiveEditors({ timeout: 5000 });
+  if (!flushed) return false;
+  checkSyncWatchdog();
+  if (state.saveInFlight) {
+    try {
+      await waitUntil(
+        () => !state.saveInFlight,
+        { timeout: 22000, interval: 25, errorMessage: '等待当前同步完成超时' }
+      );
+    } catch (_) {
+      toast('当前同步仍未完成，本地内容已保留', true);
+      return false;
+    }
+  }
+  return saveProject({ automatic: false });
+}
+window.saveCurrentProjectManually = saveCurrentProjectManually;
+
+window.getCollabDiagnostics = () => ({
+  saveInFlight: state.saveInFlight,
+  saveQueued: state.saveQueued,
+  saveStartedAt: state.saveStartedAt,
+  lastSaveAttemptAt: state.lastSaveAttemptAt,
+  lastSaveCompletedAt: state.lastSaveCompletedAt,
+  dirty: state.dirty,
+  changeVersion: state.changeVersion,
+  presencePollInFlight: state.presencePollInFlight,
+  presenceSendInFlight: state.presenceSendInFlight,
+  remoteRefreshInFlight: state.remoteRefreshInFlight,
+  lastSaveError: state.lastSaveError ? String(state.lastSaveError.message || state.lastSaveError) : null,
+  networkHealth: state.networkHealth,
+  activeEditors: activeEditorsForCurrentProject().length,
+  hasDirtyActiveEditor: hasDirtyActiveEditor(),
+  wakeRecoveryCount: state.wakeRecoveryCount || 0
+});
+
+let saveRefreshSequence = 0;
+
+async function saveAndRefreshProject() {
+  if (state.saveRefreshInFlight) return false;
+  const projectId = state.bundle?.project?.id;
+  if (!projectId) {
+    toast('当前未打开任何项目', true);
+    return false;
+  }
+
+  // Set saveRefreshInFlight BEFORE the first await to lock out concurrent clicks
+  const sequence = ++saveRefreshSequence;
+  state.saveRefreshInFlight = true;
+  refreshSaveStatus();
+  publishWorkspaceUI();
+
+  try {
+    // 1. Safety flush of any active editor session
+    const flushed = await flushActiveEditors({ timeout: 5000 });
+    if (!flushed) {
+      toast('当前编辑仍在提交，已取消刷新', true);
+      return false;
+    }
+
+    // 1b. Flush creative boards before save
+    if (!await flushCreativeBoards()) {
+      return false;
+    }
+
+    // 2. Snapshot current workspace context
+    const activeShotId = state.selection.activeShotId;
+    const windowScrollY = window.scrollY || document.documentElement.scrollTop;
+    const tableContainer = document.querySelector('#mainShotTable')?.closest('.table-container');
+    const tableScrollTop = tableContainer ? tableContainer.scrollTop : null;
+    const tableScrollLeft = tableContainer ? tableContainer.scrollLeft : null;
+
+    // 3. Wait for any in-flight background save or reorder (bounded)
+    try {
+      await waitUntil(
+        () => {
+          if (sequence !== saveRefreshSequence || state.bundle?.project?.id !== projectId) return true;
+          return !state.saveInFlight && !shotReorderInFlight;
+        },
+        { timeout: 22000, interval: 25, errorMessage: '等待当前同步完成超时' }
+      );
+    } catch (_) {
+      toast('等待同步完成超时，已停止刷新以防止丢失修改', true);
+      return false;
+    }
+    if (sequence !== saveRefreshSequence || state.bundle?.project?.id !== projectId) {
+      return false;
+    }
+
+    // 4. If dirty, save project first
+    if (state.dirty) {
+      const saved = await saveProject({ automatic: false });
+      if (!saved || sequence !== saveRefreshSequence || state.bundle?.project?.id !== projectId) {
+        toast('项目保存失败，已停止刷新以防止丢失修改', true);
+        return false;
+      }
+    }
+
+    // Block refresh whenever uploads are pending, save conflict exists, or dirty editors/data remain
+    if (state.pendingUploads > 0) {
+      toast('正在上传媒体文件，已停止刷新', true);
+      return false;
+    }
+    if (state.saveConflict) {
+      toast('存在冲突未处理，已停止刷新', true);
+      return false;
+    }
+    if (hasDirtyActiveEditor() || state.dirty) {
+      toast('检测到未保存内容，已停止刷新', true);
+      return false;
+    }
+
+    // 5. Version guard before fetching latest
+    const versionBeforeRefresh = state.changeVersion;
+
+    const latest = await api(`/api/projects/${encodeURIComponent(projectId)}`);
+
+    // 6. Stale / race checks after fetch
+    if (sequence !== saveRefreshSequence) return false;
+    if (state.bundle?.project?.id !== projectId) return false;
+    if (state.changeVersion !== versionBeforeRefresh || state.dirty || hasDirtyActiveEditor()) {
+      toast('检测到刷新期间产生新修改，跳过覆盖以保留本地修改', true);
+      return false;
+    }
+
+    // 7. Adopt server bundle safely
+    state.bundle = adoptServerBundle(latest);
+    state.dirty = false;
+    state.lastSaveError = null;
+    state.autoSaveRetryAttempt = 0;
+    clearAcknowledgedEditorDrafts(projectId, state.bundle);
+    try { localStorage.removeItem(`frameforge-draft:${projectId}`); } catch (_) {}
+
+    // 8. Re-render views
+    renderProjectHeader();
+    renderCurrentView();
+
+    // 9. Restore selection and scroll positions
+    if (activeShotId && state.bundle.shots.some(s => s.id === activeShotId)) {
+      selectShot(activeShotId);
+    }
+    if (state.inspector.open) renderInspector();
+    if (tableContainer && tableScrollTop !== null) {
+      const newTableContainer = document.querySelector('#mainShotTable')?.closest('.table-container');
+      if (newTableContainer) {
+        newTableContainer.scrollTop = tableScrollTop;
+        if (tableScrollLeft !== null) newTableContainer.scrollLeft = tableScrollLeft;
+      }
+    }
+    window.scrollTo({ top: windowScrollY, behavior: 'instant' });
+
+    toast('已安全保存并刷新到最新状态');
+    return true;
+  } catch (err) {
+    if (sequence === saveRefreshSequence) {
+      toast('刷新失败: ' + err.message, true);
+    }
+    return false;
+  } finally {
+    if (sequence === saveRefreshSequence) {
+      state.saveRefreshInFlight = false;
+      refreshSaveStatus();
+      publishWorkspaceUI();
+    }
+  }
+}
+window.saveAndRefreshProject = saveAndRefreshProject;
 
 $('#undoBtn')?.addEventListener('click', () => undoLastChange());
 $('#redoBtn')?.addEventListener('click', () => redoLastChange());
@@ -5777,7 +7719,9 @@ async function createShotAt(position = null, overrides = {}) {
     const payload = position === null ? newShot : { ...newShot, position };
     const result = await api(`/api/projects/${state.bundle.project.id}/shots`, { method: 'POST', json: payload });
       state.bundle = adoptServerBundle(result);
-    const created = state.bundle.shots.find(shot => shot.id === newShot.id) || state.bundle.shots.at(-1);
+    const createdId = result.created_shot_id || newShot.id;
+    const created = state.bundle.shots.find(shot => shot.id === createdId)
+      || (position === null ? state.bundle.shots.at(-1) : state.bundle.shots[Math.min(position, state.bundle.shots.length - 1)]);
     selectShot(created?.id || null);
     renderProjectHeader();
     renderCurrentView();
@@ -5792,7 +7736,7 @@ async function createShotAt(position = null, overrides = {}) {
 
 $('#addShotActionBtn')?.addEventListener('click', () => createShotAt());
 
-function openInsertShotDialog(direction = 'before', shotId = state.activeShotId) {
+function openInsertShotDialog(direction = 'before', shotId = state.selection.activeShotId) {
   if (!state.bundle) return;
   state.insertAnchorShotId = shotId || null;
   const form = $('#insertShotForm');
@@ -5811,7 +7755,7 @@ $('#insertShotForm')?.addEventListener('submit', async event => {
   event.preventDefault();
   if (!state.bundle) return;
   const form = new FormData(event.currentTarget);
-  const activeIndex = state.bundle.shots.findIndex(shot => shot.id === (state.insertAnchorShotId || state.activeShotId));
+  const activeIndex = state.bundle.shots.findIndex(shot => shot.id === (state.insertAnchorShotId || state.selection.activeShotId));
   const direction = form.get('insertDirection') || 'before';
   const position = activeIndex < 0 ? state.bundle.shots.length : activeIndex + (direction === 'after' ? 1 : 0);
   const created = await createShotAt(position, { title: form.get('title'), description: form.get('description') });
@@ -5825,13 +7769,36 @@ function splitNarration(text) {
   return String(text || '').split(/(?<=[。！？；.!?;\n])/u).map(item => item.trim()).filter(Boolean);
 }
 
-function estimateNarrationFrames(text, fps) {
+const NARRATION_SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+
+function normalizeNarrationSpeed(speed) {
+  const parsed = Number(speed);
+  return NARRATION_SPEED_OPTIONS.includes(parsed) ? parsed : 1;
+}
+
+function syncNarrationSpeedControls() {
+  const projectControl = $('#projectNarrationSpeed');
+  if (projectControl) projectControl.value = String(normalizeNarrationSpeed(state.narrationSpeed));
+}
+
+function estimateNarrationFrames(text, fps, speed = 1) {
   const value = String(text || '').trim();
   if (!value) return Math.max(1, Math.round(fps * 1.2));
   const chinese = (value.match(/[\u3400-\u9fff]/g) || []).length;
   const words = (value.match(/[A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)*/g) || []).length;
   const punctuation = (value.match(/[，,、]/g) || []).length * 0.16 + (value.match(/[。！？.!?；;]/g) || []).length * 0.28;
-  return Math.max(Math.round(fps * 0.6), Math.round((chinese / 4.4 + words / 2.8 + punctuation) * fps));
+  const speechSeconds = chinese / 4.4 + words / 2.8;
+  const seconds = speechSeconds / normalizeNarrationSpeed(speed) + punctuation;
+  return Math.max(Math.round(fps * 0.6), Math.round(seconds * fps));
+}
+
+function recalculateTimingSegments(segments, fps, speed) {
+  const rate = normalizeNarrationSpeed(speed);
+  for (const segment of segments || []) {
+    if (segment.locked || segment.manuallyEdited) continue;
+    segment.frames = estimateNarrationFrames(segment.text, fps, rate);
+  }
+  return segments;
 }
 
 function updateTimingWorkspaceSummary(root, draft, fps) {
@@ -5857,6 +7824,7 @@ function renderTimingWorkspace() {
         <span class="is-suggested"><small>建议时长</small><b data-timing-total>${total}f</b><em data-timing-seconds>${formatSeconds(total / Math.max(1, Number(fps) || 25))}</em></span>
       </div>
     </section>
+    <label class="timing-speed-control"><span>旁白语速</span><select data-timing-speed aria-label="旁白语速">${NARRATION_SPEED_OPTIONS.map(speed => `<option value="${speed}" ${normalizeNarrationSpeed(draft.speed) === speed ? 'selected' : ''}>${speed}×${speed === 1 ? ' · 标准' : ''}</option>`).join('')}</select><small>改变自动建议时长，已手动修改或锁定的片段保持不变</small></label>
     <div class="timing-segment-list">${draft.segments.map((segment, index) => `
       <article class="timing-segment-row">
         <span class="timing-index">${String(index + 1).padStart(2, '0')}</span>
@@ -5868,23 +7836,33 @@ function renderTimingWorkspace() {
         </div>
       </article>`).join('')}</div>`;
   $$('[data-timing-frames]', root).forEach(input => input.addEventListener('input', event => {
-    draft.segments[Number(event.target.dataset.timingFrames)].frames = Math.max(1, Number(event.target.value) || 1);
+    const segment = draft.segments[Number(event.target.dataset.timingFrames)];
+    segment.frames = Math.max(1, Number(event.target.value) || 1);
+    segment.manuallyEdited = true;
     updateTimingWorkspaceSummary(root, draft, fps);
   }));
+  $('[data-timing-speed]', root)?.addEventListener('change', event => {
+    draft.speed = normalizeNarrationSpeed(event.target.value);
+    state.narrationSpeed = draft.speed;
+    syncNarrationSpeedControls();
+    recalculateTimingSegments(draft.segments, fps, draft.speed);
+    renderTimingWorkspace();
+  });
   $$('[data-timing-lock]', root).forEach(input => input.addEventListener('change', event => {
     draft.segments[Number(event.target.dataset.timingLock)].locked = event.target.checked;
     renderTimingWorkspace();
   }));
   $$('[data-timing-recalc]', root).forEach(button => button.addEventListener('click', () => {
     const index = Number(button.dataset.timingRecalc);
-    draft.segments[index].frames = estimateNarrationFrames(draft.segments[index].text, fps);
+    draft.segments[index].frames = estimateNarrationFrames(draft.segments[index].text, fps, draft.speed);
+    draft.segments[index].manuallyEdited = false;
     renderTimingWorkspace();
   }));
 }
 
 async function runProjectAutoTiming() {
   if (!state.bundle) { toast('请先打开一个项目', true); return; }
-  const narratedCount = state.bundle.shots.filter(shot => !shot.locked && String(shot.voiceover || shot.dialogue || '').trim()).length;
+  const narratedCount = state.bundle.shots.filter(shot => !shot.locked && (String(shot.voiceover || '').trim() || String(shot.dialogue || '').trim())).length;
   if (!narratedCount) {
     toast('没有可自动计时的旁白镜头；无旁白镜头保持原时长');
     return;
@@ -5896,8 +7874,9 @@ async function runProjectAutoTiming() {
     // timing budget, otherwise it would calculate against stale narration.
     if (!await flushProjectBeforeLeaving()) return;
     const projectId = state.bundle.project.id;
+    const speechRate = normalizeNarrationSpeed(state.narrationSpeed);
     const before = cloneShots(state.bundle.shots);
-    const result = await api(`/api/projects/${projectId}/auto-timing`, { method: 'POST', json: {} });
+    const result = await api(`/api/projects/${projectId}/auto-timing`, { method: 'POST', json: { speech_rate: speechRate } });
     if (state.bundle?.project.id !== projectId) return;
     const previous = new Map(before.map(shot => [shot.id, shot]));
     const calculated = new Map(result.shots.map(shot => [shot.id, shot]));
@@ -5914,7 +7893,7 @@ async function runProjectAutoTiming() {
     renderProjectHeader();
     renderCurrentView();
     renderInspector();
-    toast(`已按 ${narratedCount} 个有旁白镜头自动分配时码；无旁白镜头保持不变`);
+    toast(`已按 ${speechRate}×语速估算 ${narratedCount} 个旁白/对白镜头；无旁白镜头保持原时长`);
   } catch (err) {
     toast(`自动计时失败：${err.message}`, true);
   } finally {
@@ -5924,13 +7903,14 @@ async function runProjectAutoTiming() {
 
 $('#autoTimingActionBtn')?.addEventListener('click', runProjectAutoTiming);
 
-function openSingleShotTiming(shotId = state.activeShotId) {
+function openSingleShotTiming(shotId = state.selection.activeShotId) {
   const shot = state.bundle?.shots?.find(item => item.id === shotId) || state.bundle?.shots?.[0];
   if (!shot || !state.bundle) { toast('请先选择一个镜头', true); return; }
   const segments = splitNarration(shot.voiceover || shot.dialogue);
   if (!segments.length) { toast('当前镜头没有可计时的旁白或对白', true); return; }
-  state.activeShotId = shot.id;
-  state.timingDraft = { shot, segments: segments.map(text => ({ text, frames: estimateNarrationFrames(text, state.bundle.project.fps), locked: false })) };
+  state.selection.activeShotId = shot.id;
+  const speed = normalizeNarrationSpeed(state.narrationSpeed);
+  state.timingDraft = { shot, speed, segments: segments.map(text => ({ text, frames: estimateNarrationFrames(text, state.bundle.project.fps, speed), locked: false, manuallyEdited: false })) };
   renderTimingWorkspace();
   $('#timingModal')?.showModal();
 }
@@ -5973,11 +7953,12 @@ const PDF_FIELD_LABELS = {
   revision: '修订号', created_at: '创建时间', updated_at: '更新时间', method_data_json: '制作方式参数'
 };
 function pdfFieldOptions() {
-  const removed = new Set(state.tablePrefs.removed || []);
-  const custom = customTableFields().map(field => `custom:${field.key}`).filter(field => !removed.has(field));
+  const removed = archivedColumnSet();
+  const custom = customTableFields().map(field => `custom:${field.key}`).filter(field => !removed.has(field) && !isColumnPurged(field));
+  const imported = importedTableFields().map(key => `import:${key}`).filter(field => !removed.has(field) && !isColumnPurged(field));
   // Export is a presentation surface. Internal revision timestamps, sync
   // payloads and raw method JSON must never leak through “all fields”.
-  const fields = [...new Set([...PDF_FIELD_FALLBACK, ...Object.keys(SCRIPT_COLUMNS), 'notes', 'action'].filter(field => !removed.has(field)).concat(custom))];
+  const fields = [...new Set([...PDF_FIELD_FALLBACK, ...Object.keys(SCRIPT_COLUMNS), 'notes', 'action'].filter(field => !removed.has(field) && !isColumnPurged(field)).concat(custom, imported))];
   return fields;
 }
 function presentationFieldKey(field) {
@@ -5999,7 +7980,7 @@ function buildPresentationExportModel({ fields = null, shots = null } = {}) {
   return {
     project: state.bundle?.project || {},
     shots: shots || state.bundle?.shots || [],
-    includeImages: !isColumnHidden('thumb') && !(state.tablePrefs.removed || []).includes('thumb'),
+    includeImages: !isColumnHidden('thumb') && !isColumnArchived('thumb') && !isColumnPurged('thumb'),
     fields: selectedFields
   };
 }
@@ -6067,9 +8048,38 @@ function pdfShotAppendix(shot) {
   return `<section class="shot-extra"><h3>完整数据 · SHOT ${escapeHtml(shot.number || '')}</h3><pre>${escapeHtml(text)}</pre></section>`;
 }
 
-$('#pdfExportQuickBtn')?.addEventListener('click', () => { renderPdfFieldOptions(); $('#pdfExportModal')?.showModal(); });
+function openDocumentExportDialog() {
+  renderPdfFieldOptions();
+  const status = $('#pdfPreflightStatus');
+  const progress = $('#pdfProgress');
+  if (status) status.textContent = '';
+  if (progress) { progress.hidden = true; progress.value = 0; }
+  const dialog = $('#pdfExportModal');
+  if (dialog && !dialog.open) dialog.showModal();
+}
+$('#pdfExportQuickBtn')?.addEventListener('click', openDocumentExportDialog);
+
+$('#importProjectPdfBtn')?.addEventListener('click', () => $('#projectPdfImportInput')?.click());
+
+$('#downloadProjectPdfBtn')?.addEventListener('click', () => {
+  const pid = state.bundle?.project?.id;
+  if (!pid) { toast('请先打开一个项目', true); return; }
+  // The engineering PDF always contains the complete project, regardless of
+  // the current document layout, selected fields, or shot range.
+  const anchor = document.createElement('a');
+  anchor.href = `/api/projects/${encodeURIComponent(pid)}/export/project-pdf`;
+  anchor.download = `${String(state.bundle.project.name || 'FRAMEFORGE').replace(/[\\/:*?"<>|\u0000-\u001F]/g, '_').slice(0, 80)}-工程.pdf`;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+});
 
 $$('.pdf-layout-option').forEach(opt => {
+  if (opt.tagName !== 'BUTTON') opt.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    opt.click();
+  });
   opt.addEventListener('click', () => {
     $$('.pdf-layout-option').forEach(o => {
       o.classList.remove('selected');
@@ -6079,140 +8089,26 @@ $$('.pdf-layout-option').forEach(opt => {
     opt.setAttribute('aria-checked', 'true');
     const input = $('#pdfLayoutHiddenInput');
     if (input) input.value = opt.dataset.value;
+    const fixedFields = opt.dataset.value === 'landscape-board';
+    if ($('#pdfFieldScopeRow')) $('#pdfFieldScopeRow').hidden = fixedFields;
+    if ($('#pdfCustomFields')) $('#pdfCustomFields').hidden = fixedFields || $('#pdfFieldScope')?.value !== 'custom';
   });
 });
 
-function printableMediaUrl(shot) {
-  const media = getShotPrimaryMedia(shot);
-  return media ? new URL(media, location.origin).href : '';
-}
-
-function blobToDataUrl(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(new Error('图片读取失败'));
-    reader.readAsDataURL(blob);
-  });
-}
-
-async function preflightPdfMedia(shots, onProgress = () => {}) {
-  const mediaMap = new Map();
-  const failures = [];
-  let cursor = 0, completed = 0;
-  const worker = async () => { while (cursor < shots.length) {
-    const shot = shots[cursor++];
-    const url = printableMediaUrl(shot);
-    const controller = new AbortController();
-    let timer;
-    try {
-      if (!url) continue;
-      const load = async () => {
-        const response = await fetch(url, { credentials: 'same-origin', signal: controller.signal });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const blob = await response.blob();
-      if (!blob.type.startsWith('image/')) throw new Error('当前素材不是可嵌入的图片');
-      const dataUrl = await blobToDataUrl(blob);
-      await new Promise((resolve, reject) => {
-        const image = new Image();
-        image.onload = resolve;
-        image.onerror = () => reject(new Error('图片解码失败'));
-        image.src = dataUrl;
-      });
-        return dataUrl;
-      };
-      const dataUrl = await Promise.race([load(), new Promise((_, reject) => {
-        timer = setTimeout(() => { controller.abort(); reject(new Error('图片读取超时，请重试')); }, 15000);
-      })]);
-      mediaMap.set(shot.id, dataUrl);
-    } catch (error) {
-      failures.push({ number: shot.number, reason: error.message || '读取失败' });
-    } finally {
-      clearTimeout(timer);
-      onProgress(++completed, shots.length);
-    }
-  }};
-  await Promise.all(Array.from({ length: Math.min(6, shots.length) }, worker));
-  return { mediaMap, failures };
-}
+const documentMedia = globalThis.FrameForgeDocumentMedia.create(getShotPrimaryMedia);
 
 function buildPdfDocument(layout, mediaMap = new Map(), fields = null, filteredShots = null) {
-  // The PDF dialog uses null specifically for "all available fields".
+  // The dialog uses null for all available fields; the renderer receives prepared values.
   const model = buildPresentationExportModel({ fields: fields ?? pdfFieldOptions(), shots: filteredShots });
-  if (layout === 'screenplay' || layout === 'us-board') return FrameForgeScreenplay.build({...model, layout, mediaMap});
-  const project = model.project;
-  const shots = model.shots;
-  const layoutTitle = { table: '分镜表', board: '九宫格', detail: '单镜详细' }[layout] || '分镜表';
-  const generatedAt = new Date().toLocaleString('zh-CN');
-  const selectedFields = model.fields;
-  const has = (f) => selectedFields.includes(f);
-
-  const printOverrides = layout === 'table' ? '<style>@page{size:A4 landscape;margin:8mm}table{table-layout:fixed;width:100%;font-size:7pt}th,td{padding:3px 2px;overflow-wrap:anywhere;word-break:break-word}th{font-size:7pt}td{line-height:1.25}</style>' : '';
-  // A same-origin external script works under the app's strict CSP, including
-  // about:blank previews which inherit that policy. Never relax script-src.
-  const script = printOverrides + '<script src="/print-preview.js?v=20260909-r26" defer><\/script>';
-
-  const head = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${escapeHtml(project.name || 'FRAMEFORGE')} — ${layoutTitle}</title><style>
-    @page { margin: 12mm; size: A4; } * { box-sizing: border-box; } body { margin: 0; color: #151617; font: 10pt/1.45 "Satoshi", "Sarasa Gothic SC", sans-serif; background: #fff; }
-    .toolbar { position: fixed; right: 12mm; top: 8mm; z-index: 2; } .toolbar button { border: 0; border-radius: 6px; background: #151617; color: #fff; padding: 8px 14px; font: inherit; font-weight: 500; cursor: pointer; } .toolbar button:disabled { opacity: 0.5; cursor: not-allowed; }
-    .doc-header { border-bottom: 2px solid #151617; padding-bottom: 5mm; margin-bottom: 6mm; } h1 { font-size: 18pt; margin: 0; font-weight: 700; } .meta { color: #526075; margin-top: 2mm; font-variant-numeric: tabular-nums; } table { width: 100%; border-collapse: collapse; } th { background: #fff; text-align: left; font-size: 8.5pt; font-weight: 500; border-bottom: 1px solid #151617; } th, td { border: none; border-bottom: 1px solid rgba(0,0,0,0.1); padding: 6px 4px; vertical-align: top; } tr { break-inside: avoid; } thead { display: table-header-group; }
-    .board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6mm; } .board-card { break-inside: avoid; min-height: 70mm; overflow: hidden; } .board-image { display: grid; place-items: center; aspect-ratio: 16 / 9; background: #f8f9fa; color: #526075; overflow: hidden; } .board-image img { width: 100%; height: 100%; object-fit: cover; } .board-body { padding: 3mm 0; } .shot-label { color: #151617; font-weight: 700; } .shot-title { font-size: 11pt; font-weight: 700; margin: 1mm 0; }
-    .detail { break-after: page; border-bottom: 1px solid #151617; padding-bottom: 7mm; margin-bottom: 7mm; } .detail:last-child { break-after: auto; border-bottom: none; } .detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6mm; } .detail-image { display: grid; place-items: center; aspect-ratio: 16 / 9; background: #f8f9fa; color: #526075; overflow: hidden; } .detail-image img { width: 100%; height: 100%; object-fit: cover; } .detail dl { display: grid; grid-template-columns: 72px 1fr; gap: 2mm 4mm; margin: 0; } .detail dt { color: #526075; } .detail dd { margin: 0; font-variant-numeric: tabular-nums; white-space: pre-wrap; overflow-wrap: anywhere; } .shot-extra { break-inside: avoid; margin-top: 5mm; } .shot-extra h3 { font-size: 10pt; margin: 0 0 2mm; } .shot-extra pre { margin: 0; padding: 3mm; background: #f8f9fa; border: 1px solid rgba(0,0,0,0.1); white-space: pre-wrap; overflow-wrap: anywhere; font: 7pt/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
-    @media print { .toolbar { display: none; } } @media screen { body { max-width: 210mm; margin: 16mm auto; box-shadow: 0 2px 18px #0002; padding: 12mm; } }
-  </style>${script}</head><body><div class="toolbar"><button type="button" id="printBtn" disabled>准备打印...</button></div><header class="doc-header"><h1>${escapeHtml(project.name || '')}</h1><div class="meta">${layoutTitle} · ${escapeHtml(project.aspect_ratio || '16:9')} · ${escapeHtml(String(project.fps || 25))} fps · ${shots.length} 镜头 · ${escapeHtml(generatedAt)}</div></header>`;
-
-  if (layout === 'board') {
-    return head + `<main class="board">${shots.map(shot => {
-      const media = mediaMap.get(shot.id) || '';
-      const bodyParts = [
-        has('number') ? `<div class="shot-label">SHOT ${escapeHtml(shot.number)}${has('duration') ? ` · ${escapeHtml(String(shot.duration_seconds || ''))}s` : ''}</div>` : '',
-        has('title') && shot.title ? `<div class="shot-title">${formattedShotField(shot,'title','')}</div>` : '',
-        has('scene') && shot.scene ? `<div class="meta">${formattedShotField(shot,'scene','')}</div>` : '',
-        has('description') && shot.description ? `<div>${formattedShotField(shot,'description','')}</div>` : '',
-        has('voiceover') && shot.voiceover ? `<div class="meta" style="color:#526075">${formattedShotField(shot,'voiceover','')}</div>` : '',
-        (has('shot_size') || has('lens') || has('movement')) ? `<div class="meta">${escapeHtml([has('shot_size') && shot.shot_size, has('lens') && shot.lens, has('movement') && shot.movement].filter(Boolean).join(' · '))}</div>` : '',
-        has('methods') ? `<div class="meta">${escapeHtml(String(pdfFieldValue(shot, 'methods') || ''))}</div>` : '',
-        has('notes') && shot.notes ? `<div class="meta" style="color:#526075">${escapeHtml(shot.notes)}</div>` : '',
-        ...selectedFields.filter(field => !['number', 'duration', 'title', 'scene', 'description', 'voiceover', 'shot_size', 'lens', 'movement', 'methods', 'notes'].includes(field) && String(pdfFieldValue(shot, field) ?? '') !== '').map(field => `<div class="meta"><b>${escapeHtml(pdfFieldLabel(field))}：</b>${escapeHtml(String(pdfFieldValue(shot, field)))}</div>`),
-      ].filter(Boolean).join('');
-      return `<article class="board-card"><div class="board-image">${media ? `<img src="${escapeHtml(media)}" data-shot="${escapeHtml(shot.number)}" alt="SHOT ${escapeHtml(shot.number)}">` : `<span class="empty">暂无图片<br>SHOT ${escapeHtml(shot.number)}</span>`}</div><div class="board-body">${bodyParts}</div></article>`;
-    }).join('')}</main></body></html>`;
-  }
-
-  if (layout === 'detail') {
-    return head + `<main>${shots.map(shot => {
-      const media = mediaMap.get(shot.id) || '';
-      const dlParts = [
-        has('tc') ? `<dt>TC IN</dt><dd>${escapeHtml(shot.tc_in || '')}</dd><dt>TC OUT</dt><dd>${escapeHtml(shot.tc_out || '')}</dd>` : '',
-        has('duration') ? `<dt>时长</dt><dd>${escapeHtml(String(shot.duration_seconds || ''))}s / ${escapeHtml(String(shot.duration_frames || ''))}f</dd>` : '',
-        has('scene') && shot.scene ? `<dt>场景</dt><dd>${formattedShotField(shot,'scene','')}</dd>` : '',
-        has('shot_size') ? `<dt>景别</dt><dd>${escapeHtml(shot.shot_size || '')}</dd>` : '',
-        has('movement') ? `<dt>运镜</dt><dd>${escapeHtml(shot.movement || '')}</dd>` : '',
-        has('angle') && shot.angle ? `<dt>机位</dt><dd>${escapeHtml(shot.angle)}</dd>` : '',
-        has('methods') ? `<dt>方式</dt><dd>${escapeHtml(String(pdfFieldValue(shot, 'methods') || ''))}</dd>` : '',
-        has('description') ? `<dt>画面</dt><dd>${formattedShotField(shot,'description','')}</dd>` : '',
-        has('voiceover') ? `<dt>旁白</dt><dd>${formattedShotField(shot,'voiceover','')}</dd>` : '',
-        has('notes') && shot.notes ? `<dt>备注</dt><dd>${escapeHtml(shot.notes)}</dd>` : '',
-        ...selectedFields.filter(field => !['tc', 'duration', 'scene', 'shot_size', 'movement', 'angle', 'methods', 'description', 'voiceover', 'notes'].includes(field)).map(field => `<dt>${escapeHtml(pdfFieldLabel(field))}</dt><dd>${escapeHtml(String(pdfFieldValue(shot, field) || '—'))}</dd>`),
-      ].filter(Boolean).join('');
-      const shotLabel = has('number') ? `<div class="shot-label">SHOT ${escapeHtml(shot.number)}</div>` : '';
-      const shotTitle = has('title') && shot.title ? `<h2>${formattedShotField(shot,'title','')}</h2>` : '';
-      return `<article class="detail">${shotLabel}${shotTitle}<div class="detail-grid"><div class="detail-image">${media ? `<img src="${escapeHtml(media)}" data-shot="${escapeHtml(shot.number)}" alt="SHOT ${escapeHtml(shot.number)}">` : `<span class="empty">暂无图片<br>SHOT ${escapeHtml(shot.number)}</span>`}</div><dl>${dlParts}</dl></div></article>`;
-    }).join('')}</main></body></html>`;
-  }
-
-  // Table layout
-  const headers = (model.includeImages ? '<th style="width:32mm">分镜画面</th>' : '')
-    + selectedFields.map(field => `<th>${escapeHtml(pdfFieldLabel(field))}</th>`).join('');
-  const rows = shots.map(shot => {
-    const media = mediaMap.get(shot.id);
-    const imageCell = model.includeImages ? `<td>${media
-      ? `<img src="${escapeHtml(media)}" data-shot="${escapeHtml(shot.number)}" alt="SHOT ${escapeHtml(shot.number)}" style="display:block;width:100%;height:auto;max-height:40mm;object-fit:contain">`
-      : '<span class="empty">暂无图片</span>'}</td>` : '';
-    const cells = selectedFields.map(field => `<td>${RICH_TEXT_FIELDS.has(field) ? formattedShotField(shot,field,'') : escapeHtml(String(pdfFieldValue(shot, field) ?? ''))}</td>`).join('');
-    return `<tr>${imageCell}${cells}</tr>`;
-  }).join('');
-  return head + `<table><thead><tr>${headers}</tr></thead><tbody>${rows}</tbody></table></body></html>`;
+  const labels = Object.fromEntries(model.fields.map(field => [field, pdfFieldLabel(field)]));
+  const rows = model.shots.map(shot => ({
+    shot,
+    values: Object.fromEntries(model.fields.map(field => [field, pdfFieldValue(shot, field)])),
+    formatted: Object.fromEntries(model.fields.filter(field => RICH_TEXT_FIELDS.has(field))
+      .map(field => [field, formattedShotField(shot, field, '')]))
+  }));
+  if (!globalThis.FrameForgePdfExport?.build) throw new Error('PDF 导出模块未加载');
+  return globalThis.FrameForgePdfExport.build({ layout, model, rows, labels, mediaMap });
 }
 
 // Parse shot range string like "1-10,15,20-25" into a Set of shot number strings.
@@ -6236,6 +8132,23 @@ function parseShotRange(rangeStr, shots) {
   return selected;
 }
 
+function documentExportSelection() {
+  const selectedFields = Array.from($$('input[name="pdf_field"]:checked', document)).map(cb => cb.value);
+  const fieldScope = $('#pdfFieldScope')?.value || 'visible';
+  const fields = fieldScope === 'all' ? null : fieldScope === 'visible'
+    ? pdfFieldOptions().filter(field => !isColumnHidden(field)) : selectedFields;
+  const shotScope = $('#pdfShotScope')?.value || 'all';
+  const rangeStr = shotScope === 'range' ? $('#pdfShotRange')?.value || '' : '';
+  if (shotScope === 'range' && !rangeStr.trim()) throw new Error('请输入镜头编号或范围');
+  const allShots = state.bundle?.shots || [];
+  const selectedShots = allShots.filter(shot => state.selection.selectedShotIds.has(shot.id));
+  const sourceShots = shotScope === 'selected' ? selectedShots : shotScope === 'visible' ? filterShots(allShots) : allShots;
+  const rangeSet = parseShotRange(rangeStr, allShots);
+  const shots = rangeSet ? sourceShots.filter(shot => rangeSet.has(shot.number)) : sourceShots;
+  if (!shots.length) throw new Error('指定的镜头范围未匹配到任何镜头，请检查格式。');
+  return { fields, shots };
+}
+
 $('#pdfShotScope')?.addEventListener('change', event => {
   $('#pdfShotRange').hidden = event.target.value !== 'range';
 });
@@ -6248,24 +8161,10 @@ $('#openPdfDocumentBtn')?.addEventListener('click', () => {
   const status = $('#pdfPreflightStatus');
   const progress = $('#pdfProgress');
   // Collect selected fields
-  const selectedFields = Array.from($$('input[name="pdf_field"]:checked', document)).map(cb => cb.value);
-  const fieldScope = $('#pdfFieldScope')?.value || 'visible';
-  const fields = fieldScope === 'all' ? null : fieldScope === 'visible'
-    ? pdfFieldOptions().filter(field => !isColumnHidden(field)) : selectedFields;
-  if (fields && !fields.length && !['screenplay','us-board'].includes(layout)) { toast('请至少选择一个导出字段', true); return; }
-  // Collect shot range
-  const shotScope = $('#pdfShotScope')?.value || 'all';
-  const rangeStr = shotScope === 'range' ? $('#pdfShotRange')?.value || '' : '';
-  if (shotScope === 'range' && !rangeStr.trim()) { toast('请输入镜头编号或范围', true); return; }
-  const allShots = state.bundle?.shots || [];
-  const selectedShots = allShots.filter(shot => state.selectedShotIds.has(shot.id));
-  const sourceShots = shotScope === 'selected' ? selectedShots : shotScope === 'visible' ? filterShots(allShots) : allShots;
-  const rangeSet = parseShotRange(rangeStr, allShots);
-  const filteredShots = rangeSet ? sourceShots.filter(s => rangeSet.has(s.number)) : sourceShots;
-  if (filteredShots.length === 0) {
-    toast('指定的镜头范围未匹配到任何镜头，请检查格式。', true);
-    return;
-  }
+  let fields, filteredShots;
+  try { ({ fields, shots: filteredShots } = documentExportSelection()); }
+  catch (error) { toast(error.message, true); return; }
+  if (fields && !fields.length && !['screenplay','us-board','landscape-board'].includes(layout)) { toast('请至少选择一个导出字段', true); return; }
   if (button) { button.disabled = true; button.textContent = '检查图片…'; }
   if (progress) { progress.hidden = false; progress.value = 0; }
   if (status) status.textContent = `正在检查 ${filteredShots.length} 个镜头的分镜画面…`;
@@ -6278,10 +8177,10 @@ $('#openPdfDocumentBtn')?.addEventListener('click', () => {
   }
   printWindow.document.write('<!doctype html><title>准备分镜预览</title><p role="status">正在准备分镜图片，请保留此页…</p>');
   printWindow.document.close();
-  preflightPdfMedia(layout === 'screenplay' || isColumnHidden('thumb') || (state.tablePrefs.removed||[]).includes('thumb') ? [] : filteredShots, (done, total) => {
+  documentMedia.preflight(layout === 'landscape-board' ? filteredShots : layout === 'screenplay' || isColumnHidden('thumb') || isColumnArchived('thumb') || isColumnPurged('thumb') ? [] : filteredShots, (done, total) => {
     if (status) status.textContent = `准备图片 ${done} / ${total}`;
     if (progress) progress.value = Math.round(done / total * 70);
-  }).then(async ({ mediaMap, failures }) => {
+  }, { compact: layout === 'landscape-board' }).then(async ({ mediaMap, failures }) => {
     if (progress) progress.value = 70;
     if (failures.length) {
       const list = failures.slice(0, 12).map(item => `SHOT ${item.number}：${item.reason}`).join('\n');
@@ -6303,6 +8202,60 @@ $('#openPdfDocumentBtn')?.addEventListener('click', () => {
     if (button) { button.disabled = false; button.textContent = '生成预览'; }
     if (progress) setTimeout(() => { progress.hidden = true; progress.value = 0; }, 400);
   });
+});
+
+$('#downloadWordDocumentBtn')?.addEventListener('click', async () => {
+  const button = $('#downloadWordDocumentBtn');
+  const status = $('#pdfPreflightStatus');
+  const progress = $('#pdfProgress');
+  try {
+    const { fields, shots } = documentExportSelection();
+    const fixedLandscapeFields = $('#pdfLayoutHiddenInput')?.value === 'landscape-board';
+    const model = buildPresentationExportModel({ fields: fixedLandscapeFields ? pdfFieldOptions() : fields ?? pdfFieldOptions(), shots });
+    if (!model.fields.length) throw new Error('请至少选择一个导出字段');
+    if (!globalThis.FrameForgeWordExport?.build) throw new Error('Word 导出模块未加载');
+    button.disabled = true;
+    button.textContent = '正在准备 Word…';
+    if (progress) { progress.hidden = false; progress.value = 0; }
+    if (status) status.textContent = `正在检查 ${shots.length} 个镜头的分镜画面…`;
+    const { mediaMap, failures } = await documentMedia.preflight(shots, (done, total) => {
+      if (status) status.textContent = `准备图片 ${done} / ${total}`;
+      if (progress) progress.value = Math.round(done / total * 70);
+    }, { wordCompatible: true });
+    if (failures.length) {
+      const list = failures.slice(0, 12).map(item => `SHOT ${item.number}：${item.reason}`).join('\n');
+      const proceed = await confirmAction('图片预检未通过', `有 ${failures.length} 张图片无法嵌入 Word，缺失处将保留占位框。是否继续？\n\n${list}`);
+      if (!proceed) return;
+    }
+    if (status) status.textContent = '正在生成 Word 文档…';
+    const blob = globalThis.FrameForgeWordExport.build({
+      project: model.project,
+      shots: model.shots.map(shot => ({
+        id: shot.id, number: shot.number,
+        values: Object.fromEntries(model.fields.map(field => [field, pdfFieldValue(shot, field)]))
+      })),
+      fields: model.fields.map(field => ({ key: field, label: pdfFieldLabel(field) })),
+      mediaMap
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${String(model.project.name || 'FRAMEFORGE').replace(/[\\/:*?"<>|\u0000-\u001F]/g, '_').slice(0, 80)}-分镜表.docx`;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    if (progress) progress.value = 100;
+    if (status) status.textContent = `Word 文档已生成：${shots.length} 个镜头`;
+    $('#pdfExportModal')?.close();
+  } catch (error) {
+    toast(`Word 导出失败：${error.message}`, true);
+    if (status) status.textContent = `Word 导出失败：${error.message}`;
+  } finally {
+    button.disabled = false;
+    button.textContent = '下载 Word (.docx)';
+    if (progress) setTimeout(() => { progress.hidden = true; progress.value = 0; }, 400);
+  }
 });
 
 // --------------------------------------------------------------------------
@@ -6389,9 +8342,11 @@ $('#importFileInput')?.addEventListener('change', async e => {
 });
 
 function importCustomColumnsFromPreview(preview) {
-  if (Array.isArray(preview.custom_columns)) return preview.custom_columns.map(item => ({ ...item }));
-  const mapped = new Set(Object.values(preview.mapping || {}).map(item => Number(item?.col)).filter(Number.isFinite));
-  return (preview.headers || []).map((label, source_col) => ({ source_col, label: label || `未命名列${source_col + 1}`, field_type: 'text' })).filter(item => !mapped.has(item.source_col));
+  // Unmapped spreadsheet columns are discarded by default. A column only
+  // survives when the user explicitly keeps it in this list.
+  return Array.isArray(preview.custom_columns)
+    ? preview.custom_columns.filter(item => item?.selected === true).map(item => ({ ...item }))
+    : [];
 }
 
 function readImportCustomColumns(box) {
@@ -6407,12 +8362,22 @@ function renderImportCustomColumnList(box, headers) {
   const target = $('#importCustomColumns', box);
   if (!target || !state.importWizard) return;
   const columns = state.importWizard.customColumns || [];
+  const mapped = new Set($$('.mapping-combobox[data-field]', box).map(item => Number(item.dataset.col)).filter(Number.isFinite).filter(col => col >= 0));
+  const selected = new Set(columns.map(item => Number(item.source_col)));
+  const available = headers.map((label, source_col) => ({ source_col, label: label || `未命名列${source_col + 1}` }))
+    .filter(item => !mapped.has(item.source_col) && !selected.has(item.source_col));
   const badge = box.querySelector('.import-custom-section .import-section-badge');
   if (badge) badge.textContent = `${columns.length} 列`;
-  target.innerHTML = columns.length ? columns.map(item => `<div class="import-custom-column" data-import-custom-col="${item.source_col}" data-key="${escapeHtml(item.key || '')}"><span class="import-custom-source">${escapeHtml(headers[item.source_col] || `第 ${item.source_col + 1} 列`)}</span><input value="${escapeHtml(item.label || '')}" aria-label="自定义列名称：${escapeHtml(item.label || '')}"><button type="button" class="btn-ghost-icon import-custom-remove" data-remove-import-custom="${item.source_col}" aria-label="不导入 ${escapeHtml(item.label || '')}" title="不导入此列">×</button></div>`).join('') : '<div class="config-empty">暂无未映射列；所有来源列都会进入核心字段。</div>';
+  target.innerHTML = `${columns.map(item => `<div class="import-custom-column" data-import-custom-col="${item.source_col}" data-key="${escapeHtml(item.key || '')}"><span class="import-custom-source">${escapeHtml(headers[item.source_col] || `第 ${item.source_col + 1} 列`)}</span><input value="${escapeHtml(item.label || '')}" aria-label="自定义列名称：${escapeHtml(item.label || '')}"><button type="button" class="btn-ghost-icon import-custom-remove" data-remove-import-custom="${item.source_col}" aria-label="不导入 ${escapeHtml(item.label || '')}" title="不导入此列">×</button></div>`).join('')}${available.length ? `<div class="import-custom-available"><span>未选择来源列（不会导入）</span>${available.map(item => `<button type="button" class="btn btn-secondary btn-small" data-add-import-custom="${item.source_col}">保留「${escapeHtml(item.label)}」</button>`).join('')}</div>` : (!columns.length ? '<div class="config-empty">没有明确保留的自定义列。</div>' : '')}`;
   target.querySelectorAll('[data-remove-import-custom]').forEach(button => button.addEventListener('click', () => {
     const sourceCol = Number(button.dataset.removeImportCustom);
     state.importWizard.customColumns = (state.importWizard.customColumns || []).filter(item => item.source_col !== sourceCol);
+    renderImportCustomColumnList(box, headers);
+  }));
+  target.querySelectorAll('[data-add-import-custom]').forEach(button => button.addEventListener('click', () => {
+    const sourceCol = Number(button.dataset.addImportCustom);
+    const label = headers[sourceCol] || `未命名列${sourceCol + 1}`;
+    state.importWizard.customColumns = [...(state.importWizard.customColumns || []), { source_col: sourceCol, label, field_type: 'text' }];
     renderImportCustomColumnList(box, headers);
   }));
 }
@@ -6443,6 +8408,7 @@ function renderImportMapping(preview) {
   const headers = preview.headers || [];
   const sampleRows = preview.sample_preview || [];
   const diagnostics = preview.diagnostics || [];
+  const sourceDiagnostics = Array.isArray(preview.source_diagnostics) ? preview.source_diagnostics : [];
   const fieldIssueCounts = diagnostics.reduce((counts, item) => {
     (item.fields || []).forEach(field => { counts[field] = (counts[field] || 0) + 1; });
     return counts;
@@ -6452,13 +8418,14 @@ function renderImportMapping(preview) {
   box.innerHTML = `
     <div class="import-mode-row"><b>字段映射</b><label><input type="radio" name="importMode" value="append" checked> 新增镜头</label><label><input type="radio" name="importMode" value="update"> 更新已有镜头</label><label class="import-replace-option"><input type="radio" name="importMode" value="replace"> 替换所有镜头</label></div>
     <div class="import-mode-help">“替换所有镜头”会在同一事务中移除当前项目镜头，再写入本文件；校验失败会自动回滚，不会留下半成品。</div>
-    <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px;">已读取 <b>${preview.total_rows || 0}</b> 行、${headers.length} 列${preview.embedded_image_count ? `，识别图片 <b>${preview.embedded_image_count}</b> 张（${formatBytes(preview.embedded_image_bytes || 0)}）` : ''}。每个来源列只能映射到一个属性。${diagnostics.length ? `有 <b>${diagnostics.length}</b> 行需关注，提示已归入下方对应选择项。` : '当前预检通过。'}</div>
+    ${sourceDiagnostics.map(item => `<div class="import-source-warning" role="alert" data-diagnostic-code="${escapeHtml(item.code || '')}"><b>PDF 文字提取提示</b><p>${escapeHtml(item.message || '')}</p><small>共 ${Number(item.page_count) || 0} 页；解析器从 ${Number(item.text_page_count) || 0} 页取得文字；${Number(item.rendered_page_count) || 0} 页已保留整页画面。可以继续仅导入图片，或先用 OCR 处理 PDF 后重新导入。</small></div>`).join('')}
+    <div style="font-size:12px;color:var(--text-secondary);margin-bottom:10px;">已读取 <b>${preview.total_rows || 0}</b> 行、${headers.length} 列${preview.embedded_image_count ? `，识别图片 <b>${preview.embedded_image_count}</b> 张（${formatBytes(preview.embedded_image_bytes || 0)}）` : ''}。每个来源列只能映射到一个属性。${sourceDiagnostics.length ? '当前仅支持按页占位导入，正文和其他字段尚未识别。' : diagnostics.length ? `有 <b>${diagnostics.length}</b> 行需关注，提示已归入下方对应选择项。` : '当前预检通过。'}</div>
     <div class="import-mapping-grid">
       ${fields.map(([field, label]) => `
         <label class="import-map-row"><span>${label}${fieldIssueCounts[field] ? `<small class="mapping-field-warning">${fieldIssueCounts[field]} 行缺少或格式异常</small>` : ''}</span><div class="mapping-input-wrap"><input class="mapping-combobox" list="mapping-source-columns" data-field="${field}" data-col="${mapping[field]?.col ?? -1}" value="${escapeHtml(String(mapping[field] ? (headers[mapping[field].col] || '') : ''))}" placeholder="不导入 / 搜索来源列"><button type="button" class="btn-ghost-icon mapping-clear" data-clear-mapping="${field}" aria-label="清除${label}映射" title="清除映射">×</button></div></label>
       `).join('')}
     </div>
-    <section class="import-custom-section" aria-labelledby="importCustomColumnsTitle"><div class="import-section-head"><div><b id="importCustomColumnsTitle">导入自定义列</b><small>未映射的来源字段默认保留为当前项目的新列，可在此删除。</small></div><span class="import-section-badge">${(state.importWizard?.customColumns || []).length} 列</span></div><div id="importCustomColumns" class="import-custom-columns"></div></section>
+    <section class="import-custom-section" aria-labelledby="importCustomColumnsTitle"><div class="import-section-head"><div><b id="importCustomColumnsTitle">导入自定义列</b><small>只有明确保留的自定义列会写入项目；未选择的来源列不会进入表格或侧栏。</small></div><span class="import-section-badge">${(state.importWizard?.customColumns || []).length} 列</span></div><div id="importCustomColumns" class="import-custom-columns"></div></section>
     <datalist id="mapping-source-columns">${headers.map((header, index) => `<option value="${escapeHtml(header)}" data-index="${index}">${index + 1} · ${escapeHtml(header)}</option>`).join('')}</datalist>
     <div class="import-preview-section"><div class="import-section-head"><div><b>原始数据预览</b><small>横向滚动查看全部来源列；图片独立显示，不与文字叠放。</small></div><span class="import-section-badge">最多显示 50 行</span></div><div class="import-preview-scroll"><table id="importPreviewTable"></table></div></div>
   `;
@@ -6580,7 +8547,7 @@ async function renderProConfig() {
   const viewList = $('#savedViewsList');
   const fieldList = $('#customFieldsList');
   if (viewList) viewList.innerHTML = views.length ? views.map(view => `<div class="config-list-row"><button class="config-view-apply" data-apply-view="${escapeHtml(view.id)}"><b>${escapeHtml(view.name)}</b><small>${escapeHtml(view.view_type)} · ${escapeHtml(view.created_at || '')}</small></button><div class="config-row-actions"><button class="btn-ghost-icon" data-rename-view="${escapeHtml(view.id)}" title="重命名保存视图" aria-label="重命名 ${escapeHtml(view.name)}">✎</button><button class="btn-ghost-icon" data-copy-view="${escapeHtml(view.id)}" title="复制保存视图" aria-label="复制 ${escapeHtml(view.name)}">⧉</button><button class="btn-ghost-icon" data-delete-view="${escapeHtml(view.id)}" title="删除保存视图">×</button></div></div>`).join('') : '<div class="config-empty">暂无保存视图</div>';
-  if (fieldList) fieldList.innerHTML = fields.length ? fields.map(field => { const columnKey = `custom:${field.key}`; const removed = (state.tablePrefs.removed || []).includes(columnKey); return `<div class="config-list-row custom-field-row ${removed ? 'is-column-removed' : ''}"><span class="custom-field-type-icon"><svg class="g-icon"><use href="#icon-description"></use></svg></span><span class="config-row-copy"><b>${escapeHtml(field.label)}</b><small>${escapeHtml(field.key)} · ${escapeHtml(field.field_type)} · ${removed ? '已删除列，可重新添加' : '当前列表可见'}</small></span><div class="config-row-actions"><button class="btn-ghost-icon" data-edit-field="${escapeHtml(field.id)}" title="编辑自定义列" aria-label="编辑 ${escapeHtml(field.label)}"><svg class="g-icon"><use href="#icon-edit"></use></svg></button><button class="btn btn-secondary btn-small" data-remove-field="${escapeHtml(field.key)}" title="${removed ? '重新添加到当前列表' : '从当前列表删除'}">${removed ? '重新添加' : '删除列'}</button></div></div>`; }).join('') : '<div class="config-empty">还没有自定义列。可在上方创建第一个字段。</div>';
+  if (fieldList) fieldList.innerHTML = fields.length ? fields.map(field => `<div class="config-list-row custom-field-row"><span class="custom-field-type-icon"><svg class="g-icon"><use href="#icon-description"></use></svg></span><span class="config-row-copy"><b>${escapeHtml(field.label)}</b><small>${escapeHtml(field.key)} · ${escapeHtml(field.field_type)} · 当前表格及侧栏同步</small></span><div class="config-row-actions"><button class="btn-ghost-icon" data-edit-field="${escapeHtml(field.id)}" title="编辑自定义列" aria-label="编辑 ${escapeHtml(field.label)}"><svg class="g-icon"><use href="#icon-edit"></use></svg></button><button class="btn btn-secondary btn-small" data-remove-field="${escapeHtml(field.key)}" title="归档该自定义列">归档列</button></div></div>`).join('') : '<div class="config-empty">还没有自定义列。可在上方创建第一个字段。</div>';
   state.bundle.custom_fields = fields;
   viewList?.querySelectorAll('[data-delete-view]').forEach(button => button.addEventListener('click', async () => {
     await api(`/api/projects/${pid}/saved-views/${button.dataset.deleteView}`, { method: 'DELETE' });
@@ -6611,15 +8578,8 @@ async function renderProConfig() {
     state.filterStatus = config.filter_status || 'ALL';
     state.filterDept = config.filter_department || 'ALL';
     if (config.table_prefs) {
-      state.tablePrefs = {
-        widths: config.table_prefs.widths || {},
-        hidden: Array.isArray(config.table_prefs.hidden) ? config.table_prefs.hidden : [],
-        removed: Array.isArray(config.table_prefs.removed) ? config.table_prefs.removed : [],
-        order: Array.isArray(config.table_prefs.order) ? config.table_prefs.order : [],
-        sort: config.table_prefs.sort || null,
-        wrap: config.table_prefs.wrap || {},
-        rowHeight: config.table_prefs.rowHeight || 'standard'
-      };
+      state.tablePrefs = tablePresentationPrefs(config.table_prefs);
+      applyColumnLifecycleProjection();
       saveTablePrefs(VIEW.TABLE);
     }
     if ($('#globalSearchInput')) $('#globalSearchInput').value = state.searchQuery;
@@ -6627,14 +8587,11 @@ async function renderProConfig() {
     navigateToView(view?.view_type === 'cards' ? VIEW.CARDS : view?.view_type === 'wall' ? VIEW.WALL : VIEW.TABLE);
     toast(`已应用视图：${view?.name || ''}`);
   }));
-  fieldList?.querySelectorAll('[data-remove-field]').forEach(button => button.addEventListener('click', () => {
+  fieldList?.querySelectorAll('[data-remove-field]').forEach(button => button.addEventListener('click', async () => {
     const field = fields.find(item => item.key === button.dataset.removeField);
     if (!field) return;
     const columnKey = `custom:${field.key}`;
-    setColumnRemoved(columnKey, !(state.tablePrefs.removed || []).includes(columnKey));
-    renderTableView();
-    renderProConfig();
-    toast((state.tablePrefs.removed || []).includes(columnKey) ? `已删除列“${field.label}”，可在列设置中重新添加` : `已重新添加列“${field.label}”`);
+    if (archiveColumn(columnKey)) await renderProConfig();
   }));
   fieldList?.querySelectorAll('[data-edit-field]').forEach(button => button.addEventListener('click', () => {
     const field = fields.find(item => item.id === button.dataset.editField);
@@ -6646,10 +8603,22 @@ async function renderProConfig() {
     form.elements.key.value = field.key;
     form.elements.field_type.value = field.field_type;
     form.elements.options.value = (field.options || []).join(', ');
+    syncCustomFieldOptions(form);
     $('#customFieldEditModal')?.showModal();
     form.elements.label.focus();
   }));
 }
+
+function syncCustomFieldOptions(form) {
+  const row = form?.querySelector('.custom-options-field');
+  const options = form?.elements?.field_type?.value === 'select';
+  if (row) row.hidden = !options;
+  const input = row?.querySelector('[name="options"]');
+  if (input) input.disabled = !options;
+}
+
+$('#customFieldForm [name="field_type"]')?.addEventListener('change', event => syncCustomFieldOptions(event.currentTarget.form));
+$('#customFieldEditForm [name="field_type"]')?.addEventListener('change', event => syncCustomFieldOptions(event.currentTarget.form));
 
 $('#proConfigBtn')?.addEventListener('click', async () => {
   $('#proConfigModal')?.showModal();
@@ -6672,7 +8641,7 @@ $('#savedViewForm')?.addEventListener('submit', async event => {
   try {
     await api(`/api/projects/${state.bundle.project.id}/saved-views`, { method: 'POST', json: {
       name: form.get('name'), view_type: form.get('view_type'), is_shared: false,
-      config: { search: state.searchQuery, filter_method: state.filterMethod, filter_status: state.filterStatus, filter_department: state.filterDept, density: 'comfortable', table_prefs: state.tablePrefs }
+      config: { search: state.searchQuery, filter_method: state.filterMethod, filter_status: state.filterStatus, filter_department: state.filterDept, density: 'comfortable', table_prefs: tablePresentationPrefs(state.tablePrefs) }
     }});
     formElement.reset();
     await renderProConfig();
@@ -6688,7 +8657,7 @@ $('#customFieldForm')?.addEventListener('submit', async event => {
   try {
     await api(`/api/projects/${state.bundle.project.id}/custom-fields`, { method: 'POST', json: {
       label: form.get('label'), key: form.get('key'), field_type: form.get('field_type'), group_name: 'Custom',
-      options: String(form.get('options') || '').split(/[,，]/).map(item => item.trim()).filter(Boolean)
+      options: form.get('field_type') === 'select' ? String(form.get('options') || '').split(/[,，]/).map(item => item.trim()).filter(Boolean) : []
     }});
     formElement.reset();
     state.bundle = adoptServerBundle(await api(`/api/projects/${state.bundle.project.id}`));
@@ -6705,8 +8674,8 @@ $('#customFieldEditForm')?.addEventListener('submit', async event => {
   const form = new FormData(event.currentTarget);
   try {
     await api(`/api/projects/${state.bundle.project.id}/custom-fields/${form.get('id')}`, { method: 'PUT', json: {
-      label: form.get('label'), key: form.get('key'), field_type: form.get('field_type'),
-      options: String(form.get('options') || '').split(/[,，]/).map(item => item.trim()).filter(Boolean)
+      label: form.get('label'), field_type: form.get('field_type'),
+      options: form.get('field_type') === 'select' ? String(form.get('options') || '').split(/[,，]/).map(item => item.trim()).filter(Boolean) : []
     }});
     state.bundle = adoptServerBundle(await api(`/api/projects/${state.bundle.project.id}`));
     $('#customFieldEditModal')?.close();
@@ -6744,6 +8713,12 @@ $('#projectMoreBtn')?.addEventListener('click', event => {
   if (!menu) return;
   const open = menu.classList.toggle('hidden') === false;
   event.currentTarget.setAttribute('aria-expanded', String(open));
+  if(open) {
+    document.body.append(menu);
+    Object.assign(menu.style,{position:'fixed',right:'auto',maxWidth:'calc(100vw - 16px)',maxHeight:'calc(100dvh - 24px)',overflowY:'auto'});
+    positionPopoverNear(event.currentTarget,menu);
+    menu.querySelector('button')?.focus();
+  }
 });
 $('#projectQuickMenu')?.addEventListener('click', event => {
   const action = event.target.closest('[data-project-quick]')?.dataset.projectQuick;
@@ -6751,6 +8726,8 @@ $('#projectQuickMenu')?.addEventListener('click', event => {
   $('#projectQuickMenu')?.classList.add('hidden');
   $('#projectMoreBtn')?.setAttribute('aria-expanded', 'false');
   if (action === 'settings') openProjectSettings();
+  if (action === 'undo') $('#undoBtn')?.click();
+  if (action === 'redo') $('#redoBtn')?.click();
   if (action === 'share') openShareDialog();
   if (action === 'import') $('#importExcelBtn')?.click();
   if (action === 'pdf') $('#pdfExportQuickBtn')?.click();
@@ -6779,12 +8756,19 @@ async function openShotTrash() {
   const projectId = state.bundle.project.id;
   const modal = $('#shotTrashModal');
   const list = $('#shotTrashList');
+  const emptyButton = $('#emptyShotTrashBtn');
   if (modal && !modal.open) modal.showModal();
   if (!list) return;
+  if (emptyButton) { emptyButton.disabled = true; emptyButton.dataset.trashLoaded = 'false'; }
   list.innerHTML = '<div class="empty-state">正在读取…</div>';
   try {
     const rows = await api(`/api/projects/${encodeURIComponent(projectId)}/trash`);
     if (state.bundle?.project?.id !== projectId) return;
+    if (emptyButton) {
+      emptyButton.dataset.trashLoaded = 'true';
+      emptyButton.dataset.trashCount = String(rows.length);
+      emptyButton.disabled = rows.length === 0;
+    }
     list.innerHTML = rows.length ? rows.map(row => {
       const deleted = new Date(row.deleted_at || Date.now());
       const remaining = Math.max(0, 30 - Math.floor((Date.now() - deleted.getTime()) / 86400000));
@@ -6807,7 +8791,10 @@ async function openShotTrash() {
       if (button.disabled || state.bundle?.project?.id !== projectId) return;
       button.disabled = true;
       try {
-        if (!await confirmAction('彻底删除镜头', '此操作不可撤销，确定继续吗？')) return;
+        const shot = rows.find(row => row.id === button.dataset.trashPurge);
+        if (!shot) return;
+        const shotLabel = `SHOT ${shot.number || '—'} · ${shot.title || '未命名'}`;
+        if (!await confirmAction('彻底删除镜头', `将废纸篓中的 ${shotLabel} 永久删除。此操作不可撤销。`)) return;
         if (state.bundle?.project?.id !== projectId) return;
         await api(`/api/projects/${projectId}/trash`, { method: 'DELETE', json: { shot_ids: [button.dataset.trashPurge] } });
         if (state.bundle?.project?.id === projectId) await openShotTrash();
@@ -6815,23 +8802,28 @@ async function openShotTrash() {
       } catch (err) { toast(`彻底删除失败：${err.message}`, true); }
       finally { button.disabled = false; }
     }));
-  } catch (err) { list.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`; }
+  } catch (err) {
+    if (emptyButton) { emptyButton.disabled = true; emptyButton.dataset.trashLoaded = 'false'; emptyButton.dataset.trashCount = ''; }
+    list.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+  }
 }
 
 $('#emptyShotTrashBtn')?.addEventListener('click', async () => {
   const projectId = state.bundle?.project?.id;
   const button = $('#emptyShotTrashBtn');
-  if (!projectId || button.disabled) return;
+  if (!projectId || button.disabled || button.dataset.trashLoaded !== 'true') return;
+  const trashCount = Number(button.dataset.trashCount || 0);
+  if (!trashCount) return;
   button.disabled = true;
   try {
-    if (!await confirmAction('清空废纸篓', '所有废纸篓镜头及不再引用的媒体将被彻底删除，无法恢复。')) return;
+    if (!await confirmAction('清空镜头废纸篓', `将永久删除当前项目废纸篓中的 ${trashCount} 个镜头及不再引用的媒体，无法恢复。`)) return;
     if (state.bundle?.project?.id !== projectId) return;
     await api(`/api/projects/${projectId}/trash`, { method: 'DELETE', json: {} });
     if (state.bundle?.project?.id === projectId) await openShotTrash();
     toast('废纸篓已清空');
   }
   catch (err) { toast(err.message, true); }
-  finally { button.disabled = false; }
+  finally { button.disabled = button.dataset.trashLoaded !== 'true' || Number(button.dataset.trashCount || 0) === 0; }
 });
 $('#projectSettingsBtn')?.addEventListener('click', () => openProjectSettings());
 $('#currentProjName')?.addEventListener('click', () => openProjectSettings());
@@ -6873,12 +8865,20 @@ $('#projectSettingsForm')?.addEventListener('submit', async event => {
   }
 });
 document.addEventListener('pointerdown', event => {
-  if (!event.target.closest('.project-collaboration-bar')) {
+  if (!event.target.closest('.project-collaboration-bar, #projectQuickMenu')) {
     $('#projectActivityPanel')?.classList.add('hidden');
     $('#projectQuickMenu')?.classList.add('hidden');
     $('#projectLastEdited')?.setAttribute('aria-expanded', 'false');
     $('#projectMoreBtn')?.setAttribute('aria-expanded', 'false');
   }
+});
+document.addEventListener('keydown', event => {
+  if (event.key !== 'Escape') return;
+  const menu = $('#projectQuickMenu');
+  if (!menu || menu.classList.contains('hidden')) return;
+  menu.classList.add('hidden');
+  $('#projectMoreBtn')?.setAttribute('aria-expanded', 'false');
+  $('#projectMoreBtn')?.focus();
 });
 
 $('#genShareBtn')?.addEventListener('click', async () => {
@@ -6895,7 +8895,7 @@ $('#genShareBtn')?.addEventListener('click', async () => {
         allow_download: true,
         password: $('#sharePasswordInput')?.value || '',
         view_config: {
-          visible_columns: [...visiblePresentationFields(), ...(!isColumnHidden('thumb') && !(state.tablePrefs.removed || []).includes('thumb') ? ['thumb'] : [])],
+          visible_columns: [...visiblePresentationFields(), ...(!isColumnHidden('thumb') && !isColumnArchived('thumb') && !isColumnPurged('thumb') ? ['thumb'] : [])],
           column_order: currentColumnOrder()
         }
       }
@@ -7074,11 +9074,12 @@ function renderScriptView() {
   c.innerHTML = `
     <div class="script-view-head">
       <div><h3>旁白与时间对齐</h3><p>${shots.length} 个镜头 · ${voChars} 字 · 修改旁白后可手动保存或重新自动计时</p></div>
+      <label class="toolbar-compact-control" title="改变自动计时结果的旁白语速">语速<select id="projectNarrationSpeed" aria-label="项目自动计时语速">${NARRATION_SPEED_OPTIONS.map(speed => `<option value="${speed}" ${normalizeNarrationSpeed(state.narrationSpeed) === speed ? 'selected' : ''}>${speed}×${speed === 1 ? ' 标准' : ''}</option>`).join('')}</select></label>
       <button class="btn btn-secondary" data-action="auto-timing">重新自动计时</button>
     </div>
     <div class="script-list">
       ${shots.map(shot => `
-        <article class="script-row ${shot.id === state.activeShotId ? 'is-selected' : ''}" data-shot-id="${shot.id}" data-context-shot-id="${shot.id}" tabindex="0" aria-haspopup="menu">
+        <article class="script-row ${shot.id === state.selection.activeShotId ? 'is-selected' : ''}" data-shot-id="${shot.id}" data-context-shot-id="${shot.id}" tabindex="0" aria-haspopup="menu">
           <div class="script-row-meta"><b>SHOT ${escapeHtml(shot.number)}</b><span>${escapeHtml(shot.tc_in || '')} · ${shot.duration_seconds || 0}s</span></div>
           <div class="script-row-title">${escapeHtml(shot.title || '未命名镜头')}</div>
           <button type="button" class="script-voiceover" data-rich-voiceover="${escapeHtml(shot.id)}" aria-label="编辑 SHOT ${escapeHtml(shot.number)} 旁白及格式">${formattedShotField(shot,'voiceover','点击输入旁白…')}</button>
@@ -7086,13 +9087,16 @@ function renderScriptView() {
       `).join('')}
     </div>
   `;
+  c.querySelector('#projectNarrationSpeed')?.addEventListener('change', event => {
+    state.narrationSpeed = normalizeNarrationSpeed(event.target.value);
+  });
   c.querySelectorAll('[data-rich-voiceover]').forEach(button => button.addEventListener('click', () => {
     const shot = state.bundle.shots.find(s => s.id === button.dataset.richVoiceover);
     if (shot) openRichShotEditor(shot, 'voiceover', button);
   }));
   const activateScriptRow = row => {
     if (!row) return;
-    state.activeShotId = row.dataset.shotId;
+    state.selection.activeShotId = row.dataset.shotId;
     $$('.script-row', c).forEach(item => item.classList.toggle('is-selected', item === row));
     queuePresenceHeartbeat(true);
   };
@@ -7107,18 +9111,35 @@ function renderAssetsView() {
   const c = $('#assetsContainer');
   if (!c || !state.bundle) return;
   c._assetsCleanup?.();
+
   const assets = state.bundle.assets || [];
+  const projectId = state.bundle.project.id;
   const cleanups = [];
+  let disposed = false;
+  cleanups.push(() => { disposed = true; });
   c._assetsCleanup = () => cleanups.forEach(cleanup => cleanup());
+
+  // Panel count is useful context, but only the server's cleanup preview can
+  // decide whether a file is actually safe to remove.
   const usage = new Map();
   (state.bundle.shots || []).forEach(shot => {
     new Set((shot.panels || []).map(panel => String(panel.media_id || '')).filter(Boolean))
       .forEach(id => usage.set(id, (usage.get(id) || 0) + 1));
   });
+  let unusedCount = 0;
+
   c.innerHTML = `
     <section class="assets-v75" aria-label="素材资产库">
-      <header class="assets-v75-head"><div><h3>素材资产库</h3><span data-assets-count>${assets.length} 个素材</span></div><label class="assets-v75-search"><span>搜索</span><input type="search" placeholder="搜索素材名称…" aria-label="搜索素材名称"></label></header>
-      <nav class="assets-v75-filters" aria-label="素材类型">${[['all','全部素材'],['image','图片'],['video','视频'],['file','其他文件']].map(([value,label]) => `<button type="button" data-assets-kind="${value}" aria-pressed="${value === 'all'}">${label}</button>`).join('')}</nav>
+      <header class="assets-v75-head">
+        <div><h3>素材资产库</h3><span data-assets-count>${assets.length} 个素材</span></div>
+        <aside class="assets-v75-tools">
+          <button type="button" class="btn btn-ghost assets-v75-clean-unused" data-assets-clean-unused disabled title="核对素材引用后显示可清理数量">
+            正在核对可清理素材…
+          </button>
+          <label class="assets-v75-search"><span>搜索</span><input type="search" placeholder="搜索素材名称…" aria-label="搜索素材名称"></label>
+        </aside>
+      </header>
+      <nav class="assets-v75-filters" aria-label="素材类型">${[['all','全部素材'],['unused','未使用'],['image','图片'],['video','视频'],['file','其他文件']].map(([value,label]) => `<button type="button" data-assets-kind="${value}" aria-pressed="${value === 'all'}" ${value === 'unused' ? 'disabled' : ''}>${label}</button>`).join('')}</nav>
       <p class="assets-v75-no-results" role="status" hidden>没有匹配的素材，试试其他名称或类型。</p>
       ${assets.length ? '<div class="assets-v75-grid"></div>' : `<div class="assets-v75-empty">
         <div class="assets-v75-empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2.5"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></div>
@@ -7128,6 +9149,7 @@ function renderAssetsView() {
       </div>`}
     </section>
   `;
+
   const observer = typeof IntersectionObserver === 'function' ? new IntersectionObserver(entries => {
     entries.forEach(entry => {
       if (entry.isIntersecting) {
@@ -7137,27 +9159,33 @@ function renderAssetsView() {
     });
   }, { rootMargin: '240px' }) : null;
   cleanups.push(() => observer?.disconnect());
+
   const fragment = document.createDocumentFragment();
   const entries = [];
+
   assets.forEach(asset => {
     const filename = asset.filename || '未命名文件';
     const mime = String(asset.mime || '').toLowerCase();
     const kind = mime.startsWith('image/') ? 'image' : mime.startsWith('video/') ? 'video' : 'file';
     const url = getMediaUrl(asset.id) || '';
     const count = usage.get(String(asset.id)) || 0;
+    const unused = false;
     const tile = document.createElement('article');
-    tile.className = 'assets-v75-tile';
-    entries.push({ tile, kind, name: filename.toLocaleLowerCase() });
+    tile.className = `assets-v75-tile${unused ? ' is-unused' : ''}`;
+    tile.dataset.assetId = String(asset.id || '');
+    entries.push({ tile, kind, name: filename.toLocaleLowerCase(), unused, assetId: String(asset.id), count, size: asset.size || 0 });
+
     tile.innerHTML = `
       <div class="assets-v75-preview"><div class="assets-v75-media"></div>
         <div class="assets-v75-status" role="status" aria-live="polite"></div>
       </div>
       <h4 class="assets-v75-name" title="${escapeHtml(filename)}">${escapeHtml(filename)}</h4>
-      <p class="assets-v75-meta">${kind === 'image' ? '图片' : kind === 'video' ? '视频' : '文件'} · ${count ? `${count} 个镜头引用` : '无镜头引用'} · ${escapeHtml(formatBytes(asset.size || 0))}</p>
+      <p class="assets-v75-meta">${kind === 'image' ? '图片' : kind === 'video' ? '视频' : '文件'} · ${count ? `${count} 个镜头引用` : '正在核对引用'} · ${escapeHtml(formatBytes(asset.size || 0))}</p>
       <div class="assets-v75-actions">
         ${url ? `${kind === 'video' ? '<button type="button" class="btn btn-ghost" data-asset-play>播放</button>' : ''}<a class="btn btn-ghost" href="${escapeHtml(url)}" target="_blank" rel="noopener" aria-label="查看原文件：${escapeHtml(filename)}">查看原文件</a><a class="btn btn-ghost" href="${escapeHtml(url)}" download="${escapeHtml(filename)}" aria-label="下载：${escapeHtml(filename)}">下载</a>` : '<span class="assets-v75-unavailable">缺少文件地址，无法下载</span>'}
         <button type="button" class="btn btn-ghost" data-asset-retry hidden>重试</button>
       </div>`;
+
     tile.querySelector('.assets-v75-preview').append(tile.querySelector('.assets-v75-actions'));
     const host = tile.querySelector('.assets-v75-media');
     const status = tile.querySelector('.assets-v75-status');
@@ -7166,6 +9194,7 @@ function renderAssetsView() {
     let media = null;
     let timer;
     let attempt = 0;
+
     const setStatus = (value, message) => {
       tile.dataset.mediaState = value;
       host.setAttribute('aria-busy', String(value === 'loading'));
@@ -7173,6 +9202,7 @@ function renderAssetsView() {
       status.hidden = value === 'loaded';
       retry.hidden = value !== 'error' && !(value === 'unsupported' && kind === 'video');
     };
+
     const disposeMedia = () => {
       clearTimeout(timer);
       if (media) {
@@ -7184,6 +9214,7 @@ function renderAssetsView() {
       }
     };
     cleanups.push(disposeMedia);
+
     const load = (isRetry = false) => {
       disposeMedia();
       setStatus('loading', '正在加载预览');
@@ -7225,6 +9256,7 @@ function renderAssetsView() {
       timer = setTimeout(fail, 20000);
       media.src = source;
     };
+
     retry.addEventListener('click', () => {
       load(true);
       tile.querySelector('a')?.focus({ preventScroll: true });
@@ -7234,6 +9266,7 @@ function renderAssetsView() {
       if (media.paused) { await media.play().catch(() => {}); play.textContent = '暂停'; }
       else { media.pause(); play.textContent = '播放'; }
     });
+
     if (!url) setStatus('missing', '缺少原文件');
     else if (kind === 'file') setStatus('unsupported', '此格式不支持缩略图');
     else {
@@ -7244,25 +9277,112 @@ function renderAssetsView() {
     }
     fragment.appendChild(tile);
   });
+
   c.querySelector('.assets-v75-grid')?.appendChild(fragment);
+
   let activeKind = 'all';
   const search = c.querySelector('.assets-v75-search input');
   const applyFilter = () => {
     const query = search.value.trim().toLocaleLowerCase();
     let visible = 0;
-    entries.forEach(({ tile, kind, name }) => {
-      tile.hidden = !(activeKind === 'all' || kind === activeKind) || !name.includes(query);
+    entries.forEach(({ tile, kind, name, unused }) => {
+      const categoryMatch =
+        activeKind === 'all' ||
+        (activeKind === 'unused' ? unused : kind === activeKind);
+      tile.hidden = !categoryMatch || !name.includes(query);
       if (!tile.hidden) visible++;
     });
     c.querySelector('[data-assets-count]').textContent = `${visible} / ${assets.length} 个素材`;
     c.querySelector('.assets-v75-no-results').hidden = visible > 0 || !assets.length;
   };
+
   search.addEventListener('input', applyFilter);
   c.querySelectorAll('[data-assets-kind]').forEach(button => button.addEventListener('click', () => {
     activeKind = button.dataset.assetsKind;
     c.querySelectorAll('[data-assets-kind]').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
     applyFilter();
   }));
+
+  const reasonNames = {
+    panel:'镜头画面', shot_link:'镜头关联', production_step:'制作步骤',
+    creative_board:'画板', shot_version:'镜头版本', project_snapshot:'项目快照',
+    asset_metadata:'其它素材', active_share:'有效分享'
+  };
+  const applyCleanupPreview = preview => {
+    if (disposed || state.bundle?.project?.id !== projectId) return;
+    const deletable = new Set((preview.deletable || []).map(item => String(item.id)));
+    const protectedById = new Map((preview.protected || []).map(item => [String(item.id), item.reasons || []]));
+    unusedCount = Number(preview.deletable_count) || 0;
+    const button = c.querySelector('[data-assets-clean-unused]');
+    if (button) {
+      button.disabled = unusedCount === 0;
+      button.innerHTML = `清理未使用素材${unusedCount ? ` <span>${unusedCount}</span>` : ''}`;
+      button.title = `${unusedCount} 个素材经服务端核对可清理`;
+    }
+    c.querySelector('[data-assets-kind="unused"]')?.removeAttribute('disabled');
+    entries.forEach(entry => {
+      entry.unused = deletable.has(entry.assetId);
+      entry.tile.classList.toggle('is-unused', entry.unused);
+      const status = entry.count ? `${entry.count} 个镜头引用` : entry.unused
+        ? '可清理' : (protectedById.get(entry.assetId) || []).map(code => reasonNames[code] || code).join('、') || '受保护';
+      const meta = entry.tile.querySelector('.assets-v75-meta');
+      if (meta) meta.textContent = `${entry.kind === 'image' ? '图片' : entry.kind === 'video' ? '视频' : '文件'} · ${status} · ${formatBytes(entry.size)}`;
+      const badge = entry.tile.querySelector('.assets-v75-unused-badge');
+      if (entry.unused && !badge) {
+        const label = document.createElement('span');
+        label.className = 'assets-v75-unused-badge';
+        label.textContent = '未使用';
+        entry.tile.querySelector('.assets-v75-preview')?.append(label);
+      } else if (!entry.unused) badge?.remove();
+    });
+    applyFilter();
+  };
+
+  api(`/api/projects/${encodeURIComponent(projectId)}/assets/unused/preview`)
+    .then(applyCleanupPreview)
+    .catch(error => {
+      if (disposed) return;
+      const button = c.querySelector('[data-assets-clean-unused]');
+      if (button) button.textContent = '无法核对可清理素材';
+      console.warn('素材清理预览失败', error);
+    });
+
+  c.querySelector('[data-assets-clean-unused]')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    if (!unusedCount || button.disabled) return;
+    const originalText = button.innerHTML;
+    button.disabled = true;
+    button.textContent = '正在重新核对…';
+
+    try {
+      const latest = await api(`/api/projects/${encodeURIComponent(projectId)}/assets/unused/preview`);
+      applyCleanupPreview(latest);
+      if (state.bundle?.project?.id !== projectId || disposed) return;
+      const latestCount = Number(latest.deletable_count) || 0;
+      if (!latestCount) { toast('没有可清理的素材'); return; }
+      button.disabled = true;
+      const confirmed = await confirmAction(
+        '清理未使用素材',
+        `服务端确认有 ${latestCount} 个素材未被镜头、制作步骤、画板、版本、快照、其它素材或有效分享使用。将永久删除这些素材文件，此操作不能撤销。`
+      );
+      if (!confirmed) { button.disabled = false; return; }
+      button.textContent = '正在清理…';
+      const result = await api(`/api/projects/${encodeURIComponent(projectId)}/assets/unused`, { method: 'DELETE' });
+      if (state.bundle?.project?.id === projectId) {
+        state.bundle = adoptServerBundle(await api(`/api/projects/${encodeURIComponent(projectId)}`));
+        renderCurrentView();
+      }
+      const freed = result?.bytes_freed ? `，释放 ${formatBytes(result.bytes_freed)}` : '';
+      const protectedText = result?.protected ? `；${result.protected} 个因仍有版本/分享等引用而保留` : '';
+      toast(`已删除 ${result?.deleted || 0} 个未使用素材${freed}${protectedText}`);
+    } catch (err) {
+      if (!disposed && button.isConnected) {
+        button.disabled = unusedCount === 0;
+        button.innerHTML = originalText;
+      }
+      toast(`清理失败：${err.message}`, true);
+    }
+  });
 }
 
 const COMMENT_REFERENCE_LABELS = {
@@ -7300,6 +9420,55 @@ function mergeShotPatch(shot, patch) {
   return shot;
 }
 
+function acknowledgePartialReviewShot(shot, response) {
+  // /api/shots/{id} returns a partial Shot without panels/custom fields. Keep
+  // their baselines and the earlier base revision so a later bulk edit still
+  // checks concurrent changes that happened before this status-only ACK.
+  const remote = normalizeShotRecord(response);
+  const baseline = shot._syncBaseline || {};
+  COLLAB_SYNC_FIELDS.forEach(field => {
+    if (!Object.hasOwn(remote, field)) return;
+    if (JSON.stringify(shot[field]) === JSON.stringify(baseline[field])) {
+      shot[field] = structuredClone(remote[field]);
+    }
+    baseline[field] = structuredClone(remote[field]);
+  });
+  shot.revision = remote.revision;
+  shot.updated_at = remote.updated_at;
+  shot._syncBaseline = baseline;
+}
+
+async function refreshCompleteReviewBundle(projectId, shotId, minRevision, originalBaseline, acknowledgedStatus) {
+  if (state.bundle?.project?.id !== projectId || hasDirtyActiveEditor()) return false;
+  try {
+    const latest = await api(`/api/projects/${encodeURIComponent(projectId)}`);
+    if (state.bundle?.project?.id !== projectId || hasDirtyActiveEditor()) return false;
+    const remote = latest?.shots?.find(item => item.id === shotId);
+    const local = state.bundle.shots.find(item => item.id === shotId);
+    if (!remote || !local || Number(remote.revision) < Number(minRevision)) return false;
+    const complete = adoptServerBundle({ shots: [remote] }).shots[0];
+    const fields = [...COLLAB_SYNC_FIELDS, 'custom_fields', 'panels', 'import_columns'];
+    const changedLocally = field => JSON.stringify(local[field]) !== JSON.stringify(
+      field === 'status' ? acknowledgedStatus : originalBaseline[field]);
+    const conflict = fields.some(field => changedLocally(field) &&
+      JSON.stringify(complete[field]) !== JSON.stringify(
+        field === 'status' ? acknowledgedStatus : originalBaseline[field]) &&
+      JSON.stringify(local[field]) !== JSON.stringify(complete[field]));
+    if (conflict) return false;
+    fields.forEach(field => {
+      if (!changedLocally(field)) local[field] = structuredClone(complete[field]);
+    });
+    local.revision = complete.revision;
+    local.updated_at = complete.updated_at;
+    local._syncBaseline = complete._syncBaseline;
+    state.bundle.project.updated_at = latest.project?.updated_at || state.bundle.project.updated_at;
+    state.lastServerUpdatedAt = latest.project?.updated_at || state.lastServerUpdatedAt;
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 function renderReviewView() {
   const c = $('#reviewContainer');
   if (!c || !state.bundle) return;
@@ -7312,7 +9481,7 @@ function renderReviewView() {
     { key: 'changed', label: '已修改', shots: reviewShots.filter(shot => reviewActivityScore(shot) > 0) },
     { key: 'unchanged', label: '未修改', shots: reviewShots.filter(shot => reviewActivityScore(shot) === 0) }
   ].filter(group => group.shots.length);
-  const activeShot = shots.find(shot => shot.id === state.activeShotId) || shots[0];
+  const activeShot = shots.find(shot => shot.id === state.selection.activeShotId) || shots[0];
   const activeId = activeShot?.id || '';
   if (!activeShot) {
     c.innerHTML = '<div class="empty-state">当前项目没有可审阅的镜头。</div>';
@@ -7322,7 +9491,7 @@ function renderReviewView() {
   const versions = activeShot?.versions || [];
   const tab = c.dataset.reviewTab || 'comments';
   const media = activeShot ? getShotPrimaryMedia(activeShot) : '';
-  const selectedVersion = versions.find(version => version.id === c.dataset.reviewVersionId) || versions[0] || null;
+  const selectedVersion = versions.find(version => version.id === c.dataset.reviewVersionId) || null;
   const priorSnapshot = versionSnapshot(selectedVersion);
   const changedFields = selectedVersion ? reviewChanges(activeShot, priorSnapshot).filter(item => item.changed) : [];
   const unresolvedComments = comments.filter(comment => !comment.is_resolved).length;
@@ -7330,8 +9499,7 @@ function renderReviewView() {
   const requestedReference = c.dataset.commentReferenceField;
   const activeReference = referenceCandidates.find(item => item.field === requestedReference) || referenceCandidates[0] || { field: 'title', label: '镜头标题', text: activeShot.title || `SHOT ${activeShot.number}` };
   c.dataset.commentReferenceField = activeReference.field;
-  if (selectedVersion) c.dataset.reviewVersionId = selectedVersion.id;
-  else delete c.dataset.reviewVersionId;
+  if (!selectedVersion) delete c.dataset.reviewVersionId;
 
   const commentsPanel = `
     <div class="review-panel-summary"><span>${comments.length} 条评论</span><b>${unresolvedComments} 条待处理</b></div>
@@ -7406,13 +9574,20 @@ function renderReviewView() {
   const statusClass = currentStatus.toLowerCase().replaceAll(' ', '-');
   const reviewFeedback = c.dataset.reviewFeedback || '';
   const reviewHistory = (activeShot.review_history || []).slice(0, 5);
-  const reviewActions = [
-    ['Ready for Review', '提交意见', 'secondary'],
-    ['Draft', '撤回意见', 'ghost'],
-    ['Approved', '同意意见', 'primary'],
-    ['Changes Requested', '驳回意见', 'danger-ghost']
-  ];
-  const reviewActionButtons = reviewActions.map(([status, label, tone]) => `<button class="btn btn-${tone} ${currentStatus === status ? 'is-current' : ''}" data-review-status="${status}" ${currentStatus === status ? 'disabled' : ''}>${currentStatus === status ? `<svg class="g-icon"><use href="#icon-check"></use></svg>` : ''}${label}</button>`).join('');
+  const reviewActions = currentStatus === 'Draft'
+    ? [['Ready for Review', '提交修订', 'secondary']]
+    : currentStatus === 'Ready for Review'
+      ? [['Draft', '撤回修订', 'ghost']]
+      : currentStatus === 'Changes Requested'
+        ? [['Ready for Review', '重新提交修订', 'secondary']]
+        : [];
+  const reviewActionButtons = reviewActions.map(([status, label, tone]) => `<button class="btn btn-${tone}" data-review-status="${status}">${label}</button>`).join('');
+  const selectedRevisionLabel = selectedVersion ? `REV · ${selectedVersion.version_num || selectedVersion.name || '所选修订'}` : '';
+  const reviewDecisionButtons = currentStatus === 'Ready for Review' && selectedVersion
+    ? `<div class="review-revision-target">审批对象：SHOT ${escapeHtml(activeShot.number || '—')} · ${escapeHtml(selectedRevisionLabel)}</div><div class="review-revision-actions"><button class="btn btn-primary" data-review-status="Approved" data-review-version-id="${escapeHtml(selectedVersion.id)}">同意 ${escapeHtml(selectedRevisionLabel)}</button><button class="btn btn-danger-ghost" data-review-status="Changes Requested" data-review-version-id="${escapeHtml(selectedVersion.id)}">驳回 ${escapeHtml(selectedRevisionLabel)}</button></div>`
+    : currentStatus === 'Ready for Review'
+      ? '<div class="review-revision-target is-unselected">先在“版本”中明确选择一条修订，再执行同意或驳回。</div>'
+      : '';
 
   c.innerHTML = `
     <div class="review-head"><div><h3>审片与版本</h3><p>Before / After 历史对照 · Word 式审阅标记 · 悬浮批注</p></div><div class="review-head-actions"><span class="status-dot-label ${statusClass}">${escapeHtml(STATUS_LABELS[currentStatus] || currentStatus)}</span><span class="review-active-shot" aria-live="polite">当前 SHOT ${escapeHtml(activeShot.number || '')}</span></div></div>
@@ -7421,7 +9596,7 @@ function renderReviewView() {
       <section class="review-viewer" data-context-shot-id="${activeShot.id}" tabindex="0" aria-haspopup="menu"><div class="review-viewer-media">${media ? `<img src="${escapeHtml(media)}" alt="SHOT ${escapeHtml(activeShot.number || '')}">` : '<div class="review-empty-frame"><span>16:9</span><small>暂无分镜画面</small></div>'}</div>${renderHoverComments(comments)}<div class="review-viewer-caption">${reviewCardDetails}</div></section>
       <aside class="review-side">
         <section class="review-state-card"><div><span>当前审阅状态</span><b>${escapeHtml(STATUS_LABELS[currentStatus] || currentStatus)}</b></div><span class="review-state-orb ${statusClass}"><svg class="g-icon"><use href="#icon-${currentStatus === 'Approved' ? 'check_circle' : 'rate_review'}"></use></svg></span></section>
-        <div class="review-decision">${reviewActionButtons}</div>
+        <div class="review-decision">${reviewActionButtons}${reviewDecisionButtons}</div>
         ${reviewFeedback ? `<div class="review-feedback"><svg class="g-icon"><use href="#icon-check_circle"></use></svg><span>${escapeHtml(reviewFeedback)}</span></div>` : ''}
         ${reviewHistory.length ? `<details class="review-history"><summary>审阅记录（${activeShot.review_history.length}）</summary>${reviewHistory.map(item => `<div><b>${escapeHtml(item.action_label)}</b><span>${escapeHtml(item.created_by)} · ${escapeHtml(formatDateTime(item.created_at))}</span></div>`).join('')}</details>` : ''}
         <div class="review-tabs" role="tablist"><button class="${tab === 'comments' ? 'is-active' : ''}" data-review-tab="comments">评论 ${comments.length}</button><button class="${tab === 'versions' ? 'is-active' : ''}" data-review-tab="versions">版本 ${versions.length}</button><button class="${tab === 'compare' ? 'is-active' : ''}" data-review-tab="compare">Before / After</button></div><div class="review-tab-content">${tab === 'comments' ? commentsPanel : ''}${tab === 'versions' ? versionsPanel : ''}${tab === 'compare' ? comparePanel : ''}</div>
@@ -7429,7 +9604,7 @@ function renderReviewView() {
     </div>
   `;
   reviewScroll.forEach(([selector,top])=>{const node=c.querySelector(selector);if(node)node.scrollTop=top;});
-  $$('[data-review-shot-id]', c).forEach(button => button.addEventListener('click', () => { delete c.dataset.reviewVersionId; selectShot(button.dataset.reviewShotId, { openInspector: false }); renderReviewView(); }));
+  $$('[data-review-shot-id]', c).forEach(button => button.addEventListener('click', () => { delete c.dataset.reviewVersionId; selectShot(button.dataset.reviewShotId); renderReviewView(); }));
   const activeReviewIndex = reviewShots.findIndex(shot => shot.id === activeId);
   $$('[data-review-shot-nav]', c).forEach(button => {
     const direction = button.dataset.reviewShotNav === 'next' ? 1 : -1;
@@ -7438,7 +9613,7 @@ function renderReviewView() {
     button.addEventListener('click', () => {
       if (!target) return;
       delete c.dataset.reviewVersionId;
-      selectShot(target.id, { openInspector: false });
+      selectShot(target.id);
       renderReviewView();
       const list=c.querySelector('.review-shot-strip-scroll'), chip=c.querySelector(`[data-review-shot-id="${CSS.escape(target.id)}"]`);
       if(list&&chip){const a=chip.getBoundingClientRect(),b=list.getBoundingClientRect();if(a.top<b.top)list.scrollTop-=b.top-a.top;else if(a.bottom>b.bottom)list.scrollTop+=a.bottom-b.bottom;}
@@ -7486,24 +9661,77 @@ function renderReviewView() {
     if (quote) quote.textContent = selected.text;
   }));
   $$('[data-review-status]', c).forEach(button => button.addEventListener('click', async () => {
+    if (reviewStatusInFlight || c.dataset.reviewStatusPreparing) return;
     const nextStatus = button.dataset.reviewStatus;
-    const previousStatus = activeShot.status;
-    activeShot.status = nextStatus;
-    activeShot.change_count = Number(activeShot.change_count || 0) + 1;
-    c.dataset.reviewFeedback = '已在本地更新，正在后台同步';
+    const reviewVersionId = button.dataset.reviewVersionId || null;
+    if (['Approved', 'Changes Requested'].includes(nextStatus)) {
+      const revision = versions.find(version => version.id === reviewVersionId);
+      if (currentStatus !== 'Ready for Review' || !revision || revision.id !== selectedVersion?.id) {
+        toast('请先选择当前镜头中要审批的修订', true);
+        return;
+      }
+      const revisionLabel = revision.version_num || revision.name || '所选修订';
+      const actionLabel = nextStatus === 'Approved' ? '同意' : '驳回';
+      if (!await confirmAction(`${actionLabel}镜头修订`, `将${actionLabel} SHOT ${activeShot.number || '—'} · ${revisionLabel}。`)) return;
+    }
+    const projectId = state.bundle?.project?.id;
+    const shotId = activeShot.id;
+    // Flush the active editor and bulk Shot draft before taking a revision for
+    // this separate Review command. A failed flush leaves the draft untouched.
+    c.dataset.reviewStatusPreparing = 'true';
+    let flushed;
+    try { flushed = await saveCurrentProjectManually(); }
+    finally { delete c.dataset.reviewStatusPreparing; }
+    if (!flushed) return;
+    if (state.bundle?.project?.id !== projectId) return;
+    const current = state.bundle.shots.find(shot => shot.id === shotId);
+    if (!current || current.status !== currentStatus) {
+      c.dataset.reviewFeedback = '镜头状态已变化，请核对后重试';
+      renderReviewView();
+      return;
+    }
+    // Review changes only status, so use the latest acknowledged Shot revision.
+    // Bulk drafts retain their earlier _syncBaseline.revision for overlap checks.
+    const baseRevision = current.revision;
+    const versionAtStart = state.changeVersion;
+    const baselineBeforeStatus = structuredClone(current._syncBaseline || {});
+    reviewStatusInFlight = true;
+    c.dataset.reviewFeedback = '正在提交审阅状态…';
     renderReviewView();
     try {
-      const updated = await api(`/api/shots/${activeShot.id}`, { method: 'PUT', json: { status: nextStatus, version_id: c.dataset.reviewVersionId || null } });
-      mergeShotPatch(activeShot, updated);
-      activeShot.last_change_at = updated.updated_at || new Date().toISOString();
+      const updated = await api(`/api/shots/${shotId}`, { method: 'PUT', json: {
+        status: nextStatus, version_id: reviewVersionId,
+        base_revision: baseRevision, changed_fields: ['status']
+      } });
+      if (state.bundle?.project?.id !== projectId) return;
+      const local = state.bundle.shots.find(shot => shot.id === shotId);
+      if (!local) return;
+      acknowledgePartialReviewShot(local, updated);
+      local.last_change_at = updated.updated_at || new Date().toISOString();
+      await refreshCompleteReviewBundle(projectId, shotId, updated.revision, baselineBeforeStatus, updated.status);
       c.dataset.reviewFeedback = nextStatus === 'Draft' ? '已撤回提交，镜头回到草稿' : `状态已更新为“${STATUS_LABELS[nextStatus] || nextStatus}”`;
       renderReviewView();
       toast(c.dataset.reviewFeedback);
     } catch (err) {
-      activeShot.status = previousStatus;
-      activeShot.change_count = Math.max(0, Number(activeShot.change_count || 1) - 1);
+      if (state.bundle?.project?.id !== projectId) return;
+      if (err.status === 409 && err.payload?.server_version) {
+        const local = state.bundle.shots.find(shot => shot.id === shotId);
+        const remote = err.payload.server_version;
+        if (local) {
+          if (state.changeVersion === versionAtStart && !state.dirty) {
+            acknowledgePartialReviewShot(local, remote);
+            await refreshCompleteReviewBundle(projectId, shotId, remote.revision, baselineBeforeStatus, remote.status);
+          }
+        }
+        c.dataset.reviewFeedback = state.dirty
+          ? '审阅状态发生冲突，本地修改仍保留；请先处理同步冲突'
+          : '审阅状态发生冲突，已显示服务器状态';
+      } else c.dataset.reviewFeedback = '审阅状态未保存，请重试';
       renderReviewView();
       toast(err.message, true);
+    } finally {
+      reviewStatusInFlight = false;
+      if (state.dirty) scheduleAutoSave(60);
     }
   }));
   $$('[data-comment-id]', c).forEach(button => button.addEventListener('click', async () => {
@@ -7642,8 +9870,9 @@ function renderDeliverablesView() {
         <a href="/api/projects/${pid}/export/otio">OpenTimelineIO</a>
         <a href="/api/projects/${pid}/export/fcpxml">FCPXML</a>
         <a href="/api/projects/${pid}/export/json">JSON 备份</a>
+        <a href="/api/projects/${pid}/export/project-pdf" download>工程 PDF</a>
         <button class="btn btn-secondary" type="button" data-action="upload-backup">上传备份</button>
-        <input id="backupUploadInput" type="file" accept="application/json,.json" hidden>
+        <input id="backupUploadInput" type="file" accept="application/json,.json,application/pdf,.pdf" hidden>
       </div>
     </div>
   `;
@@ -7726,19 +9955,18 @@ function renderSearchResults(query) {
   panel.querySelectorAll('[data-search-index]').forEach(button => button.addEventListener('click', () => openSearchResult(Number(button.dataset.searchIndex))));
 }
 
-function openSearchResult(index) {
+async function openSearchResult(index) {
   const result = state.searchResults[index];
   if (!result || !state.bundle) return;
   $('#searchResultPanel')?.classList.add('hidden');
-  state.activeShotId = result.shotId;
-  state.inspectorOpen = true;
-  navigateToView(VIEW.TABLE);
+  await navigateToView(VIEW.TABLE);
+  if (state.view.current !== VIEW.TABLE) return;
+  selectShot(result.shotId);
   requestAnimationFrame(() => {
     const row = $(`#mainShotTable tbody tr[data-id="${CSS.escape(result.shotId)}"]`);
     row?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     row?.classList.add('search-hit');
     setTimeout(() => row?.classList.remove('search-hit'), 1400);
-    selectShot(result.shotId);
   });
 }
 
@@ -7775,25 +10003,12 @@ $('#deptFilter')?.addEventListener('change', e => {
 $('#rowHeightSelect')?.addEventListener('change', e => {
   state.tablePrefs.rowHeight = e.target.value;
   saveTablePrefs();
-  if (state.currentView === VIEW.TABLE) renderTableView();
+  if (state.view.current === VIEW.TABLE) renderTableView();
 });
 
 $('#columnSettingsBtn')?.addEventListener('click', event => {
   event.stopPropagation();
-  const anchor = event.currentTarget;
-  const popover = $('#columnSettingsPopover');
-  if (!popover) return;
-  $('#filterPopover')?.classList.add('hidden');
-  $('#filterPopoverBtn')?.setAttribute('aria-expanded', 'false');
-  setToolbarTools(false);
-  renderColumnSettingsPopover();
-  popover.classList.toggle('hidden');
-  event.currentTarget.setAttribute('aria-expanded', String(!popover.classList.contains('hidden')));
-  if (!popover.classList.contains('hidden')) requestAnimationFrame(() => {
-    if (popover.classList.contains('hidden')) return;
-    positionPopoverNear(anchor, popover);
-    $('#columnManagerSearch')?.focus();
-  });
+  toggleCanonicalColumnManager(event.currentTarget);
 });
 
 function setMobileNav(open) {
@@ -7839,16 +10054,15 @@ $('#globalSearchInput')?.addEventListener('input', e => {
     clearTimeout(state.searchTimer);
     renderSearchResults(value);
     state.searchTimer = setTimeout(() => {
-      if (state.currentView === VIEW.TABLE) renderTableView();
-      else if (state.currentView === VIEW.CARDS) renderCardsView();
-      else if (state.currentView === VIEW.WALL) renderWallView();
+      if (state.view.current === VIEW.TABLE) renderTableView();
+      else if (state.view.current === VIEW.CARDS) renderCardsView();
+      else if (state.view.current === VIEW.WALL) renderWallView();
     }, 150);
   }
 });
 
 // Close popover when clicking outside
 document.addEventListener('click', e => {
-  if (!e.target.closest('#tableContextMenu')) closeTableContextMenu();
   if (!e.target.closest('#filterPopover') && !e.target.closest('#filterPopoverBtn')) {
     $('#filterPopover')?.classList.add('hidden');
     $('#filterPopoverBtn')?.setAttribute('aria-expanded', 'false');
@@ -7856,9 +10070,10 @@ document.addEventListener('click', e => {
   if (!e.target.closest('.global-search') && !e.target.closest('#searchResultPanel')) {
     $('#searchResultPanel')?.classList.add('hidden');
   }
-  if (!e.target.closest('#columnSettingsPopover') && !e.target.closest('#columnSettingsBtn')) {
-    $('#columnSettingsPopover')?.classList.add('hidden');
-    $('#columnSettingsBtn')?.setAttribute('aria-expanded', 'false');
+  if (!e.target.closest('#columnSettingsPopover') &&
+      !e.target.closest('#columnSettingsBtn') &&
+      !e.target.closest('[data-frameforge-column-manager-trigger="canonical"]')) {
+    closeColumnSettings(false);
   }
   if (!e.target.closest('#toolbarSecondaryActions') && !e.target.closest('#toolbarMoreBtn')) setToolbarTools(false);
 });
@@ -7895,17 +10110,10 @@ window.addEventListener('keydown', e => {
     return;
   }
   if (e.key === 'Escape') {
-    const contextMenu = $('#tableContextMenu');
-    if (contextMenu && !contextMenu.classList.contains('hidden')) {
-      closeTableContextMenu();
-      return;
-    }
     const column = $('#columnSettingsPopover');
     const filter = $('#filterPopover');
     if (column && !column.classList.contains('hidden')) {
-      column.classList.add('hidden');
-      $('#columnSettingsBtn')?.setAttribute('aria-expanded', 'false');
-      $('#columnSettingsBtn')?.focus();
+      closeColumnSettings(true);
       return;
     }
     if (filter && !filter.classList.contains('hidden')) {
@@ -7944,13 +10152,17 @@ window.addEventListener('keydown', e => {
     });
   } else if ((e.ctrlKey || e.metaKey) && e.key === 's') {
     e.preventDefault();
-    saveProject();
+    saveCurrentProjectManually();
   } else if (e.key === 'Escape') {
     // Modal dialogs own their cancel lifecycle (including pending editor promises).
     // Let the browser dispatch cancel to the topmost dialog instead of closing all.
     if ($('dialog[open]')) return;
     $('#filterPopover')?.classList.add('hidden');
   }
+});
+
+$('#saveProjectBtn')?.addEventListener('click', () => {
+  saveCurrentProjectManually();
 });
 
 function formatSeconds(v) {
@@ -7980,9 +10192,10 @@ function publishWorkspaceUI() {
   filters.forEach(filter => { if (!filter.options.some(option => option.value === filter.value)) filter.options.push({ value: filter.value, label: filter.value }); });
   const groups = { moodboard: '视觉', voiceover: '声音', deliverables: '项目' };
   globalThis.FrameForgeUI.update({
-    projectId: String(state.bundle?.project?.id || ''), context: state.context, view: state.currentView,
+    projectId: String(state.bundle?.project?.id || ''), context: state.context, view: state.view.current,
     search: state.searchQuery, total: state.bundle?.shots?.length || 0,
-    filtered: filterShots(state.bundle?.shots || []).length, inspectorOpen: state.inspectorOpen,
+    filtered: filterShots(state.bundle?.shots || []).length, inspectorOpen: state.inspector.open,
+    saveRefreshBusy: Boolean(state.saveRefreshInFlight),
     columns: state.bundle ? columnManagerEntries('', 'all') : [],
     columnOrder: state.bundle ? currentColumnOrder() : [], filters,
     navigation: SIDEBAR_ITEMS.map(item => ({ ...item, group: groups[item.key] || item.group })),
@@ -7996,7 +10209,9 @@ globalThis.FrameForgeUI?.mount({
     if (view === VIEW.HUB) showDashboard(); else navigateToView(view);
     if (window.innerWidth < 768) setMobileNav(false);
   },
-  action: name => {
+  action: (name, anchor = null) => {
+    if (name === 'columns') { toggleCanonicalColumnManager(anchor); return; }
+    if (name === 'saveRefresh') { saveAndRefreshProject(); return; }
     if (name === 'projectSettings') { openProjectSettings(); return; }
     if (name === 'autoFit') { autoFitTableColumns(); publishWorkspaceUI(); return; }
     if (name === 'resetColumns') { state.tablePrefs.widths = {}; saveTablePrefs(); renderTableView(); publishWorkspaceUI(); return; }
@@ -8017,7 +10232,7 @@ globalThis.FrameForgeUI?.mount({
   column: (field, action) => {
     if (!columnManagerEntries('', 'all').some(entry => entry.field === field && !entry.fixed)) return;
     if (action === 'hide' || action === 'show') setColumnHidden(field, action === 'hide');
-    else setColumnRemoved(field, action === 'remove');
+    else setColumnArchived(field, action === 'remove');
     renderCurrentView();
   },
   reorderColumns: ids => {

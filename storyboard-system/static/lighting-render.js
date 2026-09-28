@@ -730,6 +730,7 @@ function LightingWebGLRuntime(container, options) {
   this.mode = options.mode || '3d';
   this.zoom = options.zoom || 1;
   this.selectedId = options.selectedId || null;
+  this.tool = options.tool || 'select';
   this.roomWidth = options.roomWidth || 1600;
   this.roomDepth = options.roomDepth || 1000;
   this.coverage = options.coverage !== false;
@@ -1013,6 +1014,10 @@ LightingWebGLRuntime.prototype.loadGLB = function(url, onSuccess, onError) {
   });
 
   this.loadingPromises.set(url, promise);
+  var releasePending = function() {
+    if (self.loadingPromises.get(url) === promise) self.loadingPromises.delete(url);
+  };
+  promise.then(releasePending, releasePending);
   promise.then(onSuccess).catch(onError);
 };
 
@@ -1302,7 +1307,7 @@ LightingWebGLRuntime.prototype.syncScene = function(board, options) {
       var glbUrl = LA && LA.getGLBUrl ? LA.getGLBUrl(item.type, item.subtype) : null;
       if (glbUrl) {
         self.loadGLB(glbUrl, function(gltf) {
-          if (!self.equipmentMap.has(item.id)) return; // Item removed in meantime
+          if (self.disposed || self.equipmentMap.get(item.id)!==entry) return;
 
           var cloned = gltf.scene.clone(true);
           var mCount = 0;
@@ -1555,6 +1560,16 @@ LightingWebGLRuntime.prototype.orbitBy = function(dTheta, dPhi) {
 };
 
 /** 水平面平移（右键拖拽）。前后沿视线水平分量、左右沿相机右向量 */
+LightingWebGLRuntime.prototype.focusSelected = function() {
+  var entry=this.equipmentMap.get(this.selectedId), THREE=globalThis.THREE;
+  if(!entry || !THREE)return;
+  this.scene.updateMatrixWorld(true);
+  var model=entry.glbMesh && entry.glbMesh.visible ? entry.glbMesh : entry.procedural;
+  var box=new THREE.Box3().setFromObject(model), center=box.getCenter(new THREE.Vector3()), size=box.getSize(new THREE.Vector3());
+  Object.assign(this.orbit,{tx:center.x,ty:center.y,tz:center.z,radius:Math.max(100,size.length()*2)});
+  this.applyOrbit();this.render();
+};
+
 LightingWebGLRuntime.prototype.panBy = function(dx, dy) {
   var o = this.orbit;
   var s = o.radius * 0.0016;
@@ -1617,37 +1632,140 @@ LightingWebGLRuntime.prototype.initEvents = function() {
   }
 
   var cv = this.canvas;
-  var dragging = false, panning = false, lastX = 0, lastY = 0;
+  var gesture = null;
+  var touchPoints = new Map();
+  var touchGesture = null;
+  var THREE = globalThis.THREE;
+  function ray(e) {
+    var box = cv.getBoundingClientRect();
+    if (!THREE || !self.cameraPerspective || !box.width || !box.height) return null;
+    self.cameraPerspective.updateMatrixWorld(); self.scene.updateMatrixWorld(true);
+    var caster = new THREE.Raycaster();
+    caster.setFromCamera(new THREE.Vector2((e.clientX-box.left)/box.width*2-1, 1-(e.clientY-box.top)/box.height*2), self.cameraPerspective);
+    return caster;
+  }
+  function pick(caster) {
+    if (!caster) return null;
+    var best = null, distance = Infinity;
+    self.equipmentMap.forEach(function(entry) {
+      var model = entry.glbMesh && entry.glbMesh.visible ? entry.glbMesh : entry.procedural;
+      if (!model || !model.visible || !entry.group.visible) return;
+      var hits = caster.intersectObject(model, true).filter(function(hit) {
+        for (var node=hit.object;node;node=node.parent) if (!node.visible) return false;
+        return true;
+      });
+      if (hits.length && hits[0].distance < distance) { best=entry; distance=hits[0].distance; }
+    });
+    return best;
+  }
+  function floor(caster) { return caster && caster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0,1,0),0),new THREE.Vector3()); }
 
   cv.style.touchAction = 'none';
+  cv.tabIndex = 0;
+  cv.setAttribute('aria-label', '3D 灯光画布：点选设备，移动或旋转工具拖动；Alt 拖动环绕，中键或右键平移');
   cv.addEventListener('contextmenu', function(e) { e.preventDefault(); });
 
   cv.addEventListener('pointerdown', function(e) {
     // 只在与立体视图相关时接管指针；平面图模式不拦截，避免影响 2D 交互
     if (self.mode !== '3d' && self.mode !== 'split') return;
-    dragging = true; panning = (e.button === 2);
-    lastX = e.clientX; lastY = e.clientY;
+    if (e.pointerType === 'touch') {
+      touchPoints.set(e.pointerId, {x:e.clientX, y:e.clientY});
+      if (touchPoints.size === 2) {
+        e.preventDefault(); e.stopPropagation();
+        if (gesture) endDrag({type:'pointercancel', pointerId:gesture.id});
+        var points = Array.from(touchPoints.values());
+        var center = {x:(points[0].x + points[1].x) / 2, y:(points[0].y + points[1].y) / 2};
+        touchGesture = {
+          distance:Math.max(1, Math.hypot(points[1].x-points[0].x, points[1].y-points[0].y)),
+          radius:self.orbit.radius, center:center
+        };
+        touchPoints.forEach(function(_, pointerId) { try { cv.setPointerCapture(pointerId); } catch (_) {} });
+        return;
+      }
+    }
+    if (gesture || e.button > 2) return;
+    e.preventDefault(); e.stopPropagation(); cv.focus({preventScroll:true});
+    var mode = e.button===1 || e.button===2 || self.tool==='pan' ? 'pan' : e.altKey || self.tool==='orbit' ? 'orbit' : self.tool;
+    var caster = ray(e), entry = (mode==='pan'||mode==='orbit') ? null : pick(caster);
+    if (mode!=='pan' && mode!=='orbit') {
+      self.selectedId = entry ? entry.id : null;
+      if (self.options.onSelect) self.options.onSelect(self.selectedId);
+    }
+    gesture = {id:e.pointerId, mode:mode, entry:entry, x:e.clientX, y:e.clientY, lastX:e.clientX, lastY:e.clientY,
+      start:floor(caster), original:entry ? Object.assign({},entry.item) : null, patch:null};
+    if(self.options.onGestureStart)self.options.onGestureStart();
     try { cv.setPointerCapture(e.pointerId); } catch (_) {}
-    cv.style.cursor = panning ? 'grabbing' : 'move';
+    cv.style.cursor = mode==='pan' ? 'grabbing' : mode==='select' ? 'default' : 'move';
   });
 
   cv.addEventListener('pointermove', function(e) {
-    if (!dragging) return;
-    var dx = e.clientX - lastX, dy = e.clientY - lastY;
-    lastX = e.clientX; lastY = e.clientY;
-    if (panning) self.panBy(dx, dy);
-    else self.orbitBy(-dx * 0.006, dy * 0.006);
+    if (e.pointerType === 'touch' && touchPoints.has(e.pointerId)) {
+      touchPoints.set(e.pointerId, {x:e.clientX, y:e.clientY});
+      if (!touchGesture || touchPoints.size < 2) return;
+      e.preventDefault();
+      var points = Array.from(touchPoints.values());
+      var center = {x:(points[0].x + points[1].x) / 2, y:(points[0].y + points[1].y) / 2};
+      var distance = Math.max(1, Math.hypot(points[1].x-points[0].x, points[1].y-points[0].y));
+      var deltaX = center.x - touchGesture.center.x, deltaY = center.y - touchGesture.center.y;
+      var floorRadius = Math.max(self.roomWidth, self.roomDepth) * 0.12;
+      var ceilRadius = Math.max(self.roomWidth, self.roomDepth) * 6;
+      self.panBy(deltaX, deltaY);
+      self.orbit.radius = Math.max(floorRadius, Math.min(ceilRadius, touchGesture.radius * touchGesture.distance / distance));
+      self.applyOrbit(); self.render();
+      touchGesture.center = center;
+      return;
+    }
+    var g=gesture; if (!g || e.pointerId!==g.id) return;
+    var dx=e.clientX-g.lastX, dy=e.clientY-g.lastY;
+    g.lastX=e.clientX; g.lastY=e.clientY;
+    if (g.mode==='pan') self.panBy(dx,dy);
+    else if (g.mode==='orbit') self.orbitBy(-dx*.006,dy*.006);
+    else if (g.entry && Math.hypot(e.clientX-g.x,e.clientY-g.y)>3) {
+      var original=g.original;
+      if (g.mode==='move' && g.start) {
+        var current=floor(ray(e)); if (!current) return;
+        g.patch={x:Math.max(0,Math.min(self.roomWidth-original.width,original.x+current.x-g.start.x)),
+          y:Math.max(0,Math.min(self.roomDepth-original.height,original.y+current.z-g.start.z))};
+        g.entry.group.position.x=g.patch.x+original.width/2-self.roomWidth/2;
+        g.entry.group.position.z=g.patch.y+original.height/2-self.roomDepth/2;
+      } else if (g.mode==='rotate') {
+        var angle=(original.rotation||0)+(e.clientX-g.x)*.5;
+        if(e.shiftKey)angle=Math.round(angle/15)*15;
+        g.patch={rotation:angle}; g.entry.group.rotation.y=-angle*Math.PI/180;
+      }
+      self.render();
+    }
   });
 
   function endDrag(e) {
-    if (!dragging) return;
-    dragging = false; panning = false;
+    var g=gesture; if (!g || (e.pointerId!==undefined && e.pointerId!==g.id)) return;
+    gesture=null;
+    if(self.options.onGestureEnd)self.options.onGestureEnd();
     cv.style.cursor = '';
-    try { cv.releasePointerCapture(e.pointerId); } catch (_) {}
+    try { cv.releasePointerCapture(g.id); } catch (_) {}
+    if (g.entry) {
+      g.entry.group.position.x=g.original.x+g.original.width/2-self.roomWidth/2;
+      g.entry.group.position.z=g.original.y+g.original.height/2-self.roomDepth/2;
+      g.entry.group.rotation.y=-(g.original.rotation||0)*Math.PI/180;
+      if(e.type==='pointerup' && g.patch && self.options.onTransform) self.options.onTransform(g.entry.id,g.patch);
+      else self.render();
+    }
   }
   cv.addEventListener('pointerup', endDrag);
   cv.addEventListener('pointercancel', endDrag);
   cv.addEventListener('lostpointercapture', endDrag);
+  function endTouch(e) {
+    if (e.pointerType !== 'touch' || !touchPoints.has(e.pointerId)) return;
+    touchPoints.delete(e.pointerId);
+    if (touchGesture) {
+      touchGesture = null;
+      try { cv.releasePointerCapture(e.pointerId); } catch (_) {}
+    }
+  }
+  cv.addEventListener('pointerup', endTouch);
+  cv.addEventListener('pointercancel', endTouch);
+  this.cancelGesture = function() { endDrag({type:'cancel'}); };
+  cv.addEventListener('keydown', function(e) { if(e.key==='Escape'&&gesture){e.preventDefault();e.stopPropagation();endDrag(e);} });
 
   cv.addEventListener('wheel', function(e) {
     if (self.mode !== '3d' && self.mode !== 'split') return;
@@ -1679,6 +1797,8 @@ LightingWebGLRuntime.prototype.getEquipment = function(id) {
 };
 
 LightingWebGLRuntime.prototype.dispose = function() {
+  this.disposed = true;
+  if(this.cancelGesture)this.cancelGesture();
   if (this.resizeObserver) this.resizeObserver.disconnect();
   if (this.renderer) {
     this.renderer.dispose();
@@ -1688,6 +1808,33 @@ LightingWebGLRuntime.prototype.dispose = function() {
   }
 };
 
+/** Own one WebGL runtime for a board and viewport; return null for the 2D fallback. */
+function reconcileWebGLRuntime(current, container, board, options, savedOrbit) {
+  if (!container || !board) return null;
+  var mode = options.mode === 'split' ? '3d' : options.mode;
+  if (!current || current.disposed || !current.canvas || !current.canvas.isConnected ||
+      current.container !== container || current.boardId !== board.id) {
+    var previousOrbit = current && current.boardId === board.id && current.orbit
+      ? Object.assign({}, current.orbit) : savedOrbit;
+    if (current) current.dispose();
+    current = new LightingWebGLRuntime(container, Object.assign({}, options, { mode: mode }));
+    current.boardId = board.id;
+    if (previousOrbit && current.renderer) {
+      current.orbit = Object.assign({}, previousOrbit);
+      current.applyOrbit();
+    }
+  }
+  if (!current.renderer) {
+    current.dispose();
+    if (current.canvas !== container) current.canvas.remove();
+    if (current.hud) current.hud.remove();
+    return null;
+  }
+  current.syncScene(board, { mode: mode, selectedId: options.selectedId,
+    zoom: options.zoom, coverage: options.coverage });
+  return current;
+}
+
 var api = {
   project25d: project25d, project2d: project2d, project3d: project3d,
   unproject2d: unproject2d, unproject25dDelta: unproject25dDelta,
@@ -1696,7 +1843,8 @@ var api = {
   LightingWebGLRuntime: LightingWebGLRuntime,
   createWebGLRuntime: function(container, options) {
     return new LightingWebGLRuntime(container, options);
-  }
+  },
+  reconcileWebGLRuntime: reconcileWebGLRuntime
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 root.FrameForgeLightingRender = api;

@@ -260,7 +260,7 @@ class BackendIntegrityTest(unittest.TestCase):
         sizes = []
         with self.app.connect() as db:
             for i in range(12):
-                snapshot, _ = self.app.complete_shot_snapshot(db, sid)
+                snapshot, _ = self.app.complete_shot_snapshot(db, sid, self.app.project_bundle)
                 self.assertNotIn('versions', snapshot)
                 self.assertNotIn('review_history', snapshot)
                 sizes.append(len(json.dumps(snapshot)))
@@ -375,6 +375,51 @@ class BackendIntegrityTest(unittest.TestCase):
         self.assertEqual(len({p['media_id'] for p in panels}), 2)
         for panel in panels:
             self.assertEqual(self.request(f"/media/{panel['media_id']}")[1], PNG)
+
+    def test_image_only_pdf_preview_warns_and_keeps_page_import_available(self):
+        page = types.SimpleNamespace(extract_text=lambda **kwargs: '',
+                                     images=[types.SimpleNamespace(name='page.png', data=PNG)])
+        fake_reader = types.SimpleNamespace(is_encrypted=False, pages=[page])
+        bundle = self.project()
+        pid = bundle['project']['id']
+        with patch.dict('sys.modules', {'pypdf': types.SimpleNamespace(PdfReader=lambda _: fake_reader)}):
+            status, preview = self.request(f'/api/projects/{pid}/import-preview?filename=image-only.pdf',
+                                           'POST', b'%PDF-image-only-test', 'application/pdf')
+        self.assertEqual(status, 200, preview)
+        self.assertEqual(preview['total_rows'], 1)
+        self.assertEqual(set(preview['mapping']), {'number', 'title'})
+        self.assertEqual(preview['custom_columns'], [])
+        self.assertEqual(preview['embedded_image_count'], 1)
+        self.assertEqual(preview['source_diagnostics'][0]['code'], 'pdf_text_not_extracted')
+        self.assertEqual(preview['source_diagnostics'][0]['page_count'], 1)
+        self.assertEqual(preview['source_diagnostics'][0]['text_page_count'], 0)
+        self.assertIn('OCR', preview['source_diagnostics'][0]['message'])
+        status, result = self.request(f'/api/projects/{pid}/import-commit', 'POST', {
+            'preview_id': preview['preview_id'], 'mapping': preview['mapping'], 'mode': 'replace',
+        })
+        self.assertEqual(status, 200, result)
+        self.assertEqual(result['imported'], 1)
+        self.assertEqual(result['images_imported'], 1)
+        self.assertEqual(result['bundle']['shots'][0]['number'], '001')
+        self.assertEqual(result['bundle']['shots'][0]['title'], 'PDF 第 1 页')
+
+    def test_image_only_pdf_prefers_whole_page_render_over_embedded_images(self):
+        page = types.SimpleNamespace(extract_text=lambda **kwargs: '',
+                                     images=[types.SimpleNamespace(name='embedded.png', data=PNG)])
+        fake_reader = types.SimpleNamespace(is_encrypted=False, pages=[page])
+
+        def render_page(args, **kwargs):
+            Path(args[-1] + '.jpg').write_bytes(b'whole-page-render')
+
+        with patch.dict('sys.modules', {'pypdf': types.SimpleNamespace(PdfReader=lambda _: fake_reader)}), \
+             patch('import_parsing.shutil.which', return_value='pdftoppm'), \
+             patch('import_parsing.subprocess.run', side_effect=render_page):
+            rows, images, metadata = self.app.parse_pdf_storyboard(Path('fixture.pdf'), with_metadata=True)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(metadata, {'page_count': 1, 'text_page_count': 0, 'rendered_page_count': 1})
+        self.assertEqual(len(images), 1)
+        self.assertEqual(images[0]['filename'], 'page-1.jpg')
+        self.assertEqual(images[0]['raw'], b'whole-page-render')
 
 
 if __name__ == '__main__':

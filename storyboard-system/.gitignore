@@ -1,0 +1,17 @@
+node_modules/
+.npm-cache/
+.qa-data/
+qa-artifacts/
+__pycache__/
+data/
+tests/tmp*/
+dist/
+.qa-live/
+scratch/
+deployments/
+*.log
+
+# Credentials — never commit
+askpass.bat
+askpass_test.bat
+test_askpass.py

@@ -9,7 +9,6 @@ from __future__ import annotations
 import base64
 import colorsys
 import csv
-import difflib
 import hashlib
 import hmac
 import io
@@ -17,30 +16,47 @@ import json
 import math
 import mimetypes
 import os
-import posixpath
 import re
 import secrets
 import shutil
 import sqlite3
 import sys
-import subprocess
 import threading
-import tempfile
 import time
 import urllib.parse
 import uuid
 import zipfile
-from datetime import datetime, timezone, timedelta
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from xml.etree import ElementTree as ET
+from delivery_exports import (
+    frames_to_tc, tc_to_frames, generate_cmx3600_edl, generate_otio_json,
+    generate_fcpxml, generate_srt_subtitles, generate_vtt_subtitles,
+)
+from shot_updates import ShotConflict, ShotNotFound, ShotUpdateError, update_single_shot
+from shot_bulk_updates import BulkShotConflict, BulkShotError, update_bulk_shots
+from asset_cleanup import asset_usage_reasons, project_asset_cleanup_plan
+from narration_timing import estimate_narration_frames, compute_auto_timing
 from text_format import normalize_rich_text
+from field_lifecycle import purge_columns, purged_fields, column_preferences as project_column_preferences, write_column_preferences
 from creative_boards import SCHEMA as CREATIVE_BOARDS_SCHEMA, handle_creative_boards, CreativeBoardsConflict, normalize_boards
-
-def json_dumps(data: any) -> str:
-    return json.dumps(data, ensure_ascii=False)
+from import_parsing import (
+    norm_header, map_headers, parse_pdf_storyboard, build_import_custom_columns,
+    parse_xlsx_package, parse_xlsx_rows,
+)
+from schema_migrations import apply_schema_migrations
+from import_staging import (
+    cache_import_parse, load_import_parse, staged_image_bytes,
+    cleanup_import_staging, remove_staged_import,
+)
+from persistence_helpers import audit, insert_record, touch_project
+from runtime_clock import now_iso
+from shot_versions import apply_shot_version_snapshot, record_review_decision, complete_shot_snapshot
+from project_pdf_roundtrip import (
+    ProjectPdfError, embed_project_backup, extract_project_backup,
+    render_project_summary_pdf,
+)
 
 APP_ROOT = Path(__file__).resolve().parent
 VENDOR_ROOT = APP_ROOT / "vendor"
@@ -54,6 +70,8 @@ EXPORT_ROOT = DATA_ROOT / "exports"
 IMPORT_ROOT = DATA_ROOT / "import_staging"
 AVATAR_ROOT = DATA_ROOT / "avatars"
 MAX_BODY = int(os.environ.get("STORYBOARD_MAX_BODY", str(400 * 1024 * 1024)))
+MEDIA_UPLOAD_MAX_BYTES = int(os.environ.get("STORYBOARD_MEDIA_MAX_BODY", str(120 * 1024 * 1024)))
+PANEL_DRAWING_BUNDLE_LIMIT = 256 * 1024
 IMPORT_TTL_SECONDS = int(os.environ.get("STORYBOARD_IMPORT_TTL", str(2 * 60 * 60)))
 SESSION_SECONDS = 14 * 86400
 FPS_VALUES = {23.976, 24.0, 25.0, 29.97, 30.0, 48.0, 50.0, 59.94, 60.0}
@@ -76,42 +94,7 @@ APPROVAL_STATUSES = [
     "Draft", "WIP", "Ready for Review", "Changes Requested", "Approved", "Locked", "Deprecated"
 ]
 
-# Column Header Recognition Dictionary (Spec Section 115)
-ALIASES = {
-    "number": ["镜号", "镜头编号", "编号", "shot", "shot no", "shot number", "序号", "no", "id"],
-    "title": ["镜头标题", "标题", "内容", "镜头内容", "shot title", "title", "name"],
-    "chapter": ["篇章", "章节", "幕", "chapter", "act", "sequence", "seq"],
-    "scene": ["场景", "地点", "场景/地点", "scene", "location", "int/ext", "内外景"],
-    "panel_frame": ["分镜图框", "分镜框", "分镜图", "storyboard frame", "frame"],
-    "description": ["画面描述", "画面内容", "画面", "分镜画面", "description", "visual", "action"],
-    "voiceover": ["对应旁白", "旁白", "解说词", "配音", "voiceover", "vo", "narration", "dialogue"],
-    "duration": ["时长", "时长(秒)", "时长（秒）", "duration", "seconds", "sec", "length"],
-    "duration_frames": ["帧数", "frames", "frame count", "duration frames"],
-    "shot_size": ["景别", "shot size", "framing", "size"],
-    "lens": ["焦段", "建议焦段", "镜头焦段", "镜头", "lens", "focal"],
-    "movement": ["机位/运镜", "运镜", "镜头运动", "movement", "camera movement", "camera"],
-    "angle": ["机位角度", "角度", "angle", "camera angle"],
-    "primary_method": ["制作方式", "执行方式", "拍摄方式", "制作类型", "method", "production method", "execution"],
-    "department": ["责任部门", "责任组", "部门", "department", "dept"],
-    "owner": ["负责人", "执行人", "owner", "assignee", "artist"],
-    "sound": ["声音", "音效", "sound", "sfx", "audio"],
-    "transition": ["剪辑/转场", "转场", "transition", "edit"],
-    "vfx": ["vfx", "特效", "视效", "cg", "vfx requirement"],
-    "notes": ["备注", "制作备注", "导演备注", "notes", "director notes", "comment"],
-    "source_type": ["素材来源", "素材路径", "source", "source type", "stock source", "asset path"],
-    "source_note": ["素材说明", "来源说明", "source note", "rights note"]
-}
 
-
-_clock_lock = threading.Lock()
-_last_stamp = datetime.min.replace(tzinfo=timezone.utc)
-
-
-def now_iso() -> str:
-    global _last_stamp
-    with _clock_lock:
-        _last_stamp = max(datetime.now(timezone.utc), _last_stamp + timedelta(microseconds=1))
-        return _last_stamp.isoformat(timespec="microseconds")
 
 
 def avatar_url(user) -> str | None:
@@ -124,6 +107,22 @@ def avatar_url(user) -> str | None:
 
 def json_dumps(value) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def normalize_drawing_json(value):
+    """Unwrap legacy JSON-in-JSON without discarding unrecognized drawing data."""
+    original = value
+    for _ in range(64):
+        if not isinstance(value, str):
+            return json_dumps(value)
+        try:
+            decoded = json.loads(value)
+        except (ValueError, TypeError):
+            return original if isinstance(original, str) else json_dumps(original)
+        if decoded == value:
+            break
+        value = decoded
+    return original if isinstance(original, str) else json_dumps(original)
 
 
 _database_context = threading.local()
@@ -173,157 +172,11 @@ def verify_password(password: str, encoded: str) -> bool:
         return False
 
 
-# ==========================================
-# SMPTE Timecode Engine (Spec Section 19-22)
-# ==========================================
-
-def frames_to_tc(total_frames: int, fps: float, is_drop_frame: bool = False) -> str:
-    """Convert integer frames to SMPTE Timecode string."""
-    total_frames = max(0, int(round(total_frames)))
-    nominal_fps = int(round(fps))
-
-    if is_drop_frame and abs(fps - 29.97) < 0.05:
-        # 29.97 SMPTE Drop Frame formula
-        drop_frames = 2
-        frames_per_minute = 1800 - drop_frames  # 1798
-        frames_per_10minutes = 1800 * 10 - drop_frames * 9  # 17982
-        frames_per_hour = frames_per_10minutes * 6  # 107892
-
-        d = total_frames // frames_per_10minutes
-        m = total_frames % frames_per_10minutes
-        if m > drop_frames:
-            total_frames += drop_frames * 9 * d + drop_frames * ((m - drop_frames) // frames_per_minute)
-        else:
-            total_frames += drop_frames * 9 * d
-
-        ff = total_frames % 30
-        ss = (total_frames // 30) % 60
-        mm = (total_frames // 1800) % 60
-        hh = total_frames // 108000
-        return f"{hh:02d}:{mm:02d}:{ss:02d};{ff:02d}"
-
-    # Non-drop frame calculation
-    ff = total_frames % nominal_fps
-    total_seconds = total_frames // nominal_fps
-    ss = total_seconds % 60
-    mm = (total_seconds // 60) % 60
-    hh = total_seconds // 3600
-    sep = ";" if is_drop_frame else ":"
-    return f"{hh:02d}:{mm:02d}:{ss:02d}{sep}{ff:02d}"
-
-
-def tc_to_frames(tc_str: str, fps: float) -> int:
-    """Convert SMPTE Timecode string (HH:MM:SS:FF or HH:MM:SS;FF) to integer frames."""
-    if not tc_str or not isinstance(tc_str, str):
-        return 0
-    parts = re.split(r"[:;.]", tc_str.strip())
-    if len(parts) != 4:
-        return 0
-    try:
-        hh, mm, ss, ff = [int(p) for p in parts]
-    except ValueError:
-        return 0
-
-    nominal_fps = int(round(fps))
-    is_df = ";" in tc_str or (abs(fps - 29.97) < 0.05 and ";" in tc_str)
-
-    if is_df and abs(fps - 29.97) < 0.05:
-        total_minutes = 60 * hh + mm
-        drop_frames = 2
-        total_frames = (108000 * hh + 1800 * mm + 30 * ss + ff) - drop_frames * (total_minutes - total_minutes // 10)
-        return max(0, total_frames)
-
-    return max(0, (hh * 3600 + mm * 60 + ss) * nominal_fps + ff)
-
-
 # ===============================================
 # VO Auto-Timing Engine (Spec Section 23-30)
 # ===============================================
 
-def calculate_vo_weight(text: str) -> dict:
-    """Analyze Voice Over script text and calculate frame pause weights."""
-    if not text or not text.strip():
-        return {"char_count": 0, "comma_count": 0, "period_count": 0, "ellipsis_count": 0, "total_weight": 1.0}
-    clean = re.sub(r"\s+", "", text)
-    char_count = len(clean)
-    comma_count = len(re.findall(r"[，,、]", text))
-    period_count = len(re.findall(r"[。！？!?；;]", text))
-    ellipsis_count = len(re.findall(r"[…：:]", text))
-
-    # Weight formula: each char = 1.0, comma = +1.5, period/sentence = +3.0, ellipsis = +2.0
-    total_weight = max(1.0, char_count * 1.0 + comma_count * 1.5 + period_count * 3.0 + ellipsis_count * 2.0)
-    return {
-        "char_count": char_count,
-        "comma_count": comma_count,
-        "period_count": period_count,
-        "ellipsis_count": ellipsis_count,
-        "total_weight": total_weight
-    }
-
-
-def compute_auto_timing(shots: list[dict], target_seconds: float, fps: float) -> list[dict]:
-    """
-    Intelligently distribute duration frames only across unlocked shots that
-    actually contain narration. Locked shots and shots without narration keep
-    their manual duration. This makes the timing action safe for picture-only
-    beats and still fills the project's target duration when narrated shots
-    are available.
-    """
-    nominal_fps = max(1, int(round(float(fps) or 25)))
-    target_frames = max(0, int(round(float(target_seconds or 0) * float(fps or nominal_fps))))
-
-    default_frames = nominal_fps * 3
-    timed_shots = [
-        s for s in shots
-        if not s.get("locked") and str(s.get("voiceover", "")).strip()
-    ]
-
-    # Nothing to infer: do not touch a picture-only sequence.
-    if not timed_shots:
-        return shots
-
-    timed_ids = {id(s) for s in timed_shots}
-    fixed_frames = sum(
-        max(1, int(round(float(s.get("duration_frames", default_frames) or default_frames))))
-        for s in shots
-        if id(s) not in timed_ids
-    )
-
-    min_shot_frames = max(1, int(round(float(fps or nominal_fps) * 0.8)))  # min 0.8s default
-    minimum_total = min_shot_frames * len(timed_shots)
-    # The minimum is applied to the total budget too. The previous code used
-    # len(timed_shots) here, then clamped each allocation independently; with
-    # a short target that made the displayed total diverge from the computed
-    # shot durations and timecodes.
-    available_frames = max(minimum_total, target_frames - fixed_frames)
-
-    # Weights
-    weights = []
-    for s in timed_shots:
-        w_info = calculate_vo_weight(s.get("voiceover", ""))
-        weights.append(w_info["total_weight"])
-    sum_weights = sum(weights) or float(len(timed_shots))
-
-    # Allocate only the frames above the per-shot minimum using largest
-    # remainder rounding. This preserves the exact frame budget whenever the
-    # requested target is feasible, without allowing a rounding drift.
-    extra_frames = available_frames - minimum_total
-    raw_extras = [extra_frames * weight / sum_weights for weight in weights]
-    extras = [int(value) for value in raw_extras]
-    remainder = extra_frames - sum(extras)
-    for index in sorted(range(len(extras)), key=lambda item: raw_extras[item] - extras[item], reverse=True)[:remainder]:
-        extras[index] += 1
-    allocations = [min_shot_frames + extra for extra in extras]
-
-    # Apply back
-    u_idx = 0
-    for s in shots:
-        if id(s) in timed_ids:
-            s["duration_frames"] = allocations[u_idx]
-            u_idx += 1
-
-    return shots
-
+# Narration timing implementation lives in narration_timing.py.
 
 # ==========================================
 # Collaboration & Realtime Engine (Spec Master Spec V3.2)
@@ -361,7 +214,7 @@ class CollaborationManager:
             return None
         return round(max(0.0, min(1.0, number)), 5)
 
-    def heartbeat(self, production_id: str, user_id: str, display_name: str, workspace: str = "table", module: str = "", shot_id: str = None, field: str = None, cursor_x=None, cursor_y=None, cursor_visible: bool = False, color: str = "", avatar_url: str = "") -> list[dict]:
+    def heartbeat(self, production_id: str, user_id: str, display_name: str, workspace: str = "table", module: str = "", shot_id: str = None, field: str = None, cursor_x=None, cursor_y=None, cursor_visible: bool = False, color: str = "", avatar_url: str = "", presence_state: str = "viewing") -> list[dict]:
         now = time.time()
         normalized_x = self.normalize_cursor_value(cursor_x)
         normalized_y = self.normalize_cursor_value(cursor_y)
@@ -376,6 +229,7 @@ class CollaborationManager:
                 "module": module or workspace or "table",
                 "shot_id": shot_id,
                 "field": field,
+                "presence_state": presence_state if presence_state in {"idle", "viewing", "selected", "editing"} else "viewing",
                 "cursor_x": normalized_x,
                 "cursor_y": normalized_y,
                 "cursor_visible": normalized_visible,
@@ -802,6 +656,7 @@ CREATE TABLE IF NOT EXISTS project_column_preferences (
     project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     column_key TEXT NOT NULL,
     state TEXT NOT NULL DEFAULT 'visible' CHECK(state IN ('visible', 'hidden', 'removed')),
+    permanently_deleted INTEGER NOT NULL DEFAULT 0,
     position INTEGER NOT NULL DEFAULT 0,
     width_px INTEGER,
     wrap_text INTEGER NOT NULL DEFAULT 0,
@@ -841,16 +696,9 @@ CREATE TABLE IF NOT EXISTS login_attempts (
 DEFAULT_TABLE_COLUMN_KEYS = {
     "select", "number", "thumb", "tc", "duration", "title", "chapter", "scene",
     "panel_frame", "shot_size", "lens", "movement", "angle", "description", "voiceover",
-    "methods", "status", "department", "actions",
+    "methods", "status", "department", "actions", "script_scene_type",
+    "script_time_of_day", "script_character", "script_parenthetical", "dialogue", "transition",
 }
-
-
-def project_column_preferences(db: sqlite3.Connection, project_id: str) -> list[dict]:
-    return [dict(row) for row in db.execute(
-        "SELECT column_key, state, position, width_px, wrap_text, updated_by, updated_at "
-        "FROM project_column_preferences WHERE project_id=? ORDER BY position, column_key",
-        (project_id,),
-    )]
 
 
 def allocate_user_color(db: sqlite3.Connection, user_id: str) -> str:
@@ -873,90 +721,12 @@ def init_db() -> None:
     EXPORT_ROOT.mkdir(parents=True, exist_ok=True)
     IMPORT_ROOT.mkdir(parents=True, exist_ok=True)
     AVATAR_ROOT.mkdir(parents=True, exist_ok=True)
-    with connect() as db:
+    db = connect()
+    try:
         db.executescript(SCHEMA)
         db.executescript(CREATIVE_BOARDS_SCHEMA)
-        # Automatic DB migrations for existing database
-        try:
-            db.execute("ALTER TABLE shots ADD COLUMN revision INTEGER NOT NULL DEFAULT 1")
-        except Exception:
-            pass
-        try:
-            db.execute("ALTER TABLE comments ADD COLUMN is_resolved INTEGER NOT NULL DEFAULT 0")
-        except Exception:
-            pass
-        try:
-            db.execute("ALTER TABLE comments ADD COLUMN quote_field TEXT NOT NULL DEFAULT ''")
-        except Exception:
-            pass
-        try:
-            db.execute("ALTER TABLE comments ADD COLUMN quote_text TEXT NOT NULL DEFAULT ''")
-        except Exception:
-            pass
-        for column, definition in (
-            ("branch_name", "TEXT NOT NULL DEFAULT 'main'"),
-            ("parent_version_id", "TEXT"),
-            ("merge_parent_id", "TEXT"),
-            ("is_accepted", "INTEGER NOT NULL DEFAULT 0"),
-            ("updated_at", "TEXT NOT NULL DEFAULT ''"),
-        ):
-            try:
-                db.execute(f"ALTER TABLE shot_versions ADD COLUMN {column} {definition}")
-            except Exception:
-                pass
-        try:
-            db.execute("ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'ACTIVE'")
-        except Exception:
-            pass
-        for column in ("user_color", "avatar_file"):
-            try:
-                db.execute(f"ALTER TABLE users ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
-            except Exception:
-                pass
-        try:
-            db.execute("ALTER TABLE projects ADD COLUMN deleted_at TEXT")
-        except Exception:
-            pass
-        try:
-            db.execute("ALTER TABLE projects ADD COLUMN updated_by TEXT NOT NULL DEFAULT ''")
-        except Exception:
-            pass
-        try:
-            db.execute("ALTER TABLE shots ADD COLUMN panel_frame TEXT NOT NULL DEFAULT ''")
-        except Exception:
-            pass
-        try:
-            db.execute("ALTER TABLE shots ADD COLUMN import_columns_json TEXT NOT NULL DEFAULT '{}'")
-        except Exception:
-            pass
-        try:
-            db.execute("ALTER TABLE shots ADD COLUMN deleted_at TEXT")
-        except Exception:
-            pass
+        apply_schema_migrations(db)
         db.execute("UPDATE users SET status='ACTIVE' WHERE status IS NULL OR status='' ")
-        for table, column, definition in (
-            ("shots", "lens_source", "TEXT NOT NULL DEFAULT ''"),
-            ("shots", "rich_text_json", "TEXT NOT NULL DEFAULT '{}'"),
-            ("shots", "script_character", "TEXT NOT NULL DEFAULT ''"),
-            ("shots", "script_parenthetical", "TEXT NOT NULL DEFAULT ''"),
-            ("shots", "script_scene_type", "TEXT NOT NULL DEFAULT ''"),
-            ("shots", "script_time_of_day", "TEXT NOT NULL DEFAULT ''"),
-            ("comments", "author_user_id", "TEXT"),
-            ("projects", "updated_by_user_id", "TEXT"),
-            ("assets", "sha256", "TEXT NOT NULL DEFAULT ''"),
-            ("assets", "created_by", "TEXT NOT NULL DEFAULT ''"),
-            ("share_links", "password_hash", "TEXT NOT NULL DEFAULT ''"),
-            ("share_links", "revoked_at", "TEXT"),
-            ("share_links", "created_by", "TEXT NOT NULL DEFAULT ''"),
-            ("production_steps", "sort_index", "INTEGER NOT NULL DEFAULT 0"),
-            ("production_steps", "type", "TEXT NOT NULL DEFAULT 'TASK'"),
-            ("production_steps", "input_asset", "TEXT NOT NULL DEFAULT ''"),
-            ("production_steps", "output_asset", "TEXT NOT NULL DEFAULT ''"),
-        ):
-            try:
-                db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
-            except Exception:
-                pass
         db.execute("UPDATE production_steps SET sort_index=step_order")
         db.execute("""
             INSERT OR IGNORE INTO asset_versions
@@ -987,13 +757,10 @@ def init_db() -> None:
         if expired:
             purge_shot_records(db, expired)
         db.commit()
-        db.execute("BEGIN IMMEDIATE")
         cleanup_orphan_media_files(db)
+    finally:
+        db.close()
 
-
-def audit(db: sqlite3.Connection, actor: str, action: str, target: str, detail: str = "") -> None:
-    db.execute("INSERT INTO audit_log(at, actor, action, target, detail) VALUES (?,?,?,?,?)",
-               (now_iso(), actor, action, target, str(detail)[:2000]))
 
 
 def renumber_project_shots(db: sqlite3.Connection, project_id: str, at: str | None = None) -> None:
@@ -1009,11 +776,6 @@ def renumber_project_shots(db: sqlite3.Connection, project_id: str, at: str | No
             (index, index, f"{index + 1:03d}", stamp, row["id"], project_id),
         )
 
-
-def touch_project(db: sqlite3.Connection, project_id: str, session: sqlite3.Row, at: str | None = None) -> None:
-    stamp = at or now_iso()
-    actor = str(session["display_name"] or session["username"] or "")
-    db.execute("UPDATE projects SET updated_at=?, updated_by=?, updated_by_user_id=? WHERE id=?", (stamp, actor, session["user_id"], project_id))
 
 
 def purge_shot_records(db: sqlite3.Connection, shot_ids: list[str]) -> int:
@@ -1057,6 +819,63 @@ def purge_shot_records(db: sqlite3.Connection, shot_ids: list[str]) -> int:
         # File deletion is deferred until after commit and the orphan grace period.
     return len(ids)
 
+
+
+def prune_stale_storyboard_asset_links(db: sqlite3.Connection, project_id: str) -> int:
+    """Remove legacy Reference links that no longer have a matching Panel.
+
+    Browser uploads historically created both a Panel media_id and a
+    shot_asset_links row. Deleting/replacing the Panel used to leave the link
+    behind, which could resurrect the old thumbnail through the client fallback
+    and made truly unused assets look live forever.
+    """
+    before = db.total_changes
+    db.execute("""
+        DELETE FROM shot_asset_links
+        WHERE role='Reference'
+          AND shot_id IN (SELECT id FROM shots WHERE project_id=?)
+          AND NOT EXISTS (
+              SELECT 1 FROM panels p
+              WHERE p.shot_id=shot_asset_links.shot_id
+                AND p.media_id=shot_asset_links.asset_id
+          )
+    """, (project_id,))
+    return db.total_changes - before
+
+
+def asset_storage_keys(db: sqlite3.Connection, asset_id: str, stored_name: str = "") -> set[str]:
+    """Collect every physical object owned by one asset/version chain."""
+    keys = {clean_name(str(stored_name or ""))} if stored_name else set()
+    keys.update(
+        clean_name(str(row["storage_key"] or ""))
+        for row in db.execute("SELECT storage_key FROM asset_versions WHERE asset_id=?", (asset_id,))
+        if row["storage_key"]
+    )
+    return {key for key in keys if key and Path(key).name == key}
+
+
+def remove_media_storage_keys(keys: set[str]) -> tuple[int, int]:
+    """Best-effort physical cleanup after DB commit.
+
+    Returning bytes/files lets the UI report what was actually reclaimed.
+    Orphan maintenance can remove any file that could not be unlinked here.
+    """
+    files_removed = 0
+    bytes_freed = 0
+    root = MEDIA_ROOT.resolve()
+    for key in sorted(keys):
+        target = (MEDIA_ROOT / clean_name(key)).resolve()
+        if target.parent != root:
+            continue
+        try:
+            if target.is_file():
+                size = target.stat().st_size
+                target.unlink()
+                files_removed += 1
+                bytes_freed += size
+        except OSError:
+            continue
+    return files_removed, bytes_freed
 
 def cleanup_orphan_media_files(db: sqlite3.Connection, grace_seconds: int = 24 * 3600) -> int:
     """Remove aged filesystem objects that have no database storage reference."""
@@ -1114,13 +933,6 @@ def shot_dict(row: sqlite3.Row, custom_values: dict = None) -> dict:
     data["rich_text_json"] = normalize_rich_text(data.get("rich_text_json"), data)
     return data
 
-
-def insert_record(db, table, record):
-    """Only called with internal table names; bind every imported value."""
-    columns = {row["name"] for row in db.execute(f"PRAGMA table_info({table})")}
-    values = {key: json_dumps(value) if isinstance(value, (dict, list)) else value
-              for key, value in record.items() if key in columns}
-    db.execute(f"INSERT INTO {table} ({','.join(values)}) VALUES ({','.join('?' for _ in values)})", tuple(values.values()))
 
 
 BACKUP_PROJECT_TABLES = ("projects", "sequences", "shots", "assets", "custom_field_definitions", "saved_views", "project_column_preferences", "project_snapshots", "project_creative_boards")
@@ -1417,7 +1229,16 @@ def project_bundle(db: sqlite3.Connection, project_id: str, include_deleted: boo
     if shot_ids:
         placeholders = ",".join("?" for _ in shot_ids)
         for r in db.execute(f"SELECT * FROM panels WHERE shot_id IN ({placeholders}) ORDER BY position", shot_ids):
-            panels_map[r["shot_id"]].append(dict(r))
+            panel = dict(r)
+            raw_drawing = panel.get("drawing_json") or "{}"
+            if len(raw_drawing) <= PANEL_DRAWING_BUNDLE_LIMIT:
+                panel["drawing_json"] = normalize_drawing_json(raw_drawing)
+            else:
+                # Large legacy drawings are loaded by a dedicated editor
+                # request, never on every project open/sync/upload response.
+                panel.pop("drawing_json", None)
+                panel["drawing_json_omitted"] = True
+            panels_map[r["shot_id"]].append(panel)
         for r in db.execute(f"SELECT * FROM production_steps WHERE shot_id IN ({placeholders}) ORDER BY sort_index, step_order", shot_ids):
             steps_map[r["shot_id"]].append(dict(r))
         for r in db.execute(f"""
@@ -1574,110 +1395,7 @@ def compact_share_bundle(bundle: dict, visible_columns: list[str] | None = None)
             **({"total_frames": bundle.get("total_frames", 0), "total_seconds": bundle.get("total_seconds", 0)} if "duration" in allowed else {})}
 
 
-def record_review_decision(db: sqlite3.Connection, shot_id: str, version_id: str | None, previous: str, next_status: str, username: str, at: str) -> None:
-    labels = {"Ready for Review": "提交意见", "Draft": "撤回意见", "Approved": "同意意见", "Changes Requested": "驳回意见"}
-    db.execute(
-        "INSERT INTO review_decisions (id, shot_id, version_id, previous_status, next_status, action_label, created_by, created_at) VALUES (?,?,?,?,?,?,?,?)",
-        (str(uuid.uuid4()), shot_id, version_id, previous, next_status, labels.get(next_status, next_status), username, at),
-    )
 
-
-VERSION_RESTORE_FIELDS = (
-    "title", "chapter", "scene", "panel_frame", "description", "action", "performance",
-    "composition", "director_notes", "notes", "duration_frames", "locked", "shot_size",
-    "lens", "lens_source", "angle", "height", "movement", "equipment", "sensor", "aperture", "shutter",
-    "camera_fps", "voiceover", "dialogue", "subtitle", "music", "sound", "primary_method",
-    "secondary_methods", "department", "owner", "status", "transition", "method_data_json",
-    "import_columns_json", "rich_text_json", "script_character", "script_parenthetical", "script_scene_type", "script_time_of_day"
-)
-
-
-def complete_shot_snapshot(db: sqlite3.Connection, shot_id: str) -> tuple[dict | None, str | None]:
-    row = db.execute("SELECT project_id FROM shots WHERE id=? AND is_deleted=0", (shot_id,)).fetchone()
-    if not row:
-        return None, None
-    bundle = project_bundle(db, row["project_id"])
-    shot = next((item for item in (bundle or {}).get("shots", []) if item["id"] == shot_id), None)
-    if shot:
-        shot = {key: value for key, value in shot.items() if key not in {"versions", "review_history", "history", "snapshots", "change_count", "last_change_at"}}
-        shot["assets"] = [{key: value for key, value in asset.items() if key not in {"versions", "history", "snapshots"}} for asset in shot.get("assets", [])]
-    return shot, row["project_id"]
-
-
-def apply_shot_version_snapshot(db: sqlite3.Connection, shot_id: str, snapshot: dict, session: sqlite3.Row, action: str) -> str:
-    current = db.execute("SELECT * FROM shots WHERE id=? AND is_deleted=0", (shot_id,)).fetchone()
-    if not current:
-        raise ValueError("镜头不存在")
-    at = now_iso()
-    assignments = []
-    values = []
-    changed = []
-    for field in VERSION_RESTORE_FIELDS:
-        if field not in snapshot or field not in current.keys():
-            continue
-        value = snapshot[field]
-        if field in ("locked",):
-            value = 1 if value else 0
-        elif field == "duration_frames":
-            value = max(1, int(value or 1))
-        elif field in ("secondary_methods", "method_data_json") and isinstance(value, (list, dict)):
-            value = json.dumps(value, ensure_ascii=False)
-        elif field in ("import_columns_json", "rich_text_json") and isinstance(value, dict):
-            value = json.dumps(value, ensure_ascii=False)
-        if str(current[field] or "") != str(value or ""):
-            changed.append(field)
-        assignments.append(f"{field}=?")
-        values.append(value)
-    revision = int(current["revision"] or 1) + 1
-    if assignments:
-        db.execute(
-            f"UPDATE shots SET {','.join(assignments)}, revision=?, updated_at=? WHERE id=?",
-            (*values, revision, at, shot_id),
-        )
-    custom_values = snapshot.get("custom_fields")
-    if isinstance(custom_values, dict):
-        definitions = {row["key"]: row["id"] for row in db.execute(
-            "SELECT id, key FROM custom_field_definitions WHERE project_id=? AND is_active=1",
-            (current["project_id"],),
-        )}
-        for key, value in custom_values.items():
-            definition_id = definitions.get(key)
-            if not definition_id:
-                continue
-            value_text = str(value) if not isinstance(value, (dict, list)) else None
-            value_json = json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else None
-            db.execute("""
-                INSERT INTO shot_custom_field_values (id, shot_id, field_definition_id, value_text, value_json, updated_at)
-                VALUES (?,?,?,?,?,?)
-                ON CONFLICT(shot_id, field_definition_id) DO UPDATE SET value_text=excluded.value_text, value_json=excluded.value_json, updated_at=excluded.updated_at
-            """, (str(uuid.uuid4()), shot_id, definition_id, value_text, value_json, at))
-            changed.append(f"custom:{key}")
-    if isinstance(snapshot.get("panels"), list):
-        restored_panels = []
-        for position, panel in enumerate(snapshot["panels"]):
-            if not isinstance(panel, dict):
-                raise ValueError("版本 Panel 格式无效")
-            media = panel.get("media_id")
-            if media and not db.execute("SELECT 1 FROM assets WHERE id=? AND project_id=?", (media, current["project_id"])).fetchone():
-                raise ValueError("版本媒体缺失或归属错误；未回滚")
-            panel_id = str(panel.get("id") or uuid.uuid4())
-            owner = db.execute("SELECT shot_id FROM panels WHERE id=?", (panel_id,)).fetchone()
-            if owner and owner["shot_id"] != shot_id:
-                raise ValueError("版本 Panel 不属于当前镜头")
-            restored_panels.append({**panel, "id": panel_id, "shot_id": shot_id, "position": position,
-                                    "created_at": panel.get("created_at", at), "updated_at": at})
-        db.execute("DELETE FROM panels WHERE shot_id=?", (shot_id,))
-        for panel in restored_panels:
-            insert_record(db, "panels", panel)
-        changed.append("panels")
-    touch_project(db, current["project_id"], session, at)
-    if changed:
-        db.execute("""
-            INSERT INTO shot_change_events (id, shot_id, revision, changed_fields_json, user_id, user_name, created_at)
-            VALUES (?,?,?,?,?,?,?)
-        """, (str(uuid.uuid4()), shot_id, revision, json.dumps(sorted(set(changed))), session["user_id"], session["display_name"] or session["username"], at))
-    audit(db, session["username"], action, shot_id, f"{len(set(changed))} fields")
-    return current["project_id"]
 
 
 # ==========================================
@@ -1822,426 +1540,58 @@ def seed_demo_if_empty(db: sqlite3.Connection) -> None:
         pos += 1
 
 
-# ===============================================
-# Excel / CSV Importer (Spec Section 114-117)
-# ===============================================
-
-def norm_header(val: str) -> str:
-    return re.sub(r"[\s_\-/（）()：:·|]+", "", str(val or "")).lower()
-
-
-def map_headers(headers: list[str]) -> dict[str, dict]:
-    """Score headers with confidence dictionary."""
-    result: dict[str, dict] = {}
-    normalized = [norm_header(h) for h in headers]
-    used_cols: set[int] = set()
-
-    for field, aliases in ALIASES.items():
-        candidates = [norm_header(field)] + [norm_header(a) for a in aliases]
-        best_col = -1
-        best_score = 0.0
-        for idx, header in enumerate(normalized):
-            if not header or idx in used_cols:
-                continue
-            if header in candidates:
-                best_col = idx
-                best_score = 0.99
-                break
-            for c in candidates:
-                if c and (c in header or header in c):
-                    score = len(c) / max(len(header), 1) * 0.9
-                    if score > best_score:
-                        best_score = score
-                        best_col = idx
-                elif c:
-                    score = difflib.SequenceMatcher(None, header, c).ratio() * 0.86
-                    if score > best_score:
-                        best_score = score
-                        best_col = idx
-        if best_col >= 0 and best_score >= 0.6:
-            result[field] = {"col": best_col, "header": headers[best_col], "confidence": round(best_score, 2)}
-            used_cols.add(best_col)
-
-    return result
-
-
-PDF_IMPORT_HEADERS = ["镜号", "镜头标题", "景别", "焦段", "机位/运镜", "机位角度", "画面描述", "对应旁白", "时长", "备注"]
-
-
-def parse_pdf_storyboard(source: Path) -> tuple[list[list[str]], list[dict]]:
-    """Recognize card-style storyboard PDFs as one shot per card/page."""
-    try:
-        from pypdf import PdfReader
-    except ImportError as exc:
-        raise ValueError("服务器缺少 PDF 识别组件 pypdf，请安装后重试") from exc
-    try:
-        reader = PdfReader(str(source))
-    except Exception as exc:
-        raise ValueError("PDF 文件损坏、加密或无法读取") from exc
-    if reader.is_encrypted:
-        try:
-            if not reader.decrypt(""):
-                raise ValueError("暂不支持有密码的 PDF")
-        except Exception as exc:
-            raise ValueError("暂不支持有密码的 PDF") from exc
-
-    rows: list[list[str]] = [PDF_IMPORT_HEADERS]
-    images: list[dict] = []
-    shot_sizes = ("大全景", "中全景", "中近景", "大特写", "全景", "中景", "近景", "特写")
-    marker = re.compile(r"(?im)(?=^\s*(?:#\s*\d{1,6}|SHOT\s*[-_ ]?\d{1,6}|镜头\s*[-_ ]?\d{1,6}))")
-    for page_index, page in enumerate(reader.pages):
-        try:
-            raw_text = page.extract_text(extraction_mode="layout") or page.extract_text() or ""
-        except Exception:
-            raw_text = page.extract_text() or ""
-        raw_text = raw_text.replace("\u00a0", " ").replace("\x00", "")
-        blocks = [part.strip() for part in marker.split(raw_text) if part.strip()]
-        # Page headings before the first card marker are not separate shots.
-        marked = [block for block in blocks if marker.match(block)]
-        if marked:
-            blocks = marked
-        if not blocks and raw_text.strip():
-            blocks = [raw_text.strip()]
-        page_row_start = len(rows) - 1
-        for block in blocks:
-            lines = [re.sub(r"\s+", " ", line).strip() for line in block.splitlines() if line.strip()]
-            joined = "\n".join(lines)
-            number_match = re.search(r"(?i)(?:#|SHOT\s*[-_ ]?|镜头\s*[-_ ]?)(\d{1,6})", joined)
-            number = number_match.group(1).zfill(3) if number_match else str(len(rows)).zfill(3)
-            size = next((item for item in shot_sizes if item in joined), "")
-            lens_match = re.search(r"(?i)(?:建议|焦段|镜头)?\s*[:：]?\s*(\d{1,3}(?:\.\d+)?)\s*mm", joined)
-            duration_match = re.search(r"(?i)(?:时长|duration)\s*[:：]?\s*(\d+(?:\.\d+)?)\s*(?:s|秒)?", joined)
-            labelled: dict[str, str] = {}
-            free_lines: list[str] = []
-            for line in lines:
-                match = re.match(r"^([^:：]{1,12})\s*[:：]\s*(.+)$", line)
-                if match:
-                    labelled[norm_header(match.group(1))] = match.group(2).strip()
-                elif not re.search(r"(?i)(?:#\s*\d+|SHOT\s*[-_ ]?\d+|p\.\s*\d+|img\.\s*\d+)", line) and line not in shot_sizes:
-                    free_lines.append(line)
-            title = labelled.get("标题") or labelled.get("镜头标题") or (free_lines[0] if free_lines else f"镜头 {number}")
-            description = labelled.get("画面描述") or labelled.get("画面") or "\n".join(free_lines[1:] if free_lines and free_lines[0] == title else free_lines)
-            notes = [f"{key}：{value}" for key, value in labelled.items() if key not in {"标题", "镜头标题", "画面描述", "画面", "运镜", "机位", "机位角度", "旁白", "对应旁白", "时长", "焦段"}]
-            rows.append([
-                number, title, size, f"{lens_match.group(1)}mm" if lens_match else "",
-                labelled.get("运镜", ""), labelled.get("机位", labelled.get("机位角度", "")),
-                description, labelled.get("旁白", labelled.get("对应旁白", "")),
-                duration_match.group(1) if duration_match else "", "\n".join(notes)
-            ])
-        if not blocks:
-            # Scanned/image-only storyboard pages still represent real shots.
-            # Keep the page as an importable row and let the preview show the
-            # page image instead of failing the whole PDF.
-            rows.append([str(len(rows)).zfill(3), f"PDF 第 {page_index + 1} 页", "", "", "", "", "", "", "", ""])
-        candidates = []
-        try:
-            for image in page.images:
-                raw = bytes(image.data)
-                if raw:
-                    candidates.append((len(raw), image.name or f"page-{page_index + 1}.jpg", raw))
-        except Exception:
-            candidates = []
-        if not candidates and len(rows) - 1 > page_row_start and shutil.which("pdftoppm"):
-            try:
-                with tempfile.TemporaryDirectory(prefix="frameforge-pdf-") as tmp:
-                    prefix = str(Path(tmp) / "page")
-                    subprocess.run(["pdftoppm", "-f", str(page_index + 1), "-l", str(page_index + 1), "-jpeg", "-singlefile", "-r", "144", str(source), prefix], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
-                    rendered = Path(prefix + ".jpg")
-                    if rendered.exists():
-                        raw = rendered.read_bytes()
-                        candidates.append((len(raw), f"page-{page_index + 1}.jpg", raw))
-            except (OSError, subprocess.SubprocessError):
-                pass
-        if candidates and len(rows) - 1 > page_row_start:
-            page_rows = rows[page_row_start + 1:]
-            for _, image_name, raw in candidates:
-                mime = mimetypes.guess_type(image_name)[0] or "image/jpeg"
-                if mime not in {"image/jpeg", "image/png", "image/webp", "image/gif"}:
-                    continue
-                if len(page_rows) == 1:
-                    row_index = page_row_start + 1
-                else:
-                    image_marker = re.search(r"(?i)(?:shot|镜头|#)[-_ ]*(\d+)", image_name)
-                    matches = [index for index, row in enumerate(page_rows) if image_marker and row[0].lstrip('0') == image_marker.group(1).lstrip('0')]
-                    if len(matches) != 1:
-                        raise ValueError(f"PDF 第 {page_index + 1} 页含多镜头，图片无法可靠定位；请使用单镜头分页 PDF 或带 SHOT 编号的图片")
-                    row_index = page_row_start + 1 + matches[0]
-                images.append({"data_row": row_index, "filename": clean_name(Path(image_name).name), "mime": mime, "size": len(raw), "raw": raw})
-    if len(rows) == 1:
-        raise ValueError("PDF 未识别到可导入内容；请确认文件未损坏或已包含可读取页面")
-    return rows, images
-
-
-def build_import_custom_columns(headers: list[str], mapping: dict[str, dict]) -> list[dict]:
-    """Describe source columns that are not consumed by the core mapping.
-
-    The key is deterministic for a given source column, so importing the same
-    workbook more than once reuses the project's custom field instead of
-    creating a new duplicate field on every import.
-    """
-    mapped_cols = set()
-    for info in (mapping or {}).values():
-        if isinstance(info, dict):
-            try:
-                col = int(info.get("col", -1))
-            except (TypeError, ValueError):
-                col = -1
-            if col >= 0:
-                mapped_cols.add(col)
-    seen: dict[str, int] = {}
-    result: list[dict] = []
-    for index, raw in enumerate(headers):
-        if index in mapped_cols:
-            continue
-        label = str(raw or "").strip() or f"未命名列{index + 1}"
-        seen[label] = seen.get(label, 0) + 1
-        display_label = label if seen[label] == 1 else f"{label} ({seen[label]})"
-        digest = hashlib.sha1(f"{index}:{label}".encode("utf-8")).hexdigest()[:10]
-        result.append({
-            "source_col": index,
-            "label": display_label[:80],
-            "key": f"excel_col_{index + 1}_{digest}",
-            "field_type": "text",
-        })
-    return result
-
-
-def parse_xlsx_package(source: bytes | Path, include_image_data: bool = False) -> tuple[list[list[str]], list[dict]]:
-    """Read the first worksheet and images associated with worksheet rows.
-
-    Excel storyboard files commonly keep the picture outside the cell grid as
-    a drawing.  The row anchor is the only stable association available in a
-    normal XLSX, so we preserve that association for the import wizard.  Newer
-    Excel builds can instead store an image as a ``_localImage`` rich value in
-    the cell itself; those are resolved from the workbook rich-data relations.
-    """
-    ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
-    archive_source = source if isinstance(source, Path) else io.BytesIO(source)
-    with zipfile.ZipFile(archive_source) as zf:
-        names = set(zf.namelist())
-        shared: list[str] = []
-        if "xl/sharedStrings.xml" in names:
-            root = ET.fromstring(zf.read("xl/sharedStrings.xml"))
-            for si in root.findall(f"{ns}si"):
-                shared.append("".join(t.text or "" for t in si.iter(f"{ns}t")))
-        sheets = sorted(n for n in zf.namelist() if n.startswith("xl/worksheets/sheet") and n.endswith(".xml"))
-        if not sheets:
-            return [], []
-        sheet_name = sheets[0]
-        root = ET.fromstring(zf.read(sheet_name))
-        output: list[list[str]] = []
-        sheet_row_indices: dict[int, int] = {}
-        for row in root.iter(f"{ns}row"):
-            cells: dict[int, str] = {}
-            for cell in row.findall(f"{ns}c"):
-                ref = cell.get("r", "A1")
-                letters = re.match(r"[A-Z]+", ref)
-                col = 0
-                for ch in (letters.group(0) if letters else "A"):
-                    col = col * 26 + ord(ch) - 64
-                col -= 1
-                cell_type = cell.get("t")
-                if cell_type == "inlineStr":
-                    value = "".join(t.text or "" for t in cell.iter(f"{ns}t"))
-                else:
-                    node = cell.find(f"{ns}v")
-                    value = node.text if node is not None and node.text is not None else ""
-                    if cell_type == "s" and value.isdigit() and int(value) < len(shared):
-                        value = shared[int(value)]
-                cells[col] = value
-            if cells:
-                sheet_row_indices[int(row.get("r", len(output) + 1)) - 1] = len(output)
-                output.append([cells.get(i, "") for i in range(max(cells) + 1)])
-        embedded_images: list[dict] = []
-
-        def add_image(data_row: int, media_name: str) -> None:
-            """Record a workbook image once, preserving its target sheet row."""
-            data_row = sheet_row_indices.get(data_row, -1)
-            if data_row < 0:
-                return
-            if media_name not in names:
-                return
-            suffix = posixpath.splitext(media_name)[1].lower()
-            mime = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif"}.get(suffix)
-            if not mime or any(item["data_row"] == data_row and item["archive_name"] == media_name for item in embedded_images):
-                return
-            media_info = zf.getinfo(media_name)
-            item = {
-                "data_row": data_row,
-                "filename": f"excel-image-{len(embedded_images) + 1:03d}{suffix}",
-                "mime": mime,
-                "size": media_info.file_size,
-                "archive_name": media_name,
-            }
-            if include_image_data:
-                item["data"] = base64.b64encode(zf.read(media_name)).decode("ascii")
-            embedded_images.append(item)
-
-        rel_ns = "{http://schemas.openxmlformats.org/package/2006/relationships}"
-        drawing_ns = "{http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing}"
-        office_rel_ns = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
-        sheet_rel = posixpath.join(posixpath.dirname(sheet_name), "_rels", posixpath.basename(sheet_name) + ".rels")
-        if sheet_rel in names:
-            sheet_rels = ET.fromstring(zf.read(sheet_rel))
-            rel_targets = {item.get("Id"): item.get("Target", "") for item in sheet_rels.findall(f"{rel_ns}Relationship")}
-            drawing_ref = next(iter(root.iter(f"{ns}drawing")), None)
-            drawing_target = rel_targets.get(drawing_ref.get(f"{office_rel_ns}id")) if drawing_ref is not None else None
-            if drawing_target:
-                drawing_name = posixpath.normpath(posixpath.join(posixpath.dirname(sheet_name), drawing_target))
-                drawing_rel = posixpath.join(posixpath.dirname(drawing_name), "_rels", posixpath.basename(drawing_name) + ".rels")
-                if drawing_name in names and drawing_rel in names:
-                    drawing_root = ET.fromstring(zf.read(drawing_name))
-                    drawing_rels = ET.fromstring(zf.read(drawing_rel))
-                    media_targets = {item.get("Id"): item.get("Target", "") for item in drawing_rels.findall(f"{rel_ns}Relationship")}
-                    for anchor in list(drawing_root):
-                        from_node = anchor.find(f"{drawing_ns}from")
-                        if from_node is None:
-                            continue
-                        row_node = from_node.find(f"{drawing_ns}row")
-                        pic = anchor.find(f"{drawing_ns}pic")
-                        blip_fill = pic.find(f"{drawing_ns}blipFill") if pic is not None else None
-                        blip = blip_fill.find("{http://schemas.openxmlformats.org/drawingml/2006/main}blip") if blip_fill is not None else None
-                        if row_node is None or blip is None or not row_node.text:
-                            continue
-                        media_target = media_targets.get(blip.get(f"{office_rel_ns}embed"))
-                        if not media_target:
-                            continue
-                        media_name = posixpath.normpath(posixpath.join(posixpath.dirname(drawing_name), media_target))
-                        if media_name not in names:
-                            continue
-                        add_image(int(row_node.text), media_name)
-
-        # Excel 365's in-cell image feature does not create a drawing part.
-        # A cell's `vm` points into metadata.xml/valueMetadata, which in turn
-        # points at richData/rdrichvalue.xml; its first value indexes the
-        # corresponding relation in richData/richValueRel.xml.
-        rich_values_name = "xl/richData/rdrichvalue.xml"
-        rich_rel_name = "xl/richData/richValueRel.xml"
-        rich_rel_targets_name = "xl/richData/_rels/richValueRel.xml.rels"
-        metadata_name = "xl/metadata.xml"
-        if {rich_values_name, rich_rel_name, rich_rel_targets_name, metadata_name}.issubset(names):
-            try:
-                rich_root = ET.fromstring(zf.read(rich_values_name))
-                rich_rel_root = ET.fromstring(zf.read(rich_rel_name))
-                rich_target_root = ET.fromstring(zf.read(rich_rel_targets_name))
-                metadata_root = ET.fromstring(zf.read(metadata_name))
-                rich_ns = "{http://schemas.microsoft.com/office/spreadsheetml/2017/richdata}"
-                rich_rel_ns = "{http://schemas.microsoft.com/office/spreadsheetml/2022/richvaluerel}"
-                relationship_ids = [node.get(f"{office_rel_ns}id") for node in rich_rel_root.findall(f"{rich_rel_ns}rel")]
-                media_targets = {node.get("Id"): node.get("Target", "") for node in rich_target_root.findall(f"{rel_ns}Relationship")}
-                rich_value_rel_index = []
-                for rich_value in rich_root.findall(f"{rich_ns}rv"):
-                    values = rich_value.findall(f"{rich_ns}v")
-                    rich_value_rel_index.append(int(values[0].text) if values and (values[0].text or "").isdigit() else -1)
-                value_metadata = metadata_root.find(f"{ns}valueMetadata")
-                metadata_rich_values = []
-                for book in list(value_metadata) if value_metadata is not None else []:
-                    record = book.find(f"{ns}rc")
-                    metadata_rich_values.append(int(record.get("v", "-1")) if record is not None and record.get("t") == "1" else -1)
-                for cell in root.iter(f"{ns}c"):
-                    vm = cell.get("vm")
-                    ref = cell.get("r", "")
-                    if not vm or not vm.isdigit() or not ref:
-                        continue
-                    metadata_index = int(vm) - 1
-                    rich_value_index = metadata_rich_values[metadata_index] if 0 <= metadata_index < len(metadata_rich_values) else -1
-                    relation_index = rich_value_rel_index[rich_value_index] if 0 <= rich_value_index < len(rich_value_rel_index) else -1
-                    relation_id = relationship_ids[relation_index] if 0 <= relation_index < len(relationship_ids) else None
-                    target = media_targets.get(relation_id, "")
-                    row_match = re.search(r"(\d+)$", ref)
-                    if not target or row_match is None:
-                        continue
-                    media_name = posixpath.normpath(posixpath.join("xl/richData", target))
-                    add_image(int(row_match.group(1)) - 1, media_name)
-            except (ET.ParseError, OSError, ValueError, IndexError):
-                # A malformed optional rich-data part must not prevent the
-                # worksheet itself or conventional floating images importing.
-                pass
-        return output, embedded_images
-
-
-def parse_xlsx_rows(payload: bytes) -> list[list[str]]:
-    return parse_xlsx_package(payload)[0]
-
-
-def cache_import_parse(staged: Path, rows: list, records: list) -> None:
-    """Keep immutable parse results beside the staged source, never in preview JSON."""
-    cached = []
-    for index, record in enumerate(records):
-        item = dict(record)
-        raw = item.pop("raw", None)
-        if raw is not None:
-            binary = staged.with_name(f"{staged.stem}.image-{index}")
-            binary.write_bytes(bytes(raw))
-            item["raw_file"] = binary.name
-        cached.append(item)
-    staged.with_suffix(".parsed.json").write_text(json.dumps({"rows": rows, "records": cached}, ensure_ascii=False), encoding="utf-8")
-
-
-def load_import_parse(staged: Path) -> tuple[list, list]:
-    cached = staged.with_suffix(".parsed.json")
-    if cached.exists():
-        parsed = json.loads(cached.read_text(encoding="utf-8"))
-        return parsed["rows"], parsed["records"]
-    rows, records = parse_pdf_storyboard(staged) if staged.suffix.lower() == ".pdf" else parse_xlsx_package(staged)
-    cache_import_parse(staged, rows, records)
-    return load_import_parse(staged)
-
-
-def staged_image_bytes(staged: Path, record: dict) -> bytes:
-    binary = staged.parent / str(record.get("raw_file", ""))
-    if binary.parent != staged.parent or not re.fullmatch(re.escape(staged.stem) + r"\.image-\d+", binary.name):
-        raise ValueError("无效的预览图片路径")
-    return binary.read_bytes()
-
-
-def cleanup_import_staging(now: int | None = None) -> None:
-    """Remove abandoned previews without touching committed project media."""
-    now = now or int(time.time())
-    if not IMPORT_ROOT.exists():
-        return
-    for manifest_path in IMPORT_ROOT.glob("*.json"):
-        if manifest_path.name.endswith('.parsed.json'):
-            continue
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            if now - int(manifest.get("created_at", 0)) <= IMPORT_TTL_SECONDS:
-                continue
-            staged = IMPORT_ROOT / str(manifest.get("stored_name", ""))
-            if staged.parent == IMPORT_ROOT:
-                remove_staged_import(staged)
-            manifest_path.unlink()
-        except (OSError, ValueError, TypeError, json.JSONDecodeError):
-            continue
-
-
-def remove_staged_import(staged: Path) -> None:
-    if staged.resolve().parent != IMPORT_ROOT.resolve() or not re.fullmatch(r'[A-Za-z0-9_-]+', staged.stem):
-        return
-    targets = [staged, staged.with_suffix('.parsed.json')]
-    targets.extend(target for target in staged.parent.glob(staged.stem + '.image-*')
-                   if re.fullmatch(re.escape(staged.stem) + r'\.image-\d+', target.name))
-    for target in targets:
-        if target.is_file() and target.resolve().parent == IMPORT_ROOT.resolve():
-            target.unlink(missing_ok=True)
-
-
-def delete_project_files(db: sqlite3.Connection, project_id: str) -> tuple[int, list[str]]:
-    """Remove every on-disk object owned by a project.
-
-    Database cascades cannot remove flat media files or abandoned import
-    previews, so project deletion explicitly clears both before committing the
-    database delete. Paths are accepted only when they remain direct children
-    of the application-managed storage roots.
-    """
-    removed = 0
-    errors: list[str] = []
+def delete_project_files(db: sqlite3.Connection, project_id: str) -> dict[str, object]:
+    """Collect project file candidates without touching disk before commit."""
     asset_rows = db.execute("SELECT id, stored_name FROM assets WHERE project_id=?", (project_id,)).fetchall()
     storage_keys = {str(row["stored_name"] or "") for row in asset_rows}
     storage_keys.update(str(row["storage_key"] or "") for row in db.execute(
         "SELECT v.storage_key FROM asset_versions v JOIN assets a ON a.id=v.asset_id WHERE a.project_id=?",
         (project_id,),
     ))
+
+    # Older builds could leave a version file named with the asset id. Capture
+    # exact candidates now; the executor rechecks references after commit.
+    legacy_keys: set[str] = set()
+    for asset in asset_rows:
+        asset_id = str(asset["id"] or "")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", asset_id):
+            continue
+        for target in MEDIA_ROOT.glob(f"{asset_id}_*"):
+            if target.is_file():
+                legacy_keys.add(target.name)
+
+    import_files: set[str] = set()
+    for manifest_path in IMPORT_ROOT.glob("*.json"):
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if str(manifest.get("project_id", "")) != project_id:
+            continue
+        import_files.add(str(manifest.get("stored_name", "")))
+        import_files.add(manifest_path.name)
+
+    export_dir = (EXPORT_ROOT / project_id).resolve()
+    return {
+        "storage_keys": storage_keys,
+        "legacy_keys": legacy_keys,
+        "import_files": import_files,
+        "export_dir": export_dir,
+    }
+
+
+def remove_deleted_project_files(db: sqlite3.Connection, plan: dict[str, object]) -> tuple[int, list[str]]:
+    """Delete candidates after commit, retaining any still-referenced media."""
+    removed = 0
+    errors: list[str] = []
+    referenced = {clean_name(str(row["stored_name"] or ""))
+                  for row in db.execute("SELECT stored_name FROM assets")}
+    referenced.update(clean_name(str(row["storage_key"] or ""))
+                      for row in db.execute("SELECT storage_key FROM asset_versions"))
+    media_candidates = {
+        clean_name(str(key)) for key in set(plan["storage_keys"]) | set(plan["legacy_keys"])
+        if key and Path(str(key)).name == str(key)
+    } - referenced
 
     def remove_file(root: Path, name: str) -> None:
         nonlocal removed
@@ -2253,38 +1603,18 @@ def delete_project_files(db: sqlite3.Connection, project_id: str) -> tuple[int, 
             errors.append(f"文件超出存储目录：{name[:80]}")
             return
         try:
-            if target.exists():
+            if target.is_file():
                 target.unlink()
                 removed += 1
         except OSError as exc:
             errors.append(f"无法删除 {name[:80]}：{exc}")
 
-    for storage_key in storage_keys:
-        remove_file(MEDIA_ROOT, storage_key)
+    for key in media_candidates:
+        remove_file(MEDIA_ROOT, key)
+    for key in plan["import_files"]:
+        remove_file(IMPORT_ROOT, str(key))
 
-    # Older builds could leave an unreferenced version file named with the
-    # asset id. Remove those too, without using an untrusted wildcard prefix.
-    for asset in asset_rows:
-        asset_id = str(asset["id"] or "")
-        if not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", asset_id):
-            continue
-        for target in MEDIA_ROOT.glob(f"{asset_id}_*"):
-            if target.is_file():
-                remove_file(MEDIA_ROOT, target.name)
-
-    for manifest_path in IMPORT_ROOT.glob("*.json"):
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        if str(manifest.get("project_id", "")) != project_id:
-            continue
-        remove_file(IMPORT_ROOT, str(manifest.get("stored_name", "")))
-        remove_file(IMPORT_ROOT, manifest_path.name)
-
-    # Exporters currently stream responses, but retain support for deployments
-    # that cached project exports in an exact project-named directory.
-    export_dir = (EXPORT_ROOT / project_id).resolve()
+    export_dir = Path(plan["export_dir"])
     if export_dir.parent == EXPORT_ROOT.resolve() and export_dir.is_dir():
         try:
             shutil.rmtree(export_dir)
@@ -2300,138 +1630,6 @@ def parse_table(payload: bytes, filename: str) -> list[list[str]]:
     text = payload.decode("utf-8-sig", errors="replace")
     dialect = csv.Sniffer().sniff(text[:4096], delimiters=",\t;") if text.strip() else csv.excel
     return list(csv.reader(io.StringIO(text), dialect))
-
-
-# ==========================================
-# Deliverable Exporters (Spec Section 105-113)
-# ==========================================
-
-def generate_cmx3600_edl(bundle: dict) -> str:
-    """Generate professional CMX3600 EDL for DaVinci Resolve / Premiere Pro."""
-    p = bundle["project"]
-    fps = p["fps"]
-    title = re.sub(r"[^\w\s-]", "_", p["name"])[:32] or "FRAMEFORGE"
-    lines = [f"TITLE: {title}", "FCM: NON-DROP FRAME" if not p["is_drop_frame"] else "FCM: DROP FRAME", ""]
-
-    for i, s in enumerate(bundle["shots"]):
-        idx = i + 1
-        reel = "AX"
-        shot_num = s["number"]
-        src_in = "00:00:00:00"
-        src_out = frames_to_tc(s["duration_frames"], fps, p["is_drop_frame"])
-        rec_in = s["tc_in"]
-        rec_out = s["tc_out"]
-        lines.append(f"{idx:03d}  {reel:<8} V     C        {src_in} {src_out} {rec_in} {rec_out}")
-        lines.append(f"* FROM CLIP NAME: SHOT_{shot_num}_{s['title']}")
-        if s.get("voiceover"):
-            lines.append(f"* COMMENT: VO: {s['voiceover'][:60]}")
-        lines.append("")
-
-    return "\r\n".join(lines)
-
-
-def generate_otio_json(bundle: dict) -> dict:
-    """Generate OpenTimelineIO JSON structure."""
-    p = bundle["project"]
-    fps = p["fps"]
-    total_f = bundle["total_frames"]
-    return {
-        "OTIO_SCHEMA": "Timeline.1",
-        "name": p["name"],
-        "global_start_time": {"OTIO_SCHEMA": "RationalTime.1", "rate": fps, "value": tc_to_frames(p["start_tc"], fps)},
-        "tracks": {
-            "OTIO_SCHEMA": "Stack.1",
-            "children": [
-                {
-                    "OTIO_SCHEMA": "Track.1",
-                    "name": "Video Track 1",
-                    "kind": "Video",
-                    "children": [
-                        {
-                            "OTIO_SCHEMA": "Clip.1",
-                            "name": f"Shot {s['number']} - {s['title']}",
-                            "source_range": {
-                                "OTIO_SCHEMA": "TimeRange.1",
-                                "start_time": {"OTIO_SCHEMA": "RationalTime.1", "rate": fps, "value": 0},
-                                "duration": {"OTIO_SCHEMA": "RationalTime.1", "rate": fps, "value": s["duration_frames"]}
-                            },
-                            "metadata": {
-                                "frameforge": {
-                                    "shot_id": s["id"],
-                                    "primary_method": s["primary_method"],
-                                    "shot_size": s["shot_size"],
-                                    "lens": s["lens"],
-                                    "voiceover": s["voiceover"]
-                                }
-                            }
-                        }
-                        for s in bundle["shots"]
-                    ]
-                }
-            ]
-        }
-    }
-
-
-def generate_fcpxml(bundle: dict) -> str:
-    """Generate FCPXML 1.9 export."""
-    p = bundle["project"]
-    fps = int(round(p["fps"]))
-    total_f = bundle["total_frames"]
-    root = ET.Element("fcpxml", version="1.9")
-    resources = ET.SubElement(root, "resources")
-    fmt = ET.SubElement(resources, "format", id="r1", name=f"FFVideoFormat1080p{fps}", frameDuration=f"1/{fps}s", width="1920", height="1080")
-
-    library = ET.SubElement(root, "library")
-    event = ET.SubElement(library, "event", name=p["name"])
-    project = ET.SubElement(event, "project", name=p["name"])
-    sequence = ET.SubElement(project, "sequence", format="r1", duration=f"{total_f}/{fps}s", tcStart=f"{tc_to_frames(p['start_tc'], fps)}/{fps}s")
-    spine = ET.SubElement(sequence, "spine")
-
-    cursor = 0
-    for s in bundle["shots"]:
-        dur = s["duration_frames"]
-        clip = ET.SubElement(spine, "clip", name=f"Shot {s['number']} - {s['title']}", offset=f"{cursor}/{fps}s", duration=f"{dur}/{fps}s", start="0s")
-        if s.get("voiceover"):
-            note = ET.SubElement(clip, "note")
-            note.text = s["voiceover"]
-        cursor += dur
-
-    return ET.tostring(root, encoding="utf-8", xml_declaration=True).decode("utf-8")
-
-
-def generate_srt_subtitles(bundle: dict) -> str:
-    """Generate standard SRT subtitle file from voiceover."""
-    fps = bundle["project"]["fps"]
-    lines = []
-    idx = 1
-    for s in bundle["shots"]:
-        vo = s.get("voiceover", "").strip()
-        if not vo:
-            continue
-        start_tc = s["tc_in"].replace(";", ":")
-        end_tc = s["tc_out"].replace(";", ":")
-        # Format to SRT 00:00:00,000
-        # Convert frames to ms
-        f_in = s["tc_in_frames"] % int(round(fps))
-        f_out = s["tc_out_frames"] % int(round(fps))
-        ms_in = int((f_in / fps) * 1000)
-        ms_out = int((f_out / fps) * 1000)
-        srt_in = f"{start_tc[:8]},{ms_in:03d}"
-        srt_out = f"{end_tc[:8]},{ms_out:03d}"
-
-        lines.append(f"{idx}")
-        lines.append(f"{srt_in} --> {srt_out}")
-        lines.append(vo)
-        lines.append("")
-        idx += 1
-    return "\r\n".join(lines)
-
-
-def generate_vtt_subtitles(bundle: dict) -> str:
-    """Generate WebVTT using the same integer-frame timing source as SRT."""
-    srt = generate_srt_subtitles(bundle)
-    return "WEBVTT\r\n\r\n" + srt.replace(",", ".")
 
 
 # ==========================================
@@ -2478,7 +1676,12 @@ class AppHandler(BaseHTTPRequestHandler):
             self.send_header(key, value)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            # The browser may cancel a large response after its deadline. Do
+            # not attempt a second 500 response on the already closed socket.
+            return
 
     def send_error_json(self, status: int, message: str):
         self.send_json(status, {"error": message})
@@ -2579,6 +1782,21 @@ class AppHandler(BaseHTTPRequestHandler):
                         return self.send_error_json(404, "项目不存在")
                     return self.send_json(200, result)
 
+            match = re.fullmatch(r"/api/projects/([^/]+)/assets/unused/preview", path)
+            if match:
+                with connect() as db:
+                    if not self.require_auth(db):
+                        return
+                    db.execute("BEGIN")
+                    pid = match.group(1)
+                    if not db.execute(
+                        "SELECT 1 FROM projects WHERE id=? AND deleted_at IS NULL",
+                        (pid,),
+                    ).fetchone():
+                        return self.send_error_json(404, "项目不存在")
+                    plan = project_asset_cleanup_plan(db, pid)
+                    return self.send_json(200, plan)
+
             if path == "/api/session":
                 with connect() as db:
                     s = self.session(db)
@@ -2668,7 +1886,28 @@ class AppHandler(BaseHTTPRequestHandler):
                     rows = [dict(r) for r in db.execute("""
                         SELECT p.*,
                             (SELECT count(*) FROM shots s WHERE s.project_id=p.id AND s.is_deleted=0) as shot_count,
-                            (SELECT coalesce(sum(duration_frames),0) FROM shots s WHERE s.project_id=p.id AND s.is_deleted=0) as total_frames
+                            (SELECT coalesce(sum(duration_frames),0) FROM shots s WHERE s.project_id=p.id AND s.is_deleted=0) as total_frames,
+                            COALESCE(
+                              (SELECT pa.media_id
+                                 FROM shots s
+                                 JOIN panels pa ON pa.shot_id=s.id
+                                 JOIN assets cover_a ON cover_a.id=pa.media_id
+                                WHERE s.project_id=p.id
+                                  AND s.is_deleted=0
+                                  AND pa.media_id IS NOT NULL
+                                  AND cover_a.mime LIKE 'image/%'
+                                ORDER BY s.position ASC, pa.position ASC
+                                LIMIT 1),
+                              (SELECT sal.asset_id
+                                 FROM shots s
+                                 JOIN shot_asset_links sal ON sal.shot_id=s.id
+                                 JOIN assets cover_link_a ON cover_link_a.id=sal.asset_id
+                                WHERE s.project_id=p.id
+                                  AND s.is_deleted=0
+                                  AND cover_link_a.mime LIKE 'image/%'
+                                ORDER BY s.position ASC, cover_link_a.created_at ASC
+                                LIMIT 1)
+                            ) as cover_media_id
                         FROM projects p WHERE p.deleted_at IS NULL ORDER BY updated_at DESC
                     """)]
                     return self.send_json(200, rows)
@@ -2827,9 +2066,10 @@ class AppHandler(BaseHTTPRequestHandler):
                             r["options"] = []
                     return self.send_json(200, rows)
 
-            # Column preferences are project data, while the built-in column
-            # catalogue remains application-owned. This keeps hide/remove
-            # reversible and prevents a UI preference from deleting fields.
+            # Column preferences are project data. A removed state is the
+            # archive; permanently_deleted is a project-scoped tombstone so
+            # a purged built-in column cannot reappear from the virtual
+            # catalogue on another device.
             match = re.fullmatch(r"/api/projects/([^/]+)/column-preferences", path)
             if match:
                 with connect() as db:
@@ -2996,7 +2236,8 @@ class AppHandler(BaseHTTPRequestHandler):
                         cursor_y=cursor.get("y"),
                         cursor_visible=cursor.get("visible", False),
                         color=s["user_color"],
-                        avatar_url=avatar_url(s) or ""
+                        avatar_url=avatar_url(s) or "",
+                        presence_state=str(data.get("presence_state", "viewing"))
                     )
                     return self.send_json(200, {"ok": True, "presence": presence_list})
 
@@ -3073,6 +2314,21 @@ class AppHandler(BaseHTTPRequestHandler):
                     result["restore_warnings"] = ["旧版 JSON 只导入基础镜头字段与自定义列；媒体、完整 Panel、步骤及历史未恢复。完整恢复请重新导出带 _backup.version=2 的备份。"]
                     return self.send_json(201, result)
 
+                if path == "/api/projects/import-project-pdf":
+                    if self.headers.get("Content-Type", "").split(";", 1)[0].lower() != "application/pdf":
+                        return self.send_error_json(415, "仅支持 PDF 文件")
+                    pdf_bytes = self.body()
+                    if not pdf_bytes.startswith(b"%PDF-"):
+                        return self.send_error_json(400, "所选文件不是有效 PDF")
+                    try:
+                        backup_bytes = extract_project_backup(pdf_bytes, max_pdf_bytes=MAX_BODY)
+                        bundle = json.loads(backup_bytes)
+                        pid = import_project_backup(db, bundle, s)
+                    except ProjectPdfError as exc:
+                        return self.send_error_json(400, str(exc))
+                    audit(db, s["username"], "import_project_pdf", pid, f"{len(bundle['shots'])} shots")
+                    return self.send_json(201, project_bundle(db, pid))
+
                 if path == "/api/projects":
                     data = self.json_body()
                     pid = str(uuid.uuid4())
@@ -3124,13 +2380,28 @@ class AppHandler(BaseHTTPRequestHandler):
                         return self.send_error_json(404, "项目不存在")
                     data = self.json_body()
                     active_count = db.execute("SELECT COUNT(*) AS n FROM shots WHERE project_id=? AND is_deleted=0", (pid,)).fetchone()["n"]
+                    client_request_id = data.get("client_request_id")
+                    try:
+                        sid = str(uuid.UUID(str(client_request_id))) if client_request_id else str(uuid.uuid4())
+                    except (ValueError, TypeError):
+                        return self.send_error_json(400, "新增请求标识无效")
+                    existing_request = db.execute("SELECT project_id FROM shots WHERE id=?", (sid,)).fetchone()
+                    if existing_request:
+                        if existing_request["project_id"] != pid:
+                            return self.send_error_json(409, "新增请求标识已被使用")
+                        bundle = project_bundle(db, pid)
+                        bundle["created_shot_id"] = sid
+                        return self.send_json(200, bundle)
                     try:
                         requested_pos = int(data.get("position", active_count))
                     except (TypeError, ValueError):
                         requested_pos = active_count
+                    if data.get("anchor_id"):
+                        anchor = db.execute("SELECT position FROM shots WHERE id=? AND project_id=? AND is_deleted=0", (str(data["anchor_id"]), pid)).fetchone()
+                        if anchor:
+                            requested_pos = anchor["position"] + (1 if data.get("insert_direction") == "after" else 0)
                     pos = max(0, min(requested_pos, active_count))
                     db.execute("UPDATE shots SET position=position+1, sort_index=sort_index+1 WHERE project_id=? AND is_deleted=0 AND position>=?", (pid, pos))
-                    sid = str(uuid.uuid4())
                     at = now_iso()
                     number = str(data.get("number", f"{pos+1:03d}"))[:32]
                     fps = float(db.execute("SELECT fps FROM projects WHERE id=?", (pid,)).fetchone()["fps"])
@@ -3139,14 +2410,14 @@ class AppHandler(BaseHTTPRequestHandler):
                     db.execute("""
                         INSERT INTO shots (
                             id, project_id, position, number, sort_index, title, chapter, scene,
-                            description, voiceover, duration_frames, shot_size, lens, movement,
+                            description, voiceover, dialogue, duration_frames, shot_size, lens, movement,
                             primary_method, secondary_methods, department, owner, status, created_at, updated_at
-                        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """, (
                         sid, pid, pos, number, pos, str(data.get("title", f"镜头 {number}"))[:200],
                         str(data.get("chapter", "")), str(data.get("scene", "")),
                         str(data.get("description", "")), str(data.get("voiceover", "")),
-                        dur_frames, str(data.get("shot_size", "全景")), str(data.get("lens", "")),
+                        str(data.get("dialogue", "")), dur_frames, str(data.get("shot_size", "全景")), str(data.get("lens", "")),
                         str(data.get("movement", "固定")), str(data.get("primary_method", "LIVE")),
                         json.dumps(data.get("secondary_methods", [])),
                         str(data.get("department", "Camera")), str(data.get("owner", "")),
@@ -3160,7 +2431,9 @@ class AppHandler(BaseHTTPRequestHandler):
                     renumber_project_shots(db, pid, at)
                     create_project_snapshot(db, pid, s["username"], "新增镜头")
                     audit(db, s["username"], "create_shot", sid, f"Project {pid} Shot {number}")
-                    return self.send_json(201, project_bundle(db, pid))
+                    bundle = project_bundle(db, pid)
+                    bundle["created_shot_id"] = sid
+                    return self.send_json(201, bundle)
 
                 # Custom Fields CRUD
                 match = re.fullmatch(r"/api/projects/([^/]+)/custom-fields", path)
@@ -3176,10 +2449,18 @@ class AppHandler(BaseHTTPRequestHandler):
                     ftype = str(data.get("field_type", "text")).strip()[:32]
                     if not label or ftype not in {"text", "textarea", "number", "boolean", "date", "url", "select"}:
                         return self.send_error_json(400, "自定义列名称或类型无效")
+                    if f"custom:{key}" in purged_fields(db, pid):
+                        return self.send_error_json(409, "该列键已永久删除，请使用新的列键")
                     if db.execute("SELECT 1 FROM custom_field_definitions WHERE project_id=? AND key=? AND is_active=1", (pid, key)).fetchone():
                         return self.send_error_json(409, "该列键已存在")
                     group_name = str(data.get("group_name", "Custom")).strip()[:64]
-                    options_json = json.dumps(data.get("options", []))
+                    options = data.get("options", [])
+                    if not isinstance(options, list) or len(options) > 100:
+                        return self.send_error_json(400, "自定义列选项无效")
+                    options = [str(item).strip()[:120] for item in options if str(item).strip()]
+                    if ftype != "select":
+                        options = []
+                    options_json = json.dumps(options, ensure_ascii=False)
                     db.execute("""
                         INSERT INTO custom_field_definitions (
                             id, project_id, key, label, description, field_type, group_name,
@@ -3321,16 +2602,28 @@ class AppHandler(BaseHTTPRequestHandler):
                     bundle = project_bundle(db, pid)
                     if not bundle:
                         return self.send_error_json(404, "项目不存在")
+                    data = self.json_body()
+                    if not isinstance(data, dict):
+                        return self.send_error_json(400, "自动计时参数必须是对象")
+                    raw_rate = data.get("speech_rate", 1.0)
+                    if isinstance(raw_rate, bool):
+                        return self.send_error_json(400, "语速必须在 0.5 到 2.0 之间")
+                    try:
+                        speech_rate = float(raw_rate)
+                    except (TypeError, ValueError):
+                        return self.send_error_json(400, "语速必须在 0.5 到 2.0 之间")
+                    if not math.isfinite(speech_rate) or not 0.5 <= speech_rate <= 2.0:
+                        return self.send_error_json(400, "语速必须在 0.5 到 2.0 之间")
                     p = bundle["project"]
                     shots = bundle["shots"]
-                    computed = compute_auto_timing(shots, p["target_seconds"], p["fps"])
+                    computed = compute_auto_timing(shots, p["target_seconds"], p["fps"], speech_rate)
                     at = now_iso()
                     for s_item in computed:
                         db.execute("UPDATE shots SET duration_frames=?, updated_at=? WHERE id=?",
                                    (s_item["duration_frames"], at, s_item["id"]))
                     touch_project(db, pid, s, at)
                     create_project_snapshot(db, pid, s["username"], "自动计时")
-                    audit(db, s["username"], "auto_timing", pid, f"Calculated {len(shots)} shots")
+                    audit(db, s["username"], "auto_timing", pid, f"Calculated {len(shots)} shots at {speech_rate:g}x speech rate")
                     return self.send_json(200, project_bundle(db, pid))
 
                 # Publish Anonymous Share Snapshot (Spec Section 100-104)
@@ -3479,7 +2772,7 @@ class AppHandler(BaseHTTPRequestHandler):
                         return self.send_json(200, dict(accepted))
 
                     target_snapshot = json.loads(version["snapshot_json"] or "{}")
-                    current_snapshot, project_id = complete_shot_snapshot(db, sid)
+                    current_snapshot, project_id = complete_shot_snapshot(db, sid, project_bundle)
                     if not current_snapshot or not project_id:
                         return self.send_error_json(404, "镜头不存在")
                     count = int(db.execute("SELECT COUNT(*) AS n FROM shot_versions WHERE shot_id=?", (sid,)).fetchone()["n"])
@@ -3510,7 +2803,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     if not branch:
                         return self.send_error_json(400, "请输入分支名称")
                     parent_id = str(data.get("parent_version_id", "")).strip() or None
-                    snapshot, _ = complete_shot_snapshot(db, sid)
+                    snapshot, _ = complete_shot_snapshot(db, sid, project_bundle)
                     if not snapshot:
                         return self.send_error_json(404, "镜头不存在")
                     if parent_id:
@@ -3534,7 +2827,7 @@ class AppHandler(BaseHTTPRequestHandler):
                 if match:
                     db.execute("BEGIN IMMEDIATE")
                     sid = match.group(1)
-                    snapshot, _ = complete_shot_snapshot(db, sid)
+                    snapshot, _ = complete_shot_snapshot(db, sid, project_bundle)
                     if not snapshot:
                         return self.send_error_json(404, "镜头不存在")
                     data = self.json_body()
@@ -3658,216 +2951,44 @@ class AppHandler(BaseHTTPRequestHandler):
                     audit(db, s["username"], "update_project", pid)
                     return self.send_json(200, project_bundle(db, pid))
 
-                # Persist reversible column state separately from shot data.
+                # Persist column visibility/archive state separately from shot data.
                 match = re.fullmatch(r"/api/projects/([^/]+)/column-preferences", path)
                 if match:
                     pid = match.group(1)
                     if not db.execute("SELECT 1 FROM projects WHERE id=? AND deleted_at IS NULL", (pid,)).fetchone():
                         return self.send_error_json(404, "项目不存在")
-                    preferences = data.get("preferences", [])
-                    if not isinstance(preferences, list) or len(preferences) > 500:
-                        return self.send_error_json(400, "列配置格式不正确")
-                    custom_keys = {row["key"] for row in db.execute(
-                        "SELECT key FROM custom_field_definitions WHERE project_id=?", (pid,)
-                    )}
-                    allowed_keys = DEFAULT_TABLE_COLUMN_KEYS | {f"custom:{key}" for key in custom_keys}
-                    allowed_states = {"visible", "hidden", "removed"}
-                    normalized = []
-                    for index, item in enumerate(preferences):
-                        if not isinstance(item, dict):
-                            continue
-                        key = str(item.get("column_key", ""))[:120]
-                        if key not in allowed_keys:
-                            return self.send_error_json(400, f"未知列：{key}")
-                        column_state = str(item.get("state", "visible"))
-                        if column_state not in allowed_states:
-                            return self.send_error_json(400, "列状态无效")
-                        try:
-                            position = max(0, min(int(item.get("position", index)), 10000))
-                        except (TypeError, ValueError):
-                            position = index
-                        width = item.get("width_px")
-                        if width in (None, ""):
-                            width_value = None
-                        else:
-                            try:
-                                width_value = max(1, min(int(width), 5000))
-                            except (TypeError, ValueError):
-                                width_value = None
-                        normalized.append((
-                            key, column_state, position, width_value,
-                            1 if item.get("wrap_text") else 0,
-                        ))
-                    at = now_iso()
-                    for key, column_state, position, width_value, wrap_text in normalized:
-                        db.execute("""
-                            INSERT INTO project_column_preferences
-                                (project_id, column_key, state, position, width_px, wrap_text, updated_by, updated_at)
-                            VALUES (?,?,?,?,?,?,?,?)
-                            ON CONFLICT(project_id, column_key) DO UPDATE SET
-                                state=excluded.state, position=excluded.position, width_px=excluded.width_px,
-                                wrap_text=excluded.wrap_text, updated_by=excluded.updated_by, updated_at=excluded.updated_at
-                        """, (pid, key, column_state, position, width_value, wrap_text, s["display_name"] or s["username"], at))
-                    audit(db, s["username"], "update_column_preferences", pid, f"{len(normalized)} columns")
-                    return self.send_json(200, project_column_preferences(db, pid))
+                    try:
+                        preferences = write_column_preferences(
+                            db, pid, data.get("preferences", []), DEFAULT_TABLE_COLUMN_KEYS,
+                            s["display_name"] or s["username"], now_iso())
+                    except ValueError as exc:
+                        return self.send_error_json(400, str(exc))
+                    audit(db, s["username"], "update_column_preferences", pid, f"{len(preferences)} columns")
+                    return self.send_json(200, preferences)
 
                 # Batch Shots Update with Field-Aware Concurrency & Custom Fields
                 match = re.fullmatch(r"/api/projects/([^/]+)/shots", path)
                 if match:
                     db.execute("BEGIN IMMEDIATE")
                     pid = match.group(1)
-                    shots_list = data.get("shots", [])
-                    if not isinstance(shots_list, list) or len(shots_list) > 10000:
-                        return self.send_error_json(400, "镜头数据列表格式不正确")
-
-                    allowed = [
-                        "number", "title", "chapter", "scene", "description", "action", "performance",
-                        "composition", "director_notes", "notes", "duration_frames", "locked",
-                        "shot_size", "lens", "lens_source", "angle", "height", "movement", "equipment", "sensor",
-                        "aperture", "shutter", "voiceover", "dialogue", "subtitle", "music", "sound",
-                        "primary_method", "secondary_methods", "department", "owner", "status",
-                        "transition", "method_data_json", "import_columns_json", "is_deleted", "panel_frame", "camera_fps",
-                        "rich_text_json", "script_character", "script_parenthetical", "script_scene_type", "script_time_of_day"
-                    ]
-                    conflict_markers = {"custom_fields", "panels"}
-                    at = now_iso()
-                    cf_defs = {r["key"]: r["id"] for r in db.execute("SELECT id, key FROM custom_field_definitions WHERE project_id=?", (pid,))}
-
-                    for pos, item in enumerate(shots_list):
-                        sid = str(item.get("id", ""))
-                        if not sid:
-                            continue
-                        cur = db.execute("SELECT * FROM shots WHERE id=? AND project_id=?", (sid, pid)).fetchone()
-                        if not cur:
-                            continue
-
-                        cur_rev = cur["revision"] if "revision" in cur.keys() else 1
-                        previous_status = str(cur["status"] or "")
-                        base_rev = item.get("base_revision")
-                        requested_changes = item.get("changed_fields")
-                        if requested_changes is None:
-                            changed_keys = [k for k in allowed if k in item and item[k] != cur[k]]
-                            if isinstance(item.get("custom_fields"), dict):
-                                changed_keys.append("custom_fields")
-                            if isinstance(item.get("panels"), list):
-                                changed_keys.append("panels")
-                            write_keys = allowed
-                        else:
-                            # A collaboration-aware client may send a stale full shot
-                            # snapshot plus an explicit patch list.  Applying every value
-                            # in that snapshot would overwrite concurrent, non-overlapping
-                            # edits after the conflict check succeeds.
-                            changed_keys = [k for k in requested_changes if k in allowed or k in conflict_markers]
-                            write_keys = [k for k in changed_keys if k in allowed]
-
-                        if requested_changes is not None and not changed_keys and data.get("restore_order") is not True:
-                            continue
-
-                        # Field-Aware Conflict Check
-                        if base_rev is not None and int(base_rev) < cur_rev and changed_keys:
-                            ev_rows = db.execute("SELECT changed_fields_json FROM shot_change_events WHERE shot_id=? AND revision>?", (sid, int(base_rev))).fetchall()
-                            server_changed = set()
-                            for er in ev_rows:
-                                try:
-                                    for f in json.loads(er["changed_fields_json"]):
-                                        server_changed.add(f)
-                                except Exception:
-                                    pass
-                            conflict_keys = server_changed.intersection(set(changed_keys))
-                            if conflict_keys:
-                                db.rollback()
-                                return self.send_json(409, {
-                                    "conflict": True,
-                                    "shot_id": sid,
-                                    "shot_number": cur["number"],
-                                    "conflicting_fields": list(conflict_keys),
-                                    "server_version": shot_dict(cur),
-                                    "your_version": item
-                                })
-
-                        vals = []
-                        for k in write_keys:
-                            val = item.get(k, cur[k])
-                            if k == "duration_frames":
-                                val = max(1, min(int(val), 10_000_000))
-                            elif k in ("locked", "is_deleted"):
-                                val = 1 if val else 0
-                            elif k == "secondary_methods":
-                                val = json.dumps(val if isinstance(val, list) else [])
-                            elif k == "method_data_json":
-                                val = json.dumps(val if isinstance(val, dict) else {})
-                            elif k == "import_columns_json":
-                                val = json.dumps(val if isinstance(val, dict) else {})
-                            elif k == "rich_text_json":
-                                effective = {**dict(cur), **{key: item[key] for key in write_keys if key in item}}
-                                val = json.dumps(normalize_rich_text(val, effective), ensure_ascii=False)
-                            else:
-                                val = str(val or "")[:10000]
-                            vals.append(val)
-
-                        new_rev = cur_rev + 1
-                        # Field saves must not replay the client's old order.
-                        # Only legacy full saves and explicit history restores
-                        # carry editorial ordering; pointer drops use /reorder.
-                        restore_order = requested_changes is None or data.get("restore_order") is True
-                        if not restore_order and "number" in write_keys:
-                            number_index = write_keys.index("number")
-                            write_keys.pop(number_index)
-                            vals.pop(number_index)
-                        assignments = [*(f"{k}=?" for k in write_keys), "revision=?", "updated_at=?"]
-                        if restore_order:
-                            assignments.insert(0, "position=?")
-                            vals.insert(0, pos)
-                        db.execute(
-                            f"UPDATE shots SET {','.join(assignments)} WHERE id=?",
-                            (*vals, new_rev, at, sid)
+                    try:
+                        update_bulk_shots(
+                            db, pid, data, s, now_iso(),
+                            shot_to_dict=shot_dict,
+                            normalize_rich_text=normalize_rich_text,
+                            normalize_drawing_json=normalize_drawing_json,
+                            record_review_decision=record_review_decision,
+                            renumber_project_shots=renumber_project_shots,
+                            touch_project=touch_project,
+                            create_project_snapshot=create_project_snapshot,
+                            audit=audit,
                         )
-                        if "is_deleted" in write_keys:
-                            db.execute("UPDATE shots SET deleted_at=? WHERE id=? AND project_id=?", (at if item.get("is_deleted") else None, sid, pid))
-                        if "status" in changed_keys:
-                            record_review_decision(db, sid, str(item.get("version_id", "")).strip() or None, previous_status, str(item.get("status", "")), s["username"], at)
-
-                        # Log change event
-                        if changed_keys:
-                            db.execute("""
-                                INSERT INTO shot_change_events (id, shot_id, revision, changed_fields_json, user_id, user_name, created_at)
-                                VALUES (?,?,?,?,?,?,?)
-                            """, (str(uuid.uuid4()), sid, new_rev, json.dumps(changed_keys), s["user_id"], s["display_name"] or s["username"], at))
-
-                        # Custom fields update
-                        if "custom_fields" in changed_keys and isinstance(item.get("custom_fields"), dict):
-                            for cf_k, cf_v in item["custom_fields"].items():
-                                cf_id = cf_defs.get(cf_k)
-                                if cf_id:
-                                    val_t = str(cf_v) if not isinstance(cf_v, (dict, list)) else None
-                                    val_j = json.dumps(cf_v) if isinstance(cf_v, (dict, list)) else None
-                                    db.execute("""
-                                        INSERT INTO shot_custom_field_values (id, shot_id, field_definition_id, value_text, value_json, updated_at)
-                                        VALUES (?,?,?,?,?,?)
-                                        ON CONFLICT(shot_id, field_definition_id) DO UPDATE SET value_text=excluded.value_text, value_json=excluded.value_json, updated_at=excluded.updated_at
-                                    """, (str(uuid.uuid4()), sid, cf_id, val_t, val_j, at))
-
-                        # Panels update
-                        if "panels" in changed_keys and isinstance(item.get("panels"), list):
-                            for p_pos, p_data in enumerate(item["panels"]):
-                                pid_val = p_data.get("id")
-                                if pid_val:
-                                    media = p_data.get("media_id")
-                                    if media and not db.execute("SELECT 1 FROM assets WHERE id=? AND project_id=?", (media, pid)).fetchone():
-                                        db.rollback()
-                                        return self.send_error_json(400, "Panel 媒体不存在或不属于当前项目")
-                                    db.execute("""
-                                        UPDATE panels SET label=?, duration_frames=?, drawing_json=?, notes=?, updated_at=?,
-                                        media_id=CASE WHEN ? THEN ? ELSE media_id END
-                                        WHERE id=? AND shot_id=?
-                                    """, (str(p_data.get("label", "A")), int(p_data.get("duration_frames", 75)),
-                                          json.dumps(p_data.get("drawing_json", {})) if not isinstance(p_data.get("drawing_json"), str) else p_data["drawing_json"], str(p_data.get("notes", "")), at,
-                                          "media_id" in p_data, media, pid_val, sid))
-
-                    renumber_project_shots(db, pid, at)
-                    touch_project(db, pid, s, at)
-                    create_project_snapshot(db, pid, s["username"], "自动保存")
-                    audit(db, s["username"], "bulk_update_shots", pid, f"{len(shots_list)} shots")
+                    except BulkShotConflict as conflict:
+                        db.rollback()
+                        return self.send_json(409, conflict.payload)
+                    except BulkShotError as error:
+                        db.rollback()
+                        return self.send_error_json(400, str(error))
                     db.commit()
                     return self.send_json(200, project_bundle(db, pid))
 
@@ -3876,61 +2997,39 @@ class AppHandler(BaseHTTPRequestHandler):
                 if match:
                     db.execute("BEGIN IMMEDIATE")
                     sid = match.group(1)
-                    cur = db.execute("SELECT * FROM shots WHERE id=?", (sid,)).fetchone()
-                    if not cur:
-                        return self.send_error_json(404, "镜头不存在")
-                    pid = cur["project_id"]
                     at = now_iso()
-                    previous_status = str(cur["status"] or "")
-                    requested_version_id = str(data.get("version_id", "")).strip() or None
-                    cur_rev = cur["revision"] if "revision" in cur.keys() else 1
-                    base_rev = data.get("base_revision")
-                    changed_keys = data.get("changed_fields", [k for k in data.keys() if k in cur.keys() and data[k] != cur[k]])
+                    try:
+                        result = update_single_shot(
+                            db, sid, data,
+                            actor_id=s["user_id"],
+                            actor_name=s["display_name"] or s["username"],
+                            at=at,
+                        )
+                    except ShotNotFound:
+                        return self.send_error_json(404, "镜头不存在")
+                    except ShotUpdateError as error:
+                        return self.send_error_json(400, str(error))
+                    except ShotConflict as conflict:
+                        return self.send_json(409, {
+                            "conflict": True,
+                            "shot_id": sid,
+                            "shot_number": conflict.current["number"],
+                            "conflicting_fields": conflict.fields,
+                            "server_version": shot_dict(conflict.current),
+                            "your_version": data,
+                        })
 
-                    # Concurrency check
-                    if base_rev is not None and int(base_rev) < cur_rev and changed_keys:
-                        ev_rows = db.execute("SELECT changed_fields_json FROM shot_change_events WHERE shot_id=? AND revision>?", (sid, int(base_rev))).fetchall()
-                        server_changed = set()
-                        for er in ev_rows:
-                            try:
-                                for f in json.loads(er["changed_fields_json"]):
-                                    server_changed.add(f)
-                            except Exception:
-                                pass
-                        conflict_keys = server_changed.intersection(set(changed_keys))
-                        if conflict_keys:
-                            return self.send_json(409, {
-                                "conflict": True,
-                                "shot_id": sid,
-                                "shot_number": cur["number"],
-                                "conflicting_fields": list(conflict_keys),
-                                "server_version": shot_dict(cur),
-                                "your_version": data
-                            })
-
-                    for k, val in data.items():
-                        if k in changed_keys and k in VERSION_RESTORE_FIELDS:
-                            if k in ("locked", "is_deleted"):
-                                val = 1 if val else 0
-                            elif k == "duration_frames":
-                                val = max(1, int(val))
-                            elif k in ("secondary_methods", "method_data_json") and isinstance(val, (list, dict)):
-                                val = json.dumps(val)
-                            db.execute(f"UPDATE shots SET {k}=?, updated_at=? WHERE id=?", (val, at, sid))
-
-                    new_rev = cur_rev + 1
-                    db.execute("UPDATE shots SET revision=?, updated_at=? WHERE id=?", (new_rev, at, sid))
-                    touch_project(db, pid, s, at)
-                    if "status" in data and str(data.get("status", "")) != previous_status:
-                        record_review_decision(db, sid, requested_version_id, previous_status, str(data.get("status", "")), s["username"], at)
-                    if changed_keys:
-                        db.execute("""
-                            INSERT INTO shot_change_events (id, shot_id, revision, changed_fields_json, user_id, user_name, created_at)
-                            VALUES (?,?,?,?,?,?,?)
-                        """, (str(uuid.uuid4()), sid, new_rev, json.dumps(changed_keys), s["user_id"], s["display_name"] or s["username"], at))
-
+                    if not result.changed_fields:
+                        return self.send_json(200, shot_dict(result.updated))
+                    touch_project(db, result.project_id, s, at)
+                    if "status" in result.changed_fields and str(result.updated["status"] or "") != result.previous_status:
+                        try:
+                            record_review_decision(db, sid, result.requested_version_id, result.previous_status, str(result.updated["status"] or ""), s["username"], at)
+                        except ValueError as error:
+                            db.rollback()
+                            return self.send_error_json(400, str(error))
                     audit(db, s["username"], "update_shot", sid)
-                    return self.send_json(200, shot_dict(db.execute("SELECT * FROM shots WHERE id=?", (sid,)).fetchone()))
+                    return self.send_json(200, shot_dict(result.updated))
 
                 # Saved Views Update
                 # Panel / storyboard-frame updates stay scoped to the owning shot.
@@ -3945,7 +3044,7 @@ class AppHandler(BaseHTTPRequestHandler):
                         "notes": str(data.get("notes", panel["notes"]))[:2000],
                         "position": max(0, int(data.get("position", panel["position"]))),
                         "duration_frames": max(1, int(data.get("duration_frames", panel["duration_frames"]))),
-                        "drawing_json": json.dumps(data.get("drawing_json", json.loads(panel["drawing_json"] or "{}")))
+                        "drawing_json": normalize_drawing_json(data.get("drawing_json", panel["drawing_json"] or "{}"))
                     }
                     db.execute("UPDATE panels SET label=?, notes=?, position=?, duration_frames=?, drawing_json=?, updated_at=? WHERE id=?",
                                (*fields.values(), now_iso(), panel_id))
@@ -3977,14 +3076,16 @@ class AppHandler(BaseHTTPRequestHandler):
                     audit(db, s["username"], "update_production_step", step["shot_id"], step_id)
                     return self.send_json(200, dict(db.execute("SELECT * FROM production_steps WHERE id=?", (step_id,)).fetchone()))
 
-                # Custom column definition update. Existing cell values are
-                # preserved when the label, key, or editor type changes.
+                # Custom column definition update. The stable key maps every
+                # cell value, so only its presentation and editor metadata may change.
                 match = re.fullmatch(r"/api/projects/([^/]+)/custom-fields/([^/]+)", path)
                 if match:
                     pid, cid = match.group(1), match.group(2)
                     field = db.execute("SELECT * FROM custom_field_definitions WHERE id=? AND project_id=? AND is_active=1", (cid, pid)).fetchone()
                     if not field:
                         return self.send_error_json(404, "自定义列不存在")
+                    if "key" in data and str(data.get("key", "")).strip() != field["key"]:
+                        return self.send_error_json(409, "列键创建后不可修改")
                     key = re.sub(r"[^a-zA-Z0-9_]", "_", str(data.get("key", field["key"])).strip().lower())
                     label = str(data.get("label", field["label"])).strip()[:80]
                     field_type = str(data.get("field_type", field["field_type"])).strip()
@@ -3997,6 +3098,8 @@ class AppHandler(BaseHTTPRequestHandler):
                     if not isinstance(options, list) or len(options) > 100:
                         return self.send_error_json(400, "自定义列选项无效")
                     options = [str(item).strip()[:120] for item in options if str(item).strip()]
+                    if field_type != "select":
+                        options = []
                     db.execute("UPDATE custom_field_definitions SET key=?, label=?, field_type=?, options_json=?, updated_at=? WHERE id=? AND project_id=?", (key, label, field_type, json.dumps(options, ensure_ascii=False), now_iso(), cid, pid))
                     create_project_snapshot(db, pid, s["username"], "更新自定义列")
                     audit(db, s["username"], "update_custom_field", cid, f"{label} ({key})")
@@ -4033,6 +3136,24 @@ class AppHandler(BaseHTTPRequestHandler):
                 if not s:
                     return
 
+                match = re.fullmatch(r"/api/projects/([^/]+)/columns/purge", path)
+                if match:
+                    pid = match.group(1)
+                    if not db.execute('SELECT id FROM projects WHERE id=? AND deleted_at IS NULL', (pid,)).fetchone():
+                        return self.send_error_json(404, '项目不存在')
+                    data = self.json_body()
+                    db.execute('BEGIN IMMEDIATE')
+                    at = now_iso()
+                    try:
+                        removed = purge_columns(db, pid, data.get('fields'), DEFAULT_TABLE_COLUMN_KEYS, s['username'], at)
+                    except ValueError as error:
+                        db.rollback()
+                        return self.send_error_json(400, str(error))
+                    touch_project(db, pid, s, at)
+                    audit(db, s['username'], 'purge_columns', pid, json.dumps(removed, ensure_ascii=False))
+                    db.commit()
+                    return self.send_json(200, {'deleted': removed, 'bundle': project_bundle(db, pid)})
+
                 match = re.fullmatch(r"/api/projects/([^/]+)/trash", path)
                 if match:
                     pid = match.group(1)
@@ -4068,6 +3189,72 @@ class AppHandler(BaseHTTPRequestHandler):
                     self.end_headers()
                     return
 
+                # Permanently remove assets that are genuinely unused.
+                #
+                # "Unused" is intentionally stricter than "not shown in a
+                # thumbnail": active Panels, explicit shot links, production
+                # steps, visual boards, version history, project snapshots and
+                # active share snapshots all protect the media from deletion.
+                match = re.fullmatch(r"/api/projects/([^/]+)/assets/unused", path)
+                if match:
+                    pid = match.group(1)
+                    if not db.execute(
+                        "SELECT 1 FROM projects WHERE id=? AND deleted_at IS NULL",
+                        (pid,),
+                    ).fetchone():
+                        return self.send_error_json(404, "项目不存在")
+
+                    db.execute("BEGIN IMMEDIATE")
+                    pruned_links = prune_stale_storyboard_asset_links(db, pid)
+                    plan = project_asset_cleanup_plan(db, pid)
+                    deletable = plan["deletable"]
+                    protected = plan["protected"]
+                    storage_keys: set[str] = set()
+
+                    for item in deletable:
+                        row = db.execute(
+                            "SELECT stored_name FROM assets WHERE id=? AND project_id=?",
+                            (item["id"], pid),
+                        ).fetchone()
+                        if row:
+                            storage_keys.update(asset_storage_keys(db, item["id"], row["stored_name"]))
+
+                    for item in deletable:
+                        db.execute("DELETE FROM assets WHERE id=? AND project_id=?", (item["id"], pid))
+
+                    # A legacy import may let two assets point at one storage
+                    # key. Never unlink a file still named by a surviving row.
+                    storage_keys = {
+                        key for key in storage_keys
+                        if not db.execute("""
+                            SELECT 1 FROM assets WHERE stored_name=?
+                            UNION ALL
+                            SELECT 1 FROM asset_versions WHERE storage_key=?
+                            LIMIT 1
+                        """, (key, key)).fetchone()
+                    }
+
+                    touch_project(db, pid, s)
+                    audit(
+                        db,
+                        s["username"],
+                        "purge_unused_assets",
+                        pid,
+                        f"{len(deletable)} deleted; {len(protected)} protected; {pruned_links} stale links pruned",
+                    )
+                    db.commit()
+
+                    files_removed, bytes_freed = remove_media_storage_keys(storage_keys)
+                    return self.send_json(200, {
+                        "deleted": len(deletable),
+                        "protected": len(protected),
+                        "stale_links_pruned": pruned_links,
+                        "files_removed": files_removed,
+                        "bytes_freed": bytes_freed,
+                        "deleted_assets": deletable,
+                        "protected_assets": protected,
+                    })
+
                 # Project deletion is final: remove its physical files and let
                 # SQLite foreign-key cascades clear all project-owned records.
                 match = re.fullmatch(r"/api/projects/([^/]+)", path)
@@ -4076,14 +3263,17 @@ class AppHandler(BaseHTTPRequestHandler):
                     project = db.execute("SELECT id, name FROM projects WHERE id=? AND deleted_at IS NULL", (pid,)).fetchone()
                     if not project:
                         return self.send_error_json(404, "项目不存在")
-                    removed_files, cleanup_errors = delete_project_files(db, pid)
-                    if cleanup_errors:
-                        db.rollback()
-                        return self.send_error_json(500, "工程文件清理失败，项目未删除：" + "；".join(cleanup_errors[:3]))
+                    cleanup_plan = delete_project_files(db, pid)
                     db.execute("DELETE FROM projects WHERE id=?", (pid,))
                     audit(db, s["username"], "delete_project", pid, project["name"])
                     db.commit()
-                    return self.send_json(200, {"deleted": True, "project_id": pid, "files_removed": removed_files})
+                    removed_files, cleanup_errors = remove_deleted_project_files(db, cleanup_plan)
+                    return self.send_json(200, {
+                        "deleted": True,
+                        "project_id": pid,
+                        "files_removed": removed_files,
+                        "cleanup_errors": cleanup_errors[:3],
+                    })
 
                 # Soft delete / trash shot (Spec Section 128)
                 match = re.fullmatch(r"/api/shots/([^/]+)", path)
@@ -4108,11 +3298,32 @@ class AppHandler(BaseHTTPRequestHandler):
                 match = re.fullmatch(r"/api/panels/([^/]+)", path)
                 if match:
                     panel_id = match.group(1)
-                    panel = db.execute("SELECT shot_id, position FROM panels WHERE id=?", (panel_id,)).fetchone()
+                    panel = db.execute(
+                        "SELECT shot_id, position, media_id FROM panels WHERE id=?",
+                        (panel_id,),
+                    ).fetchone()
                     if not panel:
                         return self.send_error_json(404, "分镜画面不存在")
                     db.execute("DELETE FROM panels WHERE id=?", (panel_id,))
-                    db.execute("UPDATE panels SET position=position-1 WHERE shot_id=? AND position>?", (panel["shot_id"], panel["position"]))
+                    db.execute(
+                        "UPDATE panels SET position=position-1 WHERE shot_id=? AND position>?",
+                        (panel["shot_id"], panel["position"]),
+                    )
+                    # Uploads create a matching Reference link for the Panel.
+                    # Once the last Panel using this media is removed, the live
+                    # shot association must disappear too; the asset itself stays
+                    # in the project asset library until explicit cleanup.
+                    if panel["media_id"] and not db.execute(
+                        "SELECT 1 FROM panels WHERE shot_id=? AND media_id=? LIMIT 1",
+                        (panel["shot_id"], panel["media_id"]),
+                    ).fetchone():
+                        db.execute(
+                            "DELETE FROM shot_asset_links WHERE shot_id=? AND asset_id=? AND role='Reference'",
+                            (panel["shot_id"], panel["media_id"]),
+                        )
+                    shot = db.execute("SELECT project_id FROM shots WHERE id=?", (panel["shot_id"],)).fetchone()
+                    if shot:
+                        touch_project(db, shot["project_id"], s)
                     audit(db, s["username"], "delete_panel", panel["shot_id"], panel_id)
                     db.commit()
                     self.send_response(204)
@@ -4153,14 +3364,48 @@ class AppHandler(BaseHTTPRequestHandler):
                 match = re.fullmatch(r"/api/projects/([^/]+)/custom-fields/([^/]+)", path)
                 if match:
                     pid, cid = match.group(1), match.group(2)
+                    field = db.execute("SELECT key, label FROM custom_field_definitions WHERE id=? AND project_id=? AND is_active=1", (cid, pid)).fetchone()
+                    if not field:
+                        return self.send_error_json(404, "自定义列不存在或已删除")
+                    # Remove live cell values as well as the definition. Old
+                    # project snapshots remain immutable, but active views can
+                    # no longer resurrect a deleted custom column.
+                    db.execute("DELETE FROM shot_custom_field_values WHERE field_definition_id=?", (cid,))
                     db.execute("UPDATE custom_field_definitions SET is_active=0, updated_at=? WHERE id=? AND project_id=?", (now_iso(), cid, pid))
                     create_project_snapshot(db, pid, s["username"], "删除自定义列")
-                    audit(db, s["username"], "delete_custom_field", cid)
+                    audit(db, s["username"], "delete_custom_field", cid, str(field["label"]))
                     db.commit()
                     self.send_response(204)
                     self.security_headers()
                     self.end_headers()
                     return
+
+                # Purge one imported/raw column from the live project. Raw
+                # columns are JSON keys rather than schema fields, so delete
+                # the exact key from every shot and remove its shared column
+                # preference. Historical snapshots stay immutable.
+                match = re.fullmatch(r"/api/projects/([^/]+)/import-columns/(.+)", path)
+                if match:
+                    pid, column_key = match.group(1), match.group(2)
+                    if not db.execute("SELECT 1 FROM projects WHERE id=? AND deleted_at IS NULL", (pid,)).fetchone():
+                        return self.send_error_json(404, "项目不存在")
+                    changed = 0
+                    for shot in db.execute("SELECT id, import_columns_json FROM shots WHERE project_id=?", (pid,)):
+                        try:
+                            imported = json.loads(shot["import_columns_json"] or "{}")
+                        except Exception:
+                            imported = {}
+                        if not isinstance(imported, dict) or column_key not in imported:
+                            continue
+                        del imported[column_key]
+                        db.execute("UPDATE shots SET import_columns_json=?, updated_at=? WHERE id=?", (json.dumps(imported, ensure_ascii=False), now_iso(), shot["id"]))
+                        changed += 1
+                    db.execute("DELETE FROM project_column_preferences WHERE project_id=? AND column_key=?", (pid, f"import:{column_key}"))
+                    touch_project(db, pid, s)
+                    create_project_snapshot(db, pid, s["username"], "永久删除原始列")
+                    audit(db, s["username"], "purge_import_column", pid, f"{column_key}; {changed} shots")
+                    db.commit()
+                    return self.send_json(200, {"ok": True, "column_key": column_key, "shots_changed": changed})
 
                 # Delete Saved View
                 match = re.fullmatch(r"/api/projects/([^/]+)/saved-views/([^/]+)", path)
@@ -4272,6 +3517,15 @@ class AppHandler(BaseHTTPRequestHandler):
         if not re.search(r"\.(?:jpe?g|png|webp|gif|mp4|webm|mov)$", filename, re.IGNORECASE):
             return self.send_error_json(400, "媒体文件扩展名不受支持")
 
+        try:
+            declared_size = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            return self.send_error_json(400, "媒体文件大小无效")
+        if declared_size <= 0:
+            return self.send_error_json(400, "文件内容为空")
+        if declared_size > MEDIA_UPLOAD_MAX_BYTES:
+            return self.send_error_json(413, "媒体文件超过 120MB，请先压缩后再上传")
+
         payload = self.body()
         if not payload:
             return self.send_error_json(400, "文件内容为空")
@@ -4327,10 +3581,25 @@ class AppHandler(BaseHTTPRequestHandler):
                 duration = db.execute("SELECT duration_frames FROM shots WHERE id=?", (shot_id,)).fetchone()[0]
                 insert_record(db, "panels", {"id": str(uuid.uuid4()), "shot_id": shot_id, "position": 0, "label": "A", "duration_frames": duration, "media_id": aid, "created_at": at, "updated_at": at})
 
+            # Replacement changes the live Panel association to the new asset.
+            # Keep the old asset itself for versions/shares, but do not leave a
+            # stale live Reference link that makes it reappear after deletion.
+            if existing and not db.execute(
+                "SELECT 1 FROM panels WHERE shot_id=? AND media_id=? LIMIT 1",
+                (shot_id, existing["id"]),
+            ).fetchone():
+                db.execute(
+                    "DELETE FROM shot_asset_links WHERE shot_id=? AND asset_id=? AND role='Reference'",
+                    (shot_id, existing["id"]),
+                )
+
         audit(db, s["username"], "upload_media", pid, f"{filename} ({len(payload)} bytes)")
         touch_project(db, pid, s, at)
         db.commit()
-        panel = db.execute("SELECT * FROM panels WHERE shot_id=? ORDER BY position LIMIT 1", (shot_id,)).fetchone() if shot_id else None
+        panel = db.execute("SELECT id, shot_id, position, label, duration_frames, media_id, created_at, updated_at FROM panels WHERE shot_id=? ORDER BY position LIMIT 1", (shot_id,)).fetchone() if shot_id else None
+        # Never return drawing_json/notes from the upload acknowledgement. A
+        # legacy panel may contain tens of megabytes of drawing data and the
+        # upload response must remain a small control-plane response.
         return self.send_json(201, {"id": aid, "filename": filename, "size": len(payload), "mime": mime, "version": version, "panel": dict(panel) if panel else None})
 
     def store_import_image(self, db: sqlite3.Connection, s: sqlite3.Row, pid: str, shot_id: str, image: dict, at: str) -> bool:
@@ -4434,7 +3703,7 @@ class AppHandler(BaseHTTPRequestHandler):
         suffix = Path(filename).suffix.lower()
         if suffix not in {".xlsx", ".csv", ".tsv", ".pdf"}:
             return self.send_error_json(415, "仅支持 XLSX、CSV、TSV 或 PDF 文件")
-        cleanup_import_staging()
+        cleanup_import_staging(IMPORT_ROOT, IMPORT_TTL_SECONDS)
         preview_id = secrets.token_urlsafe(24)
         stored_name = f"{preview_id}{suffix}"
         staged_path = IMPORT_ROOT / stored_name
@@ -4442,10 +3711,30 @@ class AppHandler(BaseHTTPRequestHandler):
         try:
             upload_size = self.body_to_file(staged_path)
             embedded_images = []
+            source_diagnostics = []
             if suffix == ".xlsx":
                 rows, embedded_images = parse_xlsx_package(staged_path)
             elif suffix == ".pdf":
-                rows, embedded_images = parse_pdf_storyboard(staged_path)
+                rows, embedded_images, pdf_metadata = parse_pdf_storyboard(staged_path, with_metadata=True)
+                # The PDF parser creates page placeholders for pages without a
+                # text layer. Keep image-only import available, but do not
+                # present those generated columns as extracted field mappings.
+                if pdf_metadata["page_count"] and pdf_metadata["text_page_count"] == 0:
+                    full_page_images = pdf_metadata["rendered_page_count"] == pdf_metadata["page_count"]
+                    image_note = (
+                        "可见页面会作为整页图片保留，但图片中的文字不可编辑，也不能作为无损工程回导。"
+                        if full_page_images else
+                        "仅能导入解析器取得的图片，其他可见绘制内容可能缺失；请先用 OCR 或可保留文字的方式重新生成 PDF。"
+                    )
+                    source_diagnostics.append({
+                        "code": "pdf_text_not_extracted",
+                        "severity": "warning",
+                        "page_count": pdf_metadata["page_count"],
+                        "text_page_count": 0,
+                        "rendered_page_count": pdf_metadata["rendered_page_count"],
+                        "image_count": len(embedded_images),
+                        "message": "当前 PDF 解析器未取得可用文字；页面上可能仍有清晰可见的文字，但需要 OCR 才能识别分镜字段。继续导入会按页创建占位镜头，镜号和标题由页码生成。" + image_note,
+                    })
             else:
                 rows = parse_table(staged_path.read_bytes(), filename)
             if suffix in {".xlsx", ".pdf"}:
@@ -4471,7 +3760,11 @@ class AppHandler(BaseHTTPRequestHandler):
                 header_index, header_score = index, score
         headers = [str(c).strip() for c in rows[header_index]]
         mapping = map_headers(headers)
+        if any(item["code"] == "pdf_text_not_extracted" for item in source_diagnostics):
+            mapping = {field: info for field, info in mapping.items() if field in {"number", "title"}}
         custom_columns = build_import_custom_columns(headers, mapping)
+        if source_diagnostics:
+            custom_columns = []
         data_rows = rows[header_index + 1:]
         if embedded_images:
             image_header_terms = ("分镜图", "分镜框", "图片", "图像", "缩略图", "image", "photo", "thumbnail", "storyboardframe")
@@ -4550,6 +3843,7 @@ class AppHandler(BaseHTTPRequestHandler):
             "rows": data_rows[:10000],
             "sample_preview": preview_shots,
             "diagnostics": diagnostics[:200],
+            "source_diagnostics": source_diagnostics,
             "embedded_images": import_images[:10000],
             "embedded_image_count": len(import_images),
             "embedded_image_bytes": sum(int(item.get("size", 0)) for item in import_images),
@@ -4616,6 +3910,12 @@ class AppHandler(BaseHTTPRequestHandler):
                 archive.close()
             return self.send_error_json(404, "项目不存在")
         fps = float(project["fps"])
+        tombstones = purged_fields(db, pid)
+        mapped_fields = set(mapping) | ({"methods"} if set(mapping) & {"primary_method", "secondary_methods"} else set())
+        if mapped_fields & tombstones:
+            if archive:
+                archive.close()
+            return self.send_error_json(409, "导入映射包含已永久删除的列，请重新选择映射")
 
         # Any source column not consumed by the core mapping becomes a real
         # project custom field.  The browser may remove entries from this list
@@ -4656,9 +3956,14 @@ class AppHandler(BaseHTTPRequestHandler):
             if not re.match(r"^[a-zA-Z][a-zA-Z0-9_]*$", key):
                 key = f"excel_{key}"
             base_key = key[:48]
+            if f"custom:{base_key}" in tombstones:
+                if archive:
+                    archive.close()
+                db.rollback()
+                return self.send_error_json(409, "导入列键已永久删除，请重新选择列键")
             key = base_key
             suffix = 2
-            while key in used_keys:
+            while key in used_keys or f"custom:{key}" in tombstones:
                 existing = db.execute(
                     "SELECT id FROM custom_field_definitions WHERE project_id=? AND key=? AND is_active=1",
                     (pid, key),
@@ -4734,14 +4039,28 @@ class AppHandler(BaseHTTPRequestHandler):
             for f, info in mapping.items():
                 col = info.get("col", -1)
                 values[f] = str(r[col]).strip() if 0 <= col < len(r) else ""
-            source_headers = headers
             imported_columns = {}
-            if isinstance(source_headers, list):
+            # Keep only columns explicitly selected as a core mapping or as a
+            # custom field. Unselected Excel columns are intentionally not
+            # copied into the raw-import section/sidebar.
+            retained_source_cols = {
+                int(info.get("col")) for info in mapping.values()
+                if isinstance(info, dict) and str(info.get("col", "")).lstrip("-").isdigit() and int(info.get("col")) >= 0
+            }
+            retained_source_cols.update(int(spec["source_col"]) for spec in custom_specs)
+            if isinstance(headers, list):
                 seen_headers = {}
-                for index, header in enumerate(source_headers):
-                    label = str(header).strip() or f"未命名列{index + 1}"
+                for index in sorted(retained_source_cols):
+                    if index >= len(headers):
+                        continue
+                    label = str(headers[index]).strip() or f"未命名列{index + 1}"
                     seen_headers[label] = seen_headers.get(label, 0) + 1
                     key = label if seen_headers[label] == 1 else f"{label} ({seen_headers[label]})"
+                    if f"import:{key}" in tombstones:
+                        if archive:
+                            archive.close()
+                        db.rollback()
+                        return self.send_error_json(409, "导入包含已永久删除的原始列，请取消该列映射")
                     imported_columns[key] = str(r[index]).strip() if index < len(r) else ""
 
             num = values.get("number") or f"{pos+1:03d}"
@@ -4881,7 +4200,7 @@ class AppHandler(BaseHTTPRequestHandler):
             archive.close()
         response_bundle = project_bundle(db, pid)
         if stage_path:
-            remove_staged_import(stage_path)
+            remove_staged_import(stage_path, IMPORT_ROOT)
         if stage_manifest_path and stage_manifest_path.exists():
             stage_manifest_path.unlink()
         return self.send_json(200, {"imported": imported, "updated": updated, "skipped": skipped,
@@ -4918,6 +4237,20 @@ class AppHandler(BaseHTTPRequestHandler):
             if len(body) > MAX_BODY:
                 raise ValueError("完整备份超出可导入大小限制")
             self.send_file(body, f"{safe_name}_backup.json", "application/json; charset=utf-8")
+        elif export_type == "project-pdf":
+            with connect() as backup_db:
+                archive = export_project_backup(backup_db, p["id"])
+            backup_bytes = json_dumps(archive).encode("utf-8")
+            if len(backup_bytes) > MAX_BODY - 1024 * 1024:
+                return self.send_error_json(413, "完整工程备份过大，无法封装为 PDF")
+            try:
+                summary = render_project_summary_pdf(archive, backup_bytes)
+                body = embed_project_backup(summary, backup_bytes, max_pdf_bytes=MAX_BODY)
+            except ProjectPdfError as exc:
+                return self.send_error_json(400, str(exc))
+            if len(body) > MAX_BODY:
+                return self.send_error_json(413, "工程 PDF 超过可导入大小限制")
+            self.send_file(body, f"{safe_name}-工程.pdf", "application/pdf")
         else:
             self.send_error_json(400, f"不支持的导出格式: {export_type}")
 
