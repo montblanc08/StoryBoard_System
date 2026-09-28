@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/authStore';
-import { Button, Field, Input } from '@frameforge/ui';
+import { Button, Field, Input, Select } from '@frameforge/ui';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -137,22 +137,25 @@ export default function LoginPage() {
                   placeholder="例如：王摄影 / 李剪辑"
                 />
               </Field>
-              <div>
-                <label className="block text-slate-400 mb-1">管线职责角色</label>
-                <select
+              <div className="ffui-field">
+                <span>管线职责角色</span>
+                <Select
+                  label="管线职责角色"
+                  name="role_name"
                   value={roleName}
-                  onChange={e => setRoleName(e.target.value)}
+                  onChange={setRoleName}
+                  options={[
+                    { value: 'producer', label: 'Producer 制片管理' },
+                    { value: 'director', label: 'Director 导演/分镜' },
+                    { value: 'camera', label: 'Camera 摄影/实拍' },
+                    { value: 'art', label: 'Art 美术/道具' },
+                    { value: 'motion', label: 'Motion 包装/动态' },
+                    { value: 'vfx', label: 'VFX 视效/合成' },
+                    { value: 'editor', label: 'Editor 剪辑/DIT' },
+                    { value: 'reviewer', label: 'Reviewer 审片审批' }
+                  ]}
                   className="w-full rounded border border-studio-700 bg-studio-950 px-3 py-2 text-white outline-none focus:border-amber"
-                >
-                  <option value="producer">Producer 制片管理</option>
-                  <option value="director">Director 导演/分镜</option>
-                  <option value="camera">Camera 摄影/实拍</option>
-                  <option value="art">Art 美术/道具</option>
-                  <option value="motion">Motion 包装/动态</option>
-                  <option value="vfx">VFX 视效/合成</option>
-                  <option value="editor">Editor 剪辑/DIT</option>
-                  <option value="reviewer">Reviewer 审片审批</option>
-                </select>
+                />
               </div>
             </>
           )}

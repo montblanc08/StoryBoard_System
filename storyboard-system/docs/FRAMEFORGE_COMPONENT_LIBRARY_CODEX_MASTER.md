@@ -467,7 +467,7 @@ Selected 不使用 Focus Ring，推荐 subtle surface + slightly stronger border
 
 **IconButton**: 所有纯图标按钮必须有 aria-label + tooltip。Legacy `storyboard-system/packages/ui` 有成熟实现；根包已移入首批实现，仍需两端真实消费者的 tooltip/focus 验收 — INTEGRATED_NOT_CUT_OVER。
 
-**Input / Textarea / Select**: 统一 radius, height, border, focus, placeholder, disabled, error。Legacy `storyboard-system/packages/ui` 已有这些控件；根包的 Input/TextArea/Field 已进入首批，Select 尚未迁入。仍需逐个验证 API/视觉/焦点。优先复用已有 Radix Select，禁止并存多套。
+**Input / Textarea / Select**: 统一 radius, height, border, focus, placeholder, disabled, error。Legacy `storyboard-system/packages/ui` 已有这些控件；根包的 Input/TextArea/Field/Select 已进入首批，登录页已消费 Input/Field/Select。Select 的 320×568 翻转、320/375/1440 点击命中和键盘选项已在本轮浏览器验证；跨主题与旧工作区切换仍需验证。禁止并存第三套。
 
 **Textarea**: `Enter = 换行`。具体保存快捷键沿用当前业务。
 

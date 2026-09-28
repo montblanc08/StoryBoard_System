@@ -13,6 +13,12 @@ CONVERGENCE & CUTOVER — 2026-09-29，`7b3a24c` 基线。本文件下方旧里�
 - `apps/api` SRT 路由对齐 Legacy 字节/时间码合同；分享快照映射现有 ORM `voice_over`/`camera_movement`；注册响应预加载 role，避免异步序列化错误。这些是局部对等修复，不代表 API owner cutover。
 - 验证：根 UI build、`apps/web` production build、Legacy `npm run check` 均通过；隔离 SQLite 的 export/share/Shot/auth 四组后端测试 7/7；登录页 320/375/1440 实际浏览器宽度无横向溢出，空凭据、标签与焦点可见。测试数据没有写入生产。
 
+### 2026-09-29 第二批收敛切片（`0826adf` 之后）
+
+- 根 `packages/ui` 迁入 Radix Select，并让 V-Web 注册表单的角色选择真实消费；旧工作区仍使用 Legacy Select，故状态仅 `INTEGRATED_NOT_CUT_OVER`。逐控件剩余门槛见 [UI_PRIMITIVE_PARITY.md](../UI_PRIMITIVE_PARITY.md)。
+- [API_ROUTE_PARITY_MATRIX.md](../API_ROUTE_PARITY_MATRIX.md) 已逐路由核查 Legacy、目标 API 与未作为服务入口的 Legacy FastAPI 树，指出缺失和语义差异；这是一份代码审计，不是 API cutover。
+- 根 UI 与 V-Web production build 均通过。浏览器实测 Select 在 320/375/1440 的菜单点击命中与选值；320×568 时菜单向上避让，Escape 关闭并返回焦点，键盘选择有效；三宽度无横向溢出。仍待迁 Checkbox、Popover/Menu/Modal、Icons/Motion 与旧工作区双消费者接入。
+
 ## Historical Verified Findings（旧切片，不代表当前 cutover）
 - [VERIFIED] Working tree baseline SHA: `4986ac0d4af3a4829ba07cd24f95b1c5b1df6aa7`.
 - [VERIFIED] Pre-change patch saved to `docs/audits/prechange-working-tree.patch`.

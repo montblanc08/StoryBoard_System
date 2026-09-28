@@ -1,6 +1,6 @@
 # FRAMEFORGE canonical owner matrix
 
-核对基线：2026-09-29，`master`/`origin/master` = `7b3a24c`。本表记录仓库中的入口、调用链和迁移门槛；未在本轮探测生产服务。仓库配置仍以 `storyboard-system/server.py` 为 Legacy 服务入口，`apps/api` 和 `apps/web` 是目标 owner。文件存在或局部测试通过不代表运行权已切换。
+首次核对基线：2026-09-29，`7b3a24c`；首批收敛提交 `0826adf` 已推送到 `StoryBoard_System/master`。本表记录仓库中的入口、调用链和迁移门槛；未在本轮探测生产服务。仓库配置仍以 `storyboard-system/server.py` 为 Legacy 服务入口，`apps/api` 和 `apps/web` 是目标 owner。文件存在或局部测试通过不代表运行权已切换。
 
 状态：`VERIFIED` 表示当前入口已核实；`IMPLEMENTED_NOT_INTEGRATED` 表示目标代码存在但未接通真实消费链；`INTEGRATED_NOT_CUT_OVER` 表示目标入口可消费但 Legacy 仍权威；`CUTOVER_READY` 要求对等、回归和回滚演练；`CUT_OVER` 要求真实入口切换；`LEGACY_RETIRED` 要求旧 owner 无消费者；`BLOCKED` 说明当前门槛未满足。
 
@@ -27,7 +27,7 @@
 | Timeline | L-Web | 未挂载的 Legacy TimelineView；V-Web 覆盖待核 | V-Web feature | Timeline view | V-API Shot/timecode | 时长映射、拖动、撤销、保存 | V-Web 可操作时间线并走标准命令 | Legacy 时间线无消费 | BLOCKED |
 | Inspector | L-Web `static/app.js` | V-Web ShotInspector；未挂载的 Legacy WorkspaceStage | V-Web feature | Inspector target 独立 store | V-API Shot | 单击选择/双击详情、删除、切视图 | V-Web target 与 selection 分离且持久写对等 | 旧 Inspector owner 无消费 | IMPLEMENTED_NOT_INTEGRATED |
 | Selection | L-Web `state.selection` | V-Web `useWorkspaceStore` | V-Web workspace store | Selection store | 不持久化；Shot ID 由 V-API | 表/卡/时间线/搜索同步 | 所有视图使用一个选择 owner | 旧 selection 全局状态无消费 | IMPLEMENTED_NOT_INTEGRATED |
-| UI components | Legacy `storyboard-system/packages/ui` + 手写控件 | UI-root 已有首批 Button/IconButton/Input/TextArea/Field，V-Web 登录页消费；同名包仍并存 | UI-root | Primitive/overlay controller | 无 | API、视觉、focus、浏览器命中 | 根包 primitive parity，V-Web 和 Legacy 双消费者通过 | Legacy 同名包无 imports 后删除 | INTEGRATED_NOT_CUT_OVER（首批） |
+| UI components | Legacy `storyboard-system/packages/ui` + 手写控件 | UI-root 已有 Button/IconButton/Input/TextArea/Field/Select，V-Web 登录页消费其中四种；同名包仍并存 | UI-root | Primitive/overlay controller | 无 | API、视觉、focus、浏览器命中 | 根包 primitive parity，V-Web 和 Legacy 双消费者通过 | Legacy 同名包无 imports 后删除 | INTEGRATED_NOT_CUT_OVER（已消费控件） |
 | Motion | Legacy `packages/ui/src/motion.tsx` + CSS | UI-root tokens 待迁 | UI-root | Motion token/state | 无 | 状态动效、布局稳定、可访问性 | 两端同一 token、图标反馈无双重 owner | Legacy motion 实现无 imports | IMPLEMENTED_NOT_INTEGRATED |
 | i18n | Legacy 文案；V-Web 局部字典消费 | UI-root `I18N_DICTIONARY` | `packages/contracts`/V-Web i18n 边界待定 | Locale store | 用户偏好持久化待定 | 切换、回退、动态文案、SSR | 词典与语言状态有唯一 owner | Legacy 硬编码文案无必要消费 | IMPLEMENTED_NOT_INTEGRATED |
 
@@ -37,4 +37,4 @@
 2. V-API 先建立 Legacy→VNext 路由对等清单，以合成数据从一个导出或 Shot 命令切入；不得把 Legacy Raw DB-API 仓储与 SQLAlchemy 长期并列为两个事务权威。
 3. AI/Presence 维持默认关闭或开发环境状态。OpenAI-compatible provider、Redis、多 worker、PostgreSQL 数据副本迁移均需独立集成证据。
 
-相关现状：[ACTIVE_WORKSTREAMS.md](ACTIVE_WORKSTREAMS.md)、[ARCHITECTURE.md](ARCHITECTURE.md)、[ARCHITECTURE_MIGRATION.md](ARCHITECTURE_MIGRATION.md)。本轮没有生产部署或生产数据验证。
+相关现状：[ACTIVE_WORKSTREAMS.md](ACTIVE_WORKSTREAMS.md)、[UI_PRIMITIVE_PARITY.md](UI_PRIMITIVE_PARITY.md)、[API_ROUTE_PARITY_MATRIX.md](API_ROUTE_PARITY_MATRIX.md)、[ARCHITECTURE.md](ARCHITECTURE.md)、[ARCHITECTURE_MIGRATION.md](ARCHITECTURE_MIGRATION.md)。本轮没有生产部署或生产数据验证。
