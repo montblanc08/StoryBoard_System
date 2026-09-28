@@ -1,6 +1,7 @@
 import { Button, Field, Icons, Input, IconButton, Menu, Popover, Segmented, Select, ToggleButton } from '@frameforge/ui';
 import type { WorkspaceBridge } from './contracts';
 import { useWorkspace } from './store';
+import { PresenceBar } from './components/PresenceBar';
 
 function Columns({bridge}: {bridge:WorkspaceBridge}) {
   return <Button data-frameforge-column-manager-trigger="canonical" aria-controls="columnSettingsPopover" aria-expanded="false" onClick={event=>bridge.action('columns',event.currentTarget)}><Icons.Columns3 size={16}/><span>列管理</span></Button>;
@@ -15,6 +16,7 @@ export function WorkspaceToolbar({bridge}: {bridge:WorkspaceBridge}) {
     ]}/>
     <div className="ff73-local-search"><Icons.Search size={14}/><Input type="search" aria-label="搜索当前分镜" placeholder="搜索当前分镜…" value={state.search} onChange={e=>bridge.search(e.target.value)}/></div>
     <span className="ff73-shot-count" aria-live="polite">{state.filtered===state.total?`${state.total} 镜头`:`${state.filtered} / ${state.total}`}</span>
+    <PresenceBar/>
     <div className="ff73-toolbar-actions">
       <ToggleButton pressed={state.inspectorOpen} className="inspector-toggle" title={state.inspectorOpen?'收起镜头详情':'打开镜头详情'} onClick={()=>bridge.action('inspector')}><Icons.PanelRight size={15}/><span>详情</span></ToggleButton>
       <Columns bridge={bridge}/>

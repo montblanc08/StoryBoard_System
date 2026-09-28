@@ -73,6 +73,7 @@ class ShotCreate(BaseModel):
     lens_mm: Optional[float] = 35.0
     camera: Optional[str] = None
     movement: Optional[str] = "固定"
+    camera_movement: Optional[dict] = None
     voice_over: str = ""
     dialogue: str = ""
     primary_method: str = "live"

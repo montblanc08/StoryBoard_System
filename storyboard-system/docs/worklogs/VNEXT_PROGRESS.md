@@ -61,3 +61,47 @@ ALL PHASES COMPLETE (P0, P1, P2, P3) - VERIFIED & READY FOR RELEASE
 - `docs/reports/VNEXT_DEPLOYMENT.md`
 - `docs/reports/VNEXT_FINAL_ACCEPTANCE.md`
 - `docs/worklogs/VNEXT_PROGRESS.md`
+
+
+---
+
+# VNEXT ARCHITECTURE MIGRATION - 5 PILLARS EXECUTION WORKLOG (2026-09-29)
+
+## Current Status: P0/P1 IMPLEMENTATION & VERIFICATION COMPLETE (CUTOVER_READY)
+
+### 1. PostgreSQL & Repository Layer
+- **Contract Protocols**: Created `storyboard-system/repositories/contracts.py` defining `ProjectRepository`, `ShotRepository`, `FieldRepository`, and `UnitOfWork` protocols.
+- **SQLite Dual-Compatibility**: Implemented `storyboard-system/repositories/sqlite_repo.py` preserving SQLite V1 transactional behavior.
+- **PostgreSQL Production Target**: Implemented `storyboard-system/repositories/postgres_schema.sql` (matching baseline DDL with UUID PKs, JSONB, Timestamptz, Foreign Keys, cascade constraints) and `postgres_repo.py`.
+- **Data Migration Runner**: Created `storyboard-system/repositories/migration_runner.py` for automated schema creation and data pumping between engines.
+- **Verification**: `tests/test_repository_contracts.py` (4/4 tests pass).
+
+### 2. FastAPI Backend Real Ownership
+- **Configuration & Security**: Fail-closed production configuration in `apps/api/app/core/config.py` (fail on default keys when `ENVIRONMENT=production`, configurable `CORS_ORIGINS`).
+- **Database Startup & Schema Governance**: Restructured lifespan in `apps/api/main.py`. Development/test mode auto-seeds; production mode delegates strictly to Alembic migrations without silent DDL mutation on boot.
+- **Alembic Migration System**: Initialized Alembic in `apps/api/` with `env.py` and generated baseline migration `fdc1353e5b23_create_initial_tables.py` tracking all 18 domain tables.
+- **Route Parity**: Implemented and mounted routers for `/auth`, `/productions`, `/shots`, `/imports`, `/exports`, `/shares`, `/ai`, and `/presence`.
+- **Optimistic Concurrency & Reordering**: Atomic fractional reordering and revision conflict checks (`HTTP 409`) on shot mutations.
+
+### 3. AI Provider + Job + Proposal Engine (Human-In-The-Loop)
+- **Zero-Dependency Default**: Implemented `apps/api/app/services/ai_provider.py` with `BaseAIProvider`, `AIProviderRegistry`, and `MockAIProvider` (0 external network dependencies by default).
+- **Proposal Lifecycle**: Created `apps/api/app/services/ai_proposal.py` and `apps/api/app/api/v1/ai.py`. Proposals are generated as `pending_review` with before/after diffs without modifying entity records.
+- **Human Review**: Explicit accept/reject actions (`POST /api/v1/ai/proposals/{id}/review`). Acceptance atomically updates shot records and increments revision.
+- **Verification**: Automated test pipeline in `tests/backend/test_ai_and_presence.py::test_ai_status_and_proposal_pipeline` passed.
+
+### 4. Real-time Presence & Cell Lock Collaboration
+- **Soft Cell Locking**: Implemented `SoftLockManager` in `apps/api/app/services/presence.py` preventing simultaneous overwrites during collaborative multi-user editing.
+- **TTL & Session Reaping**: Configurable heartbeat (30s TTL) with automatic lock release on disconnect or expiry.
+- **WebSocket Multicast**: Duplex WebSocket support (`/ws/presence/{production_id}`) and HTTP endpoints (`/api/v1/presence/rooms/{id}/heartbeat`, `/lock`, `/unlock`).
+- **Verification**: Automated test pipeline in `tests/backend/test_ai_and_presence.py::test_presence_and_cell_lock_pipeline` passed.
+
+### 5. React Workspace Decoupling & UI Components
+- **MIG-002 Compliance**: In `storyboard-system/src/workspace/store.ts`, strictly decoupled `useSelectionStore` from `useInspectorStore`.
+- **Collaborative Components**: Added `PresenceBar.tsx` for real-time collaborator avatars and state indicators.
+- **Inspector & AI Drawers**: Added `ShotInspector.tsx` (docked/overlay tabs, Esc dismiss) and `AIProposalDrawer.tsx` (diff inspector with accept/reject buttons).
+- **Build Verification**: `npm run check` in `storyboard-system` passed (TypeScript 7.0.2 + Tailwind v4 + esbuild passed with 0 errors).
+
+### Test Suite Execution Summary
+- `storyboard-system/tests`: 116 passed / 3 skipped in 15.3s.
+- `tests/backend` (Pytest): 14 passed / 14 total in 3.3s.
+- `tools/architecture_boundary_gate.py`: PASS.

@@ -12,6 +12,8 @@ from app.api.v1.auth import router as auth_router
 from app.api.v1.exports import router as exports_router
 from app.api.v1.health import router as health_router
 from app.api.v1.imports import router as imports_router
+from app.api.v1.ai import router as ai_router
+from app.api.v1.presence import router as presence_router
 from app.api.v1.productions import router as productions_router
 from app.api.v1.shares import router as shares_router
 from app.api.v1.shots import router as shots_router
@@ -25,15 +27,18 @@ logger = logging.getLogger("frameforge")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Initialize tables and seed development database
-    logger.info("Initializing FrameForge OS database...")
-    async with async_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    # Startup: Initialize tables in development/test; in production Alembic owns schema
+    if settings.ENVIRONMENT != "production":
+        logger.info("Development/Test mode: Initializing database schema...")
+        async with async_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
 
-    async with AsyncSessionLocal() as session:
-        await seed_database(session)
-        await session.commit()
-    logger.info("Database initialized and development seed data confirmed.")
+        async with AsyncSessionLocal() as session:
+            await seed_database(session)
+            await session.commit()
+        logger.info("Database initialized and development seed data confirmed.")
+    else:
+        logger.info("Production mode: Schema ownership belongs to Alembic migrations; skipping Base.metadata.create_all.")
 
     yield
     # Shutdown
@@ -50,10 +55,10 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS Configuration
+# CORS Configuration - explicitly constrained origins per environment
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -113,6 +118,9 @@ app.include_router(imports_router, prefix=settings.API_V1_PREFIX)
 app.include_router(exports_router, prefix=settings.API_V1_PREFIX)
 app.include_router(shares_router, prefix=settings.API_V1_PREFIX)
 app.include_router(shares_router, prefix="")  # Public /share/{token} endpoint
+app.include_router(ai_router, prefix=settings.API_V1_PREFIX)
+app.include_router(presence_router, prefix=settings.API_V1_PREFIX)
+app.include_router(presence_router, prefix="")  # Support /ws/presence/{production_id} directly
 
 
 if __name__ == "__main__":

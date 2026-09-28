@@ -91,7 +91,7 @@ async def create_shot(
         camera_height=req.camera_height,
         lens_mm=req.lens_mm,
         camera=req.camera,
-        movement=req.movement,
+        camera_movement=req.camera_movement or {"type": req.movement or "固定"},
         voice_over=req.voice_over,
         dialogue=req.dialogue,
         primary_method=req.primary_method,

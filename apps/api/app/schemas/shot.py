@@ -1,0 +1,18 @@
+"""Shot schemas exported for v1 API routes."""
+from app.schemas.production import (
+    BulkUpdateShotsRequest,
+    ShotCreate,
+    ShotOut,
+    ShotPatch,
+    ShotReorderItem,
+    ShotReorderRequest,
+)
+
+__all__ = [
+    "ShotCreate",
+    "ShotPatch",
+    "ShotReorderItem",
+    "ShotReorderRequest",
+    "BulkUpdateShotsRequest",
+    "ShotOut",
+]
