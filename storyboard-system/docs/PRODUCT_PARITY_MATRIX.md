@@ -31,7 +31,7 @@ Status vocabulary:
 | Inline Double-click Editing | Present | Present | INTEGRATED_NOT_CUT_OVER | Description and voice-over cells use real PATCH; broader field coverage and full keyboard/conflict parity remain. |
 | Row Single Click | Select | Select | INTEGRATED_NOT_CUT_OVER | Selection no longer implicitly opens Inspector. |
 | Row Double Click | Open Inspector | Open Inspector | INTEGRATED_NOT_CUT_OVER | Real consumer exists; broader workspace parity remains. |
-| Column Manager | Present | Present | BLOCKED | Resize/reorder/visibility lifecycle not yet migrated. |
+| Column Manager | Present | Present | INTEGRATED_NOT_CUT_OVER | Canonical V-Web now has real show/hide controls persisted per production/browser. Resize/reorder, archived/purged field lifecycle, server-saved layouts and full baseline context-menu semantics remain. |
 | Saved View / Column Layout | Present | Present | BLOCKED | Not yet migrated. |
 | Row Height | Present | Present | BLOCKED | Not yet migrated. |
 | Search | Present | Present | INTEGRATED_NOT_CUT_OVER | Basic local search exists; parity with baseline search/filter semantics is incomplete. |
