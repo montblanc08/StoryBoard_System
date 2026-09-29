@@ -93,7 +93,7 @@ async def test_production_and_shot_pipeline():
 
         # 6. Reorder Transaction
         reorder_res = await client.post("/api/v1/shots/reorder", headers=headers, json={
-            "items": [{"id": sid, "sort_index": 1500.0}]
+            "items": [{"id": sid, "sort_index": 1500.0, "revision": updated_data["revision"]}]
         })
         assert reorder_res.status_code == 200
 
