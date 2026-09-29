@@ -6,7 +6,6 @@ mappings may still mention the key, but they cannot recreate the field.
 """
 from __future__ import annotations
 
-import copy
 import re
 import uuid
 from datetime import datetime, timezone
@@ -22,6 +21,7 @@ from app.models.production import Production
 from app.models.shot import Shot
 from app.models.user import User
 from app.models.view import SavedView
+from app.services.column_lifecycle import sanitize_saved_view_config
 from app.schemas.custom_field import (
     CustomFieldCreate,
     CustomFieldPurgeRequest,
@@ -46,13 +46,19 @@ class CustomFieldService:
             raise DomainError("当前账号没有修改自定义列的权限", code="FORBIDDEN")
 
     @staticmethod
-    async def _production(db: AsyncSession, production_id: str) -> Production:
-        result = await db.execute(
-            select(Production).where(
-                Production.id == production_id,
-                Production.deleted_at.is_(None),
-            )
+    async def _production(
+        db: AsyncSession,
+        production_id: str,
+        *,
+        for_update: bool = False,
+    ) -> Production:
+        query = select(Production).where(
+            Production.id == production_id,
+            Production.deleted_at.is_(None),
         )
+        if for_update:
+            query = query.with_for_update()
+        result = await db.execute(query)
         production = result.scalar_one_or_none()
         if not production:
             raise NotFoundError("项目不存在")
@@ -268,7 +274,7 @@ class CustomFieldService:
         user: User,
     ) -> dict:
         CustomFieldService._require_write(user)
-        await CustomFieldService._production(db, production_id)
+        await CustomFieldService._production(db, production_id, for_update=True)
 
         label = req.label.strip()
         if not label:
@@ -544,57 +550,6 @@ class CustomFieldService:
         return (await CustomFieldService._projection(db, [field]))[0]
 
     @staticmethod
-    def _sanitize_saved_view_config(
-        config: dict,
-        *,
-        column_key: str,
-    ) -> tuple[dict, bool]:
-        next_config = copy.deepcopy(config)
-        changed = False
-
-        def remove_from_list(container: dict, key: str) -> None:
-            nonlocal changed
-            value = container.get(key)
-            if isinstance(value, list):
-                filtered = [item for item in value if item != column_key]
-                if filtered != value:
-                    container[key] = filtered
-                    changed = True
-
-        def remove_from_map(container: dict, key: str) -> None:
-            nonlocal changed
-            value = container.get(key)
-            if isinstance(value, dict) and column_key in value:
-                value = dict(value)
-                value.pop(column_key, None)
-                container[key] = value
-                changed = True
-
-        presentation = next_config.get("presentation")
-        if isinstance(presentation, dict):
-            for key in ("columnOrder", "hiddenColumns", "visibleColumns", "columns"):
-                remove_from_list(presentation, key)
-            for key in ("columnWidths", "widths"):
-                remove_from_map(presentation, key)
-
-        custom_columns = next_config.get("customColumns")
-        if isinstance(custom_columns, dict):
-            for key in ("order", "hidden", "visible", "columns"):
-                remove_from_list(custom_columns, key)
-            for key in ("widths", "columnWidths"):
-                remove_from_map(custom_columns, key)
-
-        sort_config = next_config.get("sort")
-        if isinstance(sort_config, dict) and sort_config.get("key") == column_key:
-            sort_config = dict(sort_config)
-            sort_config["key"] = "default"
-            sort_config["direction"] = "asc"
-            next_config["sort"] = sort_config
-            changed = True
-
-        return next_config, changed
-
-    @staticmethod
     async def purge_field(
         db: AsyncSession,
         production_id: str,
@@ -654,13 +609,15 @@ class CustomFieldService:
         preference.updated_at = now
 
         views_result = await db.execute(
-            select(SavedView).where(SavedView.production_id == production_id)
+            select(SavedView)
+            .where(SavedView.production_id == production_id)
+            .with_for_update()
         )
         for view in views_result.scalars().all():
             config = view.config if isinstance(view.config, dict) else {}
-            sanitized, changed = CustomFieldService._sanitize_saved_view_config(
+            sanitized, changed = sanitize_saved_view_config(
                 config,
-                column_key=column_key,
+                {column_key},
             )
             if changed:
                 view.config = sanitized
