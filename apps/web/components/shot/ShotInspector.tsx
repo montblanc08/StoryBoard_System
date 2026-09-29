@@ -56,7 +56,27 @@ export function ShotInspector({ shot, production, onClose }: ShotInspectorProps)
   useEffect(() => {
     if (!shot) return;
     const values = editableShotValues(shot);
-    if (currentShotIdRef.current === shot.id && isDirty) return;
+
+    if (currentShotIdRef.current === shot.id && isDirty) {
+      if (saveStatus === 'conflict' && shot.revision !== baseRevision) {
+        const nextChanges: Partial<Shot> = { ...changedFields };
+        for (const [key, value] of Object.entries(nextChanges)) {
+          const field = key as keyof Shot;
+          if (Object.is(value, values[field])) {
+            delete (nextChanges as Record<string, unknown>)[key];
+          }
+        }
+
+        setServerSnapshot(values);
+        setChangedFields(nextChanges);
+        setFormData({ ...values, ...nextChanges });
+        setBaseRevision(shot.revision);
+        setSaveStatus('idle');
+        setErrorMessage(null);
+        setConflictDetails(null);
+      }
+      return;
+    }
     if (currentShotIdRef.current && currentShotIdRef.current !== shot.id && isDirty) {
       draftsRef.current.set(currentShotIdRef.current, {
         form: formData, snapshot: serverSnapshot, changes: changedFields, revision: baseRevision
@@ -128,9 +148,9 @@ export function ShotInspector({ shot, production, onClose }: ShotInspectorProps)
     }
   };
 
-  const handleRefetch = () => {
-    queryClient.invalidateQueries({ queryKey: ['shots', production.id] });
-    // Keep the draft and its original revision so a concurrent edit stays explicit.
+  const handleRefetch = async () => {
+    await queryClient.invalidateQueries({ queryKey: ['shots', production.id] });
+    // When the server revision changes, the effect above rebases the preserved draft.
   };
 
   const handleDiscard = () => {
