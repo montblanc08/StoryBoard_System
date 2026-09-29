@@ -6,6 +6,7 @@ import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/authStore';
 import type { Production } from '@frameforge/types';
 import { Badge, Button, Card, Field, Icons, Input, Select } from '@frameforge/ui';
+import { ProjectCover } from '@/components/ProjectCover';
 
 export default function ProductionsPage() {
   const router = useRouter();
@@ -138,19 +139,20 @@ export default function ProductionsPage() {
             {productions.map(prod => (
               <Card
                 key={prod.id}
-                onClick={() => router.push(`/production/${prod.id}/storyboard`)}
+                onClick={() => router.push(`/production/${prod.id}/shots`)}
                 className="group flex cursor-pointer items-center gap-4 p-4 transition hover:bg-accent/40"
               >
+                <ProjectCover name={prod.name} coverMediaId={(prod as any).cover_media_id} />
                 <div className="min-w-0 flex-1 space-y-1.5">
-                  <h3 className="truncate text-sm font-medium text-foreground">{prod.name}</h3>
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                    <span>{prod.template_type}</span>
+                  <h3 className="truncate text-base font-bold tracking-tight text-foreground">{prod.name}</h3>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-mono text-muted-foreground">
+                    <span className="uppercase">{prod.template_type}</span>
                     <span>{prod.fps_num} FPS</span>
                     <span>{prod.aspect_ratio}</span>
-                    <span>{(prod as any).shot_count || 0} 镜头</span>
+                    <span>{(prod as any).shot_count || 0} SHOTS</span>
                   </div>
                 </div>
-                <span className="shrink-0 text-xs text-primary">打开 →</span>
+                <span className="shrink-0 text-xs font-medium text-primary opacity-0 group-hover:opacity-100 transition-opacity">进入工作区 →</span>
               </Card>
             ))}
           </div>

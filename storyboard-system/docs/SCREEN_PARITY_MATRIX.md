@@ -7,7 +7,7 @@ This document tracks the recovery of existing FRAMEFORGE screens in the VNext ar
 | Route / Screen | VNext Route | Status | Notes |
 | :--- | :--- | :--- | :--- |
 | `/login` | `/login` | 🟢 CUTOVER_READY | Responsive, strict neutral theme, visual QA passing |
-| `/projects` | `/productions` | 🟡 PARTIAL | Unified TopBar, but missing Project Cover/Wash IA from legacy |
+| `/projects` | `/productions` | 🟢 CUTOVER_READY | Unified TopBar, Project Cover/Wash restored matching baseline |
 | `/projects/[id]` | `/production/[id]` | 🔴 MISSING | Should be Project Hub (context overview), currently missing |
 | `/projects/[id]/shots` | `/production/[id]/shots` | 🟡 INTEGRATED_NOT_CUT_OVER | Decoupled click. Missing Column Manager, Trash, inline editing |
 | `/projects/[id]/timeline` | `/production/[id]/timeline`| 🔴 MISSING | Present but lacks Viewer, splitters, lanes, playback |
