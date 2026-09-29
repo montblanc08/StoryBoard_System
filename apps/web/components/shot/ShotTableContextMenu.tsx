@@ -191,13 +191,13 @@ export function ShotTableContextMenu({
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
-                    onSelect={() => onAutoFitColumn(target.column)}
+                    onSelect={() => onAutoFitColumn(target.column as ShotTableColumnKey)}
                   >
                     <Icons.ArrowUpDown className="mr-2 h-4 w-4 rotate-90" />
                     按内容自动列宽
                   </DropdownMenuItem>
                   <DropdownMenuItem
-                    onSelect={() => onHideColumn(target.column)}
+                    onSelect={() => onHideColumn(target.column as ShotTableColumnKey)}
                   >
                     <Icons.Columns3 className="mr-2 h-4 w-4" />
                     隐藏此列
