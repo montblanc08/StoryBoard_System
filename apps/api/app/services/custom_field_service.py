@@ -758,6 +758,8 @@ class CustomFieldService:
             req.value,
             list(field.options or []),
         )
+        if field.required and normalized in (None, ""):
+            raise DomainError("必填自定义列不能为空", code="FIELD_REQUIRED")
 
         value_result = await db.execute(
             select(ShotCustomFieldValue).where(
