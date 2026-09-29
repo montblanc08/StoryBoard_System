@@ -90,6 +90,7 @@ class ReviewService:
                 "user_id": comment.user_id,
                 "author_name": display_name or email or "未知用户",
                 "body": comment.body,
+                "role": comment.role,
                 "timecode": comment.timecode,
                 "quote_field": comment.quote_field,
                 "quote_text": comment.quote_text,
@@ -128,7 +129,9 @@ class ReviewService:
         if quote_field and not quote_text:
             field_name = {
                 "description": "description",
+                "voiceover": "voice_over",
                 "voice_over": "voice_over",
+                "title": "name",
                 "name": "name",
             }.get(quote_field)
             if field_name:
@@ -138,6 +141,7 @@ class ReviewService:
             production_id=shot.production_id,
             shot_id=shot.id,
             user_id=user.id,
+            role=req.role.strip() or "Director",
             body=body,
             timecode=req.timecode.strip(),
             quote_field=quote_field,
