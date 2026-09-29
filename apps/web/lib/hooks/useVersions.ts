@@ -20,10 +20,36 @@ export interface ShotVersionDetail extends ShotVersion {
   snapshot: Record<string, unknown>;
 }
 
+export interface ShotVersionCompareField {
+  key: string;
+  label: string;
+  before: unknown;
+  after: unknown;
+  changed: boolean;
+}
+
+export interface ShotVersionCompare {
+  version: ShotVersion;
+  other_version_id: string | null;
+  against_current: boolean;
+  current_revision: number | null;
+  changed_count: number;
+  fields: ShotVersionCompareField[];
+}
+
 export function useShotVersionDetail(versionId: string | null) {
   return useQuery({
     queryKey: ['shot-version', versionId],
     queryFn: () => apiClient<ShotVersionDetail>(`/api/v1/versions/${versionId}`),
+    enabled: Boolean(versionId)
+  });
+}
+
+export function useShotVersionCompare(versionId: string | null) {
+  return useQuery({
+    queryKey: ['shot-version-compare', versionId],
+    queryFn: () =>
+      apiClient<ShotVersionCompare>(`/api/v1/versions/${versionId}/compare`),
     enabled: Boolean(versionId)
   });
 }
