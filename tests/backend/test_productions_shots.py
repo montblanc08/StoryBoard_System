@@ -39,6 +39,12 @@ async def test_production_and_shot_pipeline():
         token = login_res.json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
 
+        # Development/test seed initializes required roles/admin only. Product
+        # demo data is explicit opt-in and must not pollute a normal test run.
+        empty_list = await client.get("/api/v1/productions", headers=headers)
+        assert empty_list.status_code == 200
+        assert empty_list.json() == []
+
         # 2. Create Production
         p_res = await client.post("/api/v1/productions", headers=headers, json={
             "name": "2026 电影概念先导片",
