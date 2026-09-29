@@ -12,58 +12,26 @@ import { StatusBadge } from '@/components/shot/StatusBadge';
 import { ShotInspector } from '@/components/shot/ShotInspector';
 import { ShotTrashModal } from '@/components/shot/ShotTrashModal';
 import { InlineEditCell } from '@/components/shot/InlineEditCell';
-import {
-  DEFAULT_SHOT_TABLE_COLUMN_ORDER,
-  SHOT_TABLE_COLUMN_LABELS,
-  ShotColumnManager,
-  type ShotTableColumnKey
-} from '@/components/shot/ShotColumnManager';
+import { ShotColumnManager } from '@/components/shot/ShotColumnManager';
 import { BulkActionToolbar } from '@/components/storyboard/BulkActionToolbar';
 import { shotMovementLabel } from '@/lib/shot-display';
+import {
+  SHOT_TABLE_COLUMN_LABELS,
+  clampShotTableColumnWidth,
+  defaultShotTablePresentationPreferences,
+  loadShotTablePresentationPreferences,
+  saveShotTablePresentationPreferences,
+  type ShotTableColumnKey,
+  type ShotTablePresentationPreferences,
+  type ShotTableRowHeight
+} from '@/lib/shot-table-presentation';
 
-const SHOT_COLUMN_WIDTHS: Record<ShotTableColumnKey, number> = {
-  shot_size: 80,
-  lens_mm: 80,
-  camera_movement: 112,
-  description: 240,
-  voice_over: 240,
-  duration_frames: 128,
-  department: 100,
-  owner_id: 120,
-  status: 120
+const ROW_PADDING: Record<ShotTableRowHeight, string> = {
+  compact: 'py-1',
+  standard: 'py-2',
+  comfortable: 'py-3',
+  auto: 'py-2'
 };
-
-const LEGACY_COLUMN_KEYS: Record<ShotTableColumnKey, string> = {
-  shot_size: 'shotSize',
-  lens_mm: 'lens',
-  camera_movement: 'movement',
-  description: 'description',
-  voice_over: 'voiceOver',
-  duration_frames: 'duration',
-  department: 'department',
-  owner_id: 'owner',
-  status: 'status'
-};
-
-function normalizeColumnOrder(value: unknown): ShotTableColumnKey[] {
-  if (!Array.isArray(value)) return [...DEFAULT_SHOT_TABLE_COLUMN_ORDER];
-  const allowed = new Set<ShotTableColumnKey>(DEFAULT_SHOT_TABLE_COLUMN_ORDER);
-  const next = value.filter((item): item is ShotTableColumnKey =>
-    typeof item === 'string' && allowed.has(item as ShotTableColumnKey)
-  );
-  for (const column of DEFAULT_SHOT_TABLE_COLUMN_ORDER) {
-    if (!next.includes(column)) next.push(column);
-  }
-  return next;
-}
-
-function normalizeHiddenColumns(value: unknown): ShotTableColumnKey[] {
-  if (!Array.isArray(value)) return [];
-  const allowed = new Set<ShotTableColumnKey>(DEFAULT_SHOT_TABLE_COLUMN_ORDER);
-  return value.filter((item): item is ShotTableColumnKey =>
-    typeof item === 'string' && allowed.has(item as ShotTableColumnKey)
-  );
-}
 
 export default function ShotListPage() {
   const params = useParams();
@@ -77,10 +45,9 @@ export default function ShotListPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [sortKey, setSortKey] = useState<'default' | 'display_number' | 'duration_frames' | 'status'>('default');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
-  const [columnOrder, setColumnOrder] = useState<ShotTableColumnKey[]>([
-    ...DEFAULT_SHOT_TABLE_COLUMN_ORDER
-  ]);
-  const [hiddenColumns, setHiddenColumns] = useState<ShotTableColumnKey[]>([]);
+  const [tablePresentation, setTablePresentation] = useState<ShotTablePresentationPreferences>(
+    () => defaultShotTablePresentationPreferences()
+  );
 
   const {
     filters,
@@ -98,71 +65,132 @@ export default function ShotListPage() {
 
   useEffect(() => {
     if (!id || typeof window === 'undefined') return;
-
-    const storageKey = `frameforge:shot-table:${id}:column-layout-v2`;
-    const legacyStorageKey = `frameforge:shot-table:${id}:columns`;
-
-    try {
-      const raw = window.localStorage.getItem(storageKey);
-      if (raw) {
-        const parsed = JSON.parse(raw) as { order?: unknown; hidden?: unknown };
-        setColumnOrder(normalizeColumnOrder(parsed.order));
-        setHiddenColumns(normalizeHiddenColumns(parsed.hidden));
-        return;
-      }
-
-      const legacyRaw = window.localStorage.getItem(legacyStorageKey);
-      if (legacyRaw) {
-        const legacy = JSON.parse(legacyRaw) as Record<string, unknown>;
-        const hidden = DEFAULT_SHOT_TABLE_COLUMN_ORDER.filter(
-          column => legacy[LEGACY_COLUMN_KEYS[column]] === false
-        );
-        setHiddenColumns(hidden);
-      }
-    } catch {
-      setColumnOrder([...DEFAULT_SHOT_TABLE_COLUMN_ORDER]);
-      setHiddenColumns([]);
-    }
+    setTablePresentation(loadShotTablePresentationPreferences(id, window.localStorage));
   }, [id]);
 
-  const persistColumnLayout = (
-    nextOrder: ShotTableColumnKey[],
-    nextHidden: ShotTableColumnKey[]
+  const commitTablePresentation = (
+    updater: (current: ShotTablePresentationPreferences) => ShotTablePresentationPreferences
   ) => {
-    if (!id || typeof window === 'undefined') return;
-    window.localStorage.setItem(
-      `frameforge:shot-table:${id}:column-layout-v2`,
-      JSON.stringify({ order: nextOrder, hidden: nextHidden })
-    );
+    setTablePresentation(current => {
+      const next = updater(current);
+      if (id && typeof window !== 'undefined') {
+        saveShotTablePresentationPreferences(id, next, window.localStorage);
+      }
+      return next;
+    });
   };
 
   const handleColumnVisibleChange = (column: ShotTableColumnKey, visible: boolean) => {
-    setHiddenColumns(current => {
-      const next = visible
-        ? current.filter(item => item !== column)
-        : Array.from(new Set([...current, column]));
-      persistColumnLayout(columnOrder, next);
-      return next;
-    });
+    commitTablePresentation(current => ({
+      ...current,
+      hiddenColumns: visible
+        ? current.hiddenColumns.filter(item => item !== column)
+        : Array.from(new Set([...current.hiddenColumns, column]))
+    }));
   };
 
   const handleColumnMove = (column: ShotTableColumnKey, direction: -1 | 1) => {
-    setColumnOrder(current => {
-      const index = current.indexOf(column);
+    commitTablePresentation(current => {
+      const index = current.columnOrder.indexOf(column);
       const target = index + direction;
-      if (index < 0 || target < 0 || target >= current.length) return current;
-      const next = [...current];
-      [next[index], next[target]] = [next[target], next[index]];
-      persistColumnLayout(next, hiddenColumns);
-      return next;
+      if (index < 0 || target < 0 || target >= current.columnOrder.length) return current;
+
+      const nextOrder = [...current.columnOrder];
+      [nextOrder[index], nextOrder[target]] = [nextOrder[target], nextOrder[index]];
+      return { ...current, columnOrder: nextOrder };
     });
   };
 
+  const handleRowHeightChange = (rowHeight: ShotTableRowHeight) => {
+    commitTablePresentation(current => ({ ...current, rowHeight }));
+  };
+
   const resetColumnLayout = () => {
-    const nextOrder = [...DEFAULT_SHOT_TABLE_COLUMN_ORDER];
-    setColumnOrder(nextOrder);
-    setHiddenColumns([]);
-    persistColumnLayout(nextOrder, []);
+    const next = defaultShotTablePresentationPreferences();
+    setTablePresentation(next);
+    if (id && typeof window !== 'undefined') {
+      saveShotTablePresentationPreferences(id, next, window.localStorage);
+    }
+  };
+
+  const resizeColumnBy = (column: ShotTableColumnKey, delta: number) => {
+    commitTablePresentation(current => ({
+      ...current,
+      columnWidths: {
+        ...current.columnWidths,
+        [column]: clampShotTableColumnWidth(column, current.columnWidths[column] + delta)
+      }
+    }));
+  };
+
+  const handleResizePointerDown = (
+    column: ShotTableColumnKey,
+    event: React.PointerEvent<HTMLButtonElement>
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const startX = event.clientX;
+    const startWidth = tablePresentation.columnWidths[column];
+    let latestWidth = startWidth;
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      latestWidth = clampShotTableColumnWidth(
+        column,
+        startWidth + moveEvent.clientX - startX
+      );
+      setTablePresentation(current => ({
+        ...current,
+        columnWidths: {
+          ...current.columnWidths,
+          [column]: latestWidth
+        }
+      }));
+    };
+
+    const finishResize = () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', finishResize);
+      window.removeEventListener('pointercancel', finishResize);
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+
+      setTablePresentation(current => {
+        const next = {
+          ...current,
+          columnWidths: {
+            ...current.columnWidths,
+            [column]: latestWidth
+          }
+        };
+        if (id && typeof window !== 'undefined') {
+          saveShotTablePresentationPreferences(id, next, window.localStorage);
+        }
+        return next;
+      });
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', finishResize, { once: true });
+    window.addEventListener('pointercancel', finishResize, { once: true });
+  };
+
+  const handleResizeKeyDown = (
+    column: ShotTableColumnKey,
+    event: React.KeyboardEvent<HTMLButtonElement>
+  ) => {
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      resizeColumnBy(column, -8);
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      resizeColumnBy(column, 8);
+    }
   };
 
   const inspectedShot = shots.find(shot => shot.id === inspectedShotId) || null;
@@ -200,6 +228,7 @@ export default function ShotListPage() {
           item.primary_method
         ].some(value => String(value || '').toLowerCase().includes(query))
       ) return false;
+
       if (filters.primaryMethod !== 'all' && item.primary_method !== filters.primaryMethod) return false;
       if (filters.department !== 'all' && item.department !== filters.department) return false;
       if (filters.status !== 'all' && item.status !== filters.status) return false;
@@ -236,9 +265,15 @@ export default function ShotListPage() {
   }, [shots, filters, sortKey, sortDirection]);
 
   const visibleShotIds = visibleShots.map(item => item.id);
-  const visibleColumns = columnOrder.filter(column => !hiddenColumns.includes(column));
+  const visibleColumns = tablePresentation.columnOrder.filter(
+    column => !tablePresentation.hiddenColumns.includes(column)
+  );
   const tableMinWidth =
-    192 + visibleColumns.reduce((sum, column) => sum + SHOT_COLUMN_WIDTHS[column], 0);
+    192 + visibleColumns.reduce(
+      (sum, column) => sum + tablePresentation.columnWidths[column],
+      0
+    );
+  const rowPadding = ROW_PADDING[tablePresentation.rowHeight];
 
   const activeFilterCount = [
     filters.primaryMethod !== 'all',
@@ -320,10 +355,12 @@ export default function ShotListPage() {
             </Button>
 
             <ShotColumnManager
-              columnOrder={columnOrder}
-              hiddenColumns={hiddenColumns}
+              columnOrder={tablePresentation.columnOrder}
+              hiddenColumns={tablePresentation.hiddenColumns}
+              rowHeight={tablePresentation.rowHeight}
               onVisibleChange={handleColumnVisibleChange}
               onMove={handleColumnMove}
+              onRowHeightChange={handleRowHeightChange}
               onReset={resetColumnLayout}
             />
 
@@ -454,16 +491,26 @@ export default function ShotListPage() {
                     <th
                       key={column}
                       scope="col"
-                      className={`px-3 py-2.5 ${
+                      className={`relative px-3 py-2.5 ${
                         column === 'duration_frames'
                           ? 'text-right'
                           : column === 'status'
                             ? 'text-center'
                             : ''
                       }`}
-                      style={{ width: SHOT_COLUMN_WIDTHS[column] }}
+                      style={{ width: tablePresentation.columnWidths[column] }}
                     >
-                      {SHOT_TABLE_COLUMN_LABELS[column]}
+                      <span className="block truncate pr-1">
+                        {SHOT_TABLE_COLUMN_LABELS[column]}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={`调整${SHOT_TABLE_COLUMN_LABELS[column]}列宽`}
+                        title={`拖动调整${SHOT_TABLE_COLUMN_LABELS[column]}列宽；方向键微调`}
+                        onPointerDown={event => handleResizePointerDown(column, event)}
+                        onKeyDown={event => handleResizeKeyDown(column, event)}
+                        className="absolute inset-y-0 right-0 z-20 w-2 cursor-col-resize touch-none border-0 bg-transparent p-0 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      />
                     </th>
                   ))}
                 </tr>
@@ -509,14 +556,14 @@ export default function ShotListPage() {
                       } ${isInspected ? 'ring-1 ring-inset ring-ring/50' : ''}`}
                     >
                       <td
-                        className={`sticky left-0 z-10 w-20 border-r border-border px-3 py-2 font-mono font-bold text-foreground ${
+                        className={`sticky left-0 z-10 w-20 border-r border-border px-3 ${rowPadding} font-mono font-bold text-foreground ${
                           isSelected ? 'bg-accent' : 'bg-card group-hover:bg-accent'
                         }`}
                       >
                         {shot.display_number}
                       </td>
                       <td
-                        className={`sticky left-20 z-10 w-28 border-r border-border px-3 py-2 ${
+                        className={`sticky left-20 z-10 w-28 border-r border-border px-3 ${rowPadding} ${
                           isSelected ? 'bg-accent' : 'bg-card group-hover:bg-accent'
                         }`}
                       >
@@ -526,7 +573,7 @@ export default function ShotListPage() {
                       {visibleColumns.map(column => {
                         if (column === 'shot_size') {
                           return (
-                            <td key={column} className="px-3 py-2 font-mono text-foreground">
+                            <td key={column} className={`px-3 ${rowPadding} font-mono text-foreground`}>
                               {shot.shot_size || '全景'}
                             </td>
                           );
@@ -534,7 +581,7 @@ export default function ShotListPage() {
 
                         if (column === 'lens_mm') {
                           return (
-                            <td key={column} className="px-3 py-2 font-mono text-muted-foreground">
+                            <td key={column} className={`px-3 ${rowPadding} font-mono text-muted-foreground`}>
                               {shot.lens_mm ? `${shot.lens_mm}mm` : '—'}
                             </td>
                           );
@@ -542,7 +589,7 @@ export default function ShotListPage() {
 
                         if (column === 'camera_movement') {
                           return (
-                            <td key={column} className="max-w-[120px] truncate px-3 py-2 text-foreground">
+                            <td key={column} className={`max-w-[120px] truncate px-3 ${rowPadding} text-foreground`}>
                               {shotMovementLabel(shot)}
                             </td>
                           );
@@ -550,7 +597,7 @@ export default function ShotListPage() {
 
                         if (column === 'description') {
                           return (
-                            <td key={column} className="px-3 py-2 text-foreground">
+                            <td key={column} className={`px-3 ${rowPadding} text-foreground`}>
                               <InlineEditCell
                                 productionId={production.id}
                                 shot={shot}
@@ -564,7 +611,7 @@ export default function ShotListPage() {
 
                         if (column === 'voice_over') {
                           return (
-                            <td key={column} className="px-3 py-2 text-foreground">
+                            <td key={column} className={`px-3 ${rowPadding} text-foreground`}>
                               <InlineEditCell
                                 productionId={production.id}
                                 shot={shot}
@@ -578,7 +625,7 @@ export default function ShotListPage() {
 
                         if (column === 'duration_frames') {
                           return (
-                            <td key={column} className="px-3 py-2 text-right font-mono">
+                            <td key={column} className={`px-3 ${rowPadding} text-right font-mono`}>
                               <div className="flex items-center justify-end gap-1.5">
                                 <span className="font-bold text-foreground">
                                   {shot.duration_frames}f
@@ -609,7 +656,7 @@ export default function ShotListPage() {
 
                         if (column === 'department') {
                           return (
-                            <td key={column} className="px-3 py-2 font-mono text-muted-foreground">
+                            <td key={column} className={`px-3 ${rowPadding} font-mono text-muted-foreground`}>
                               {shot.department || 'Camera'}
                             </td>
                           );
@@ -617,14 +664,14 @@ export default function ShotListPage() {
 
                         if (column === 'owner_id') {
                           return (
-                            <td key={column} className="px-3 py-2 text-foreground">
+                            <td key={column} className={`px-3 ${rowPadding} text-foreground`}>
                               {shot.owner_id || '—'}
                             </td>
                           );
                         }
 
                         return (
-                          <td key={column} className="px-3 py-2 text-center">
+                          <td key={column} className={`px-3 ${rowPadding} text-center`}>
                             <StatusBadge status={shot.status} />
                           </td>
                         );
