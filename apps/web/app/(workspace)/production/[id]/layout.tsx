@@ -58,7 +58,7 @@ export default function ProductionLayout({
     <div className="flex h-screen w-screen flex-col bg-background overflow-hidden select-none">
       {/* Top Header */}
       <TopBar production={production} />
-      <PresenceSync />
+      {/* <PresenceSync /> */}
 
       {/* Main Workspace Frame */}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row">

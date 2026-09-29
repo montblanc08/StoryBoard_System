@@ -27,27 +27,27 @@ export function ProjectCover({ name, coverMediaId, className = '' }: ProjectCove
   };
 
   // We are currently not fetching real media in V-Web, so we fallback.
-  // In the future coverMediaUrl will be used.
-  const hasImage = false; // !!coverMediaId (for now mocked false)
+  const hasImage = !!coverMediaId;
+  const coverMediaUrl = coverMediaId ? `/api/v1/media/${coverMediaId}` : '';
 
   return (
     <div 
-      className={`relative grid shrink-0 place-items-center overflow-hidden rounded-lg ${className}`}
-      style={{ width: '96px', height: '56px', ...(!hasImage ? bgStyle : {}) }}
+      className={`relative grid shrink-0 place-items-center overflow-hidden rounded-lg ${className || 'h-[56px] w-[96px]'}`}
+      style={!hasImage ? bgStyle : undefined}
       aria-hidden="true"
     >
       {/* Wash fade on the right edge to blend into panel surfaces */}
       <div 
         className="pointer-events-none absolute inset-0 z-10" 
         style={{
-          background: 'linear-gradient(90deg, rgba(0,0,0,0) 62%, hsl(var(--card)) 128%)'
+          background: 'linear-gradient(90deg, rgba(0,0,0,0) 62%, rgb(var(--card)) 128%)'
         }}
       />
       
       {hasImage ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img 
-          src={''} // coverMediaUrl
+          src={coverMediaUrl}
           alt="" 
           loading="lazy" 
           decoding="async"

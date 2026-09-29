@@ -1,28 +1,26 @@
 # FRAMEFORGE Screen Parity Matrix
 
-This document tracks the recovery of existing FRAMEFORGE screens in the VNext architecture against the `5e86a0b` Product Golden Baseline.
+This document tracks the recovery of existing FRAMEFORGE screens in the VNext architecture.
 
 ## Web UI Pages (apps/web)
 
 | Route / Screen | VNext Route | Status | Notes |
 | :--- | :--- | :--- | :--- |
-| `/login` | `/login` | 🟢 CUTOVER_READY | Responsive, strict neutral theme, visual QA passing |
-| `/projects` | `/productions` | 🟢 CUTOVER_READY | Unified TopBar, Project Cover/Wash restored matching baseline |
-| `/projects/[id]` | `/production/[id]` | 🟢 IMPLEMENTED | Project Hub (context overview) restored matching baseline |
-| `/projects/[id]/shots` | `/production/[id]/shots` | 🟡 INTEGRATED_NOT_CUT_OVER | Decoupled click. Missing Column Manager, Trash, inline editing |
-| `/projects/[id]/timeline` | `/production/[id]/timeline`| 🔴 MISSING | Present but lacks Viewer, splitters, lanes, playback |
-| `/projects/[id]/storyboard`| `/production/[id]/storyboard`| 🟡 PARTIAL | Present but basic |
-| `/projects/[id]/deliverables`| `/production/[id]/deliverables`| 🔴 MISSING | PDF/Word/Print subsystem missing (mock UI only) |
-| `/projects/[id]/import` | `/production/[id]/import`| 🔴 MISSING | 5-stage import pipeline missing |
-| `/projects/[id]/narration` | `/production/[id]/narration` | 🔴 MISSING | Core legacy feature: timing, split, read speed |
-| `/projects/[id]/moodboard` | `/production/[id]/moodboard` | 🔴 MISSING | Core legacy feature |
-| `/projects/[id]/lighting` | `/production/[id]/lighting` | 🔴 MISSING | Core legacy feature: WebGL, 2D/3D toggle |
-| `/projects/[id]/review` | `/production/[id]/review` | 🔴 MISSING | Core legacy feature: Comments, Word-diff, history |
+| /login | /login | 🟢 CUTOVER_READY | Responsive, strict neutral theme, visual QA passing |
+| /projects | /productions | 🟡 INTEGRATED_NOT_CUT_OVER | Missing visual QA and media hydration |
+| /projects/[id] | /production/[id] | 🔴 REMOVE / RECONCILE | Not a baseline capability, unauthorized product redesign |
+| /projects/[id]/shots | /production/[id]/shots | 🟡 INTEGRATED_NOT_CUT_OVER | Dense read-first table. Trash modal restored. Needs inline edit & column tools |
+| /projects/[id]/timeline | /production/[id]/timeline| 🟡 PARTIAL | Present but basic |
+| /projects/[id]/storyboard| /production/[id]/storyboard| 🟡 PARTIAL | Present but basic |
+| /projects/[id]/deliverables| /production/[id]/deliverables| 🟡 PARTIAL | PDF/Export mock UI present, backend export exists but not fully wired with options |
+| /projects/[id]/narration | N/A | 🔴 MISSING | Core legacy feature |
+| /projects/[id]/moodboard | N/A | 🔴 MISSING | Core legacy feature |
+| /projects/[id]/planning | N/A | 🔴 MISSING | Core legacy feature |
 
 *Legend:*
-- 🔴 `MISSING`: Dropped in VNext, needs recovery from 5e86a0b
-- 🟡 `PARTIAL`: Partially implemented or buggy
-- 🟡 `IMPLEMENTED_NOT_INTEGRATED`: UI exists, mock data
-- 🟡 `INTEGRATED_NOT_CUT_OVER`: UI exists, real API, functional parity close
-- 🟢 `CUTOVER_READY`: Parity proven, QA passes
-- 🟢 `CUT_OVER`: Authoritative runtime
+- 🔴 MISSING: Dropped in VNext, needs recovery
+- 🟡 PARTIAL: Partially implemented or buggy
+- 🟢 IMPLEMENTED_NOT_INTEGRATED: UI exists, mock data
+- 🟡 INTEGRATED_NOT_CUT_OVER: UI exists, real API, functional parity close
+- 🟢 CUTOVER_READY: Parity proven, QA passes
+- 🟢 CUT_OVER: Authoritative runtime

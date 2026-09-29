@@ -29,8 +29,17 @@ export function ShotInspector({ shot, production, onClose }: ShotInspectorProps)
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [activeTab, setActiveTab] = useState<'creative' | 'camera' | 'pipeline' | 'timing'>('creative');
 
+  const currentShotIdRef = React.useRef<string | null>(null);
+
   useEffect(() => {
-    if (shot) {
+    if (!shot) {
+      currentShotIdRef.current = null;
+      return;
+    }
+
+    const isDifferentShot = currentShotIdRef.current !== shot.id;
+    
+    if (isDifferentShot || !isDirty) {
       setFormData({
         name: shot.name || '',
         display_number: shot.display_number,
@@ -54,12 +63,16 @@ export function ShotInspector({ shot, production, onClose }: ShotInspectorProps)
         composition: shot.composition || '',
         vfx_required: shot.vfx_required || false
       });
-      setIsDirty(false);
-      setSaveStatus('idle');
-      setErrorMessage(null);
-      setConflictDetails(null);
+      
+      if (isDifferentShot) {
+        setIsDirty(false);
+        setSaveStatus('idle');
+        setErrorMessage(null);
+        setConflictDetails(null);
+        currentShotIdRef.current = shot.id;
+      }
     }
-  }, [shot]);
+  }, [shot, isDirty]);
 
   if (!shot) return null;
 
@@ -447,7 +460,6 @@ export function ShotInspector({ shot, production, onClose }: ShotInspectorProps)
         )}
       </div>
 
-      {/* Inspector Footer with Danger Zone */}
       <div className="border-t border-border p-4 bg-background/60">
         {confirmDelete ? (
           <div className="flex items-center gap-2">
@@ -457,7 +469,7 @@ export function ShotInspector({ shot, production, onClose }: ShotInspectorProps)
               onClick={handleDelete}
               className="flex-1 text-xs"
             >
-              确认彻底删除
+              确认移至废纸篓
             </Button>
             <Button
               variant="outline"
@@ -473,10 +485,10 @@ export function ShotInspector({ shot, production, onClose }: ShotInspectorProps)
             variant="destructive"
             size="sm"
             onClick={() => setConfirmDelete(true)}
-            className="flex w-full items-center justify-center gap-2 rounded border py-2 text-xs font-medium transition"
+            className="flex w-full items-center justify-center gap-2 rounded border py-2 text-xs font-medium transition text-destructive hover:bg-destructive hover:text-destructive-foreground"
           >
             <Icons.Trash2 className="h-4 w-4" />
-            删除镜头 (Trash Shot)
+            移至废纸篓 (Trash Shot)
           </Button>
         )}
       </div>

@@ -10,6 +10,7 @@ import { useWorkspaceStore } from '@/stores/useWorkspaceStore';
 import { MethodBadge } from '@/components/shot/MethodBadge';
 import { StatusBadge } from '@/components/shot/StatusBadge';
 import { ShotInspector } from '@/components/shot/ShotInspector';
+import { ShotTrashModal } from '@/components/shot/ShotTrashModal';
 import { shotMovementLabel } from '@/lib/shot-display';
 
 export default function ShotListPage() {
@@ -21,6 +22,7 @@ export default function ShotListPage() {
   const updateShot = useUpdateShot(id);
 
   const [search, setSearch] = useState('');
+  const [isTrashOpen, setIsTrashOpen] = useState(false);
   const {
     selectedShotIds,
     selectShot,
@@ -79,8 +81,14 @@ export default function ShotListPage() {
 
         <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground">
           <span>单击行即可在右侧展开检查器</span>
+          <Button variant="ghost" size="sm" onClick={() => setIsTrashOpen(true)} className="ml-4 h-7 text-xs hover:text-foreground">
+            <Icons.Trash2 className="mr-1.5 h-3.5 w-3.5" />
+            废纸篓
+          </Button>
         </div>
       </div>
+
+      {isTrashOpen && <ShotTrashModal productionId={production.id} onClose={() => setIsTrashOpen(false)} />}
 
       {/* Table & Inspector Container */}
       <div className="flex flex-1 overflow-hidden">
