@@ -30,49 +30,12 @@ import {
   useCreateShotVersion,
   useMergeShotVersion,
   useRestoreShotVersion,
-  useShotVersionDetail,
+  useShotVersionCompare,
   useShotVersions
 } from '@/lib/hooks/useVersions';
 import { StatusBadge } from '@/components/shot/StatusBadge';
 import { MethodBadge } from '@/components/shot/MethodBadge';
 import { shotMovementLabel } from '@/lib/shot-display';
-
-const VERSION_FIELD_LABELS: Record<string, string> = {
-  sequence_id: '篇章',
-  scene_id: '场景',
-  display_number: '镜号',
-  name: '镜头标题',
-  description: '画面描述',
-  action: '动作',
-  performance: '表演',
-  composition: '构图',
-  director_notes: '导演备注',
-  duration_frames: '时长',
-  timing_locked: '时长锁定',
-  shot_size: '景别',
-  camera_angle: '机位角度',
-  camera_height: '机位高度',
-  lens_mm: '焦段',
-  camera: '摄影机',
-  sensor: '传感器',
-  aperture: '光圈',
-  shutter: '快门',
-  camera_movement: '运镜',
-  dialogue: '对白',
-  voice_over: '旁白',
-  subtitle: '字幕',
-  music_notes: '音乐',
-  sfx_notes: '音效',
-  primary_method: '主要制作方式',
-  secondary_methods: '辅助制作方式',
-  department: '部门',
-  owner_id: '负责人',
-  status: '状态',
-  approval_status: '审批状态',
-  vfx_required: 'VFX',
-  continuity_notes: '连续性',
-  risk_notes: '风险备注'
-};
 
 function formatVersionValue(value: unknown) {
   if (value === null || value === undefined || value === '') return '—';
@@ -85,18 +48,6 @@ function formatVersionValue(value: unknown) {
     }
   }
   return String(value);
-}
-
-function versionValueEqual(left: unknown, right: unknown) {
-  if (Object.is(left, right)) return true;
-  if (typeof left === 'object' || typeof right === 'object') {
-    try {
-      return JSON.stringify(left) === JSON.stringify(right);
-    } catch {
-      return false;
-    }
-  }
-  return false;
 }
 
 export default function ReviewPage() {
@@ -128,8 +79,8 @@ export default function ReviewPage() {
   const resolveComment = useResolveReviewComment(shotId);
   const applyDecision = useApplyReviewDecision(productionId, shotId);
   const { data: versions = [], isLoading: versionsLoading } = useShotVersions(shotId);
-  const { data: selectedVersionDetail, isLoading: versionDetailLoading } =
-    useShotVersionDetail(selectedVersionId);
+  const { data: selectedVersionCompare, isLoading: versionCompareLoading } =
+    useShotVersionCompare(selectedVersionId);
   const createVersion = useCreateShotVersion(shotId);
   const createBranch = useCreateShotBranch(shotId);
   const acceptVersion = useAcceptShotVersion(shotId);
@@ -254,17 +205,8 @@ export default function ReviewPage() {
 
   const canSubmit = ['draft', 'in_progress', 'changes_requested'].includes(currentShot.status);
   const isInReview = currentShot.status === 'review';
-  const currentShotRecord = currentShot as unknown as Record<string, unknown>;
-  const versionChanges = selectedVersionDetail
-    ? Object.entries(selectedVersionDetail.snapshot)
-        .filter(([field, before]) => !versionValueEqual(before, currentShotRecord[field]))
-        .map(([field, before]) => ({
-          field,
-          label: VERSION_FIELD_LABELS[field] || field,
-          before,
-          after: currentShotRecord[field]
-        }))
-    : [];
+  const versionChanges =
+    selectedVersionCompare?.fields.filter(field => field.changed) || [];
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col overflow-hidden lg:flex-row">
@@ -455,26 +397,26 @@ export default function ReviewPage() {
                       所选版本 vs 当前镜头 · 仅显示发生变化的字段
                     </div>
                   </div>
-                  {selectedVersionDetail && (
+                  {selectedVersionCompare && (
                     <Badge variant="outline">
-                      v{String(selectedVersionDetail.version_number).padStart(3, '0')}
+                      v{String(selectedVersionCompare.version.version_number).padStart(3, '0')}
                     </Badge>
                   )}
                 </div>
 
-                {versionDetailLoading ? (
+                {versionCompareLoading ? (
                   <div className="py-5 text-center text-xs text-muted-foreground">
                     正在读取版本快照...
                   </div>
-                ) : selectedVersionDetail && versionChanges.length === 0 ? (
+                ) : selectedVersionCompare && versionChanges.length === 0 ? (
                   <div className="mt-3 rounded-md border border-dashed border-border p-4 text-center text-xs text-muted-foreground">
                     当前镜头与该版本在已迁移的镜头字段范围内没有差异。
                   </div>
-                ) : selectedVersionDetail ? (
+                ) : selectedVersionCompare ? (
                   <div className="mt-3 space-y-2">
                     {versionChanges.map(change => (
                       <div
-                        key={change.field}
+                        key={change.key}
                         className="grid gap-2 rounded-md border border-border p-2.5 sm:grid-cols-[120px_minmax(0,1fr)_minmax(0,1fr)]"
                       >
                         <div className="text-xs font-medium text-foreground">
