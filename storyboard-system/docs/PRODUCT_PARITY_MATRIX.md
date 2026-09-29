@@ -22,7 +22,7 @@ Status vocabulary:
 | Workspace IA: Narration | Present | Present | BLOCKED | Missing from canonical V-Web workspace. |
 | Workspace IA: Moodboard | Present | Present | BLOCKED | Missing from canonical V-Web workspace. |
 | Workspace IA: Lighting | Present | Present | BLOCKED | Missing from canonical V-Web workspace. |
-| Workspace IA: Review | Present | Present | BLOCKED | Review/version/comment surface not yet migrated. |
+| Workspace IA: Review | Present | Present | INTEGRATED_NOT_CUT_OVER | Canonical V-Web Review now consumes real V-API comments and revision-aware review decisions. Version creation/compare/restore and rendered-browser parity remain incomplete. |
 
 ## 2. Shot Workspace Advanced Capabilities
 | Capability | Baseline | VNext target | Status | Gap / evidence |
@@ -31,21 +31,21 @@ Status vocabulary:
 | Inline Double-click Editing | Present | Present | INTEGRATED_NOT_CUT_OVER | Description and voice-over cells use real PATCH; broader field coverage and full keyboard/conflict parity remain. |
 | Row Single Click | Select | Select | INTEGRATED_NOT_CUT_OVER | Selection no longer implicitly opens Inspector. |
 | Row Double Click | Open Inspector | Open Inspector | INTEGRATED_NOT_CUT_OVER | Real consumer exists; broader workspace parity remains. |
-| Column Manager | Present | Present | INTEGRATED_NOT_CUT_OVER | Canonical V-Web now has real show/hide controls persisted per production/browser. Resize/reorder, archived/purged field lifecycle, server-saved layouts and full baseline context-menu semantics remain. |
+| Column Manager | Present | Present | INTEGRATED_NOT_CUT_OVER | Canonical V-Web now persists visibility, order, pointer/keyboard column widths and row-height preferences per production/browser. Server-saved layouts plus archived/purged custom-field lifecycle remain. |
 | Saved View / Column Layout | Present | Present | BLOCKED | Not yet migrated. |
-| Row Height | Present | Present | BLOCKED | Not yet migrated. |
+| Row Height | Present | Present | INTEGRATED_NOT_CUT_OVER | Compact/standard/comfortable/auto row-height controls are wired into the canonical table and persisted locally; server saved-view parity and rendered-browser QA remain. |
 | Search | Present | Present | INTEGRATED_NOT_CUT_OVER | Basic local search exists; parity with baseline search/filter semantics is incomplete. |
 | Multi-select | Present | Present | INTEGRATED_NOT_CUT_OVER | Shift-range and Ctrl/Cmd toggle selection now use the canonical workspace selection owner; bulk-action UI parity remains incomplete. |
 | Filtering & Sorting | Present | Present | INTEGRATED_NOT_CUT_OVER | Canonical V-Web now consumes workspace search plus method/department/status filters and client sorting; advanced baseline filter semantics and persisted saved views remain. |
 | Grouping | Present | Present | BLOCKED | Not yet migrated. |
 | Bulk Actions | Present | Present | INTEGRATED_NOT_CUT_OVER | Shot Table mounts the canonical bulk toolbar; method/status/department edits use revision-aware atomic `ShotService` writes and bulk trash uses one project-scoped atomic request. Panel/custom-field/audit parity and fresh rendered visual QA remain incomplete. |
-| Context Menu | Present | Present | BLOCKED | Not yet migrated. |
+| Context Menu | Present | Present | INTEGRATED_NOT_CUT_OVER | Canonical Shot Table now uses shared shadcn/Radix DropdownMenu for row/column actions, keyboard ContextMenu/Shift+F10 entry and focus return. Baseline action coverage and narrow-width rendered QA remain. |
 | Shot Reorder | Present | Present | IMPLEMENTED_NOT_INTEGRATED | Canonical command now requires one production, the complete active-shot set, exact client `base_order`, and per-shot revisions before any mutation; V-Web hook sends that contract. Canonical drag/reorder UI plus baseline collaboration lease, snapshot/audit and browser parity are still missing. |
 | Undo / Redo | Present | Present | BLOCKED | Not yet migrated. |
 | Save Status / Dirty Draft | Present | Present | INTEGRATED_NOT_CUT_OVER | Inspector now tracks changed fields and preserves drafts; browser/visual regression still required. |
 | Production Steps | Present | Present | BLOCKED | Not yet migrated. |
 | Custom Fields | Present | Present | BLOCKED | Not yet migrated. |
-| Comments | Present | Present | BLOCKED | Not yet migrated. |
+| Comments | Present | Present | INTEGRATED_NOT_CUT_OVER | V-API now persists create/edit/resolve/reopen/delete semantics with actor audit, quote metadata, role and parent linkage; V-Web Review consumes real comments instead of local fake state. Browser/permission parity remains. |
 | Versions | Present | Present | BLOCKED | Not yet migrated. |
 | Share | Present | Present | BLOCKED | VNext share contract is not baseline-parity. |
 | Shot Trash | Present | Present | INTEGRATED_NOT_CUT_OVER | Soft delete/list/restore/purge plus project-scoped bulk trash route through `ShotService`; trash/restore now advance revision and all lifecycle mutations emit audit rows. Retention policy and immutable version-history parity remain incomplete. |
