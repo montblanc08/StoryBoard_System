@@ -133,15 +133,6 @@ class VersionService:
         return list(result.scalars().all())
 
     @staticmethod
-    async def get_version(db: AsyncSession, version_id: str) -> ShotVersion:
-        result = await db.execute(select(ShotVersion).where(ShotVersion.id == version_id))
-        version = result.scalar_one_or_none()
-        if not version:
-            raise NotFoundError("版本不存在")
-        await VersionService._active_shot(db, version.shot_id)
-        return version
-
-    @staticmethod
     async def create_version(
         db: AsyncSession,
         shot_id: str,
@@ -379,55 +370,36 @@ class VersionService:
     async def compare_version(
         db: AsyncSession,
         version_id: str,
-        other_version_id: str | None = None,
     ) -> dict:
-        """Compare one immutable version against current Shot or another version."""
+        """Read-only field comparison between one immutable version and current Shot."""
         result = await db.execute(select(ShotVersion).where(ShotVersion.id == version_id))
         version = result.scalar_one_or_none()
         if not version:
             raise NotFoundError("版本不存在")
 
-        version_snapshot = version.snapshot if isinstance(version.snapshot, dict) else {}
-        against_current = other_version_id is None
-        current_revision: int | None = None
+        shot = await VersionService._active_shot(db, version.shot_id)
+        snapshot = version.snapshot if isinstance(version.snapshot, dict) else {}
 
-        if other_version_id:
-            other_result = await db.execute(
-                select(ShotVersion).where(
-                    ShotVersion.id == other_version_id,
-                    ShotVersion.shot_id == version.shot_id,
-                )
-            )
-            other = other_result.scalar_one_or_none()
-            if not other:
-                raise DomainError(
-                    "对比版本不存在或不属于当前镜头",
-                    code="INVALID_COMPARE_VERSION",
-                )
-            other_snapshot = other.snapshot if isinstance(other.snapshot, dict) else {}
-        else:
-            shot = await VersionService._active_shot(db, version.shot_id)
-            other_snapshot = VersionService._snapshot(shot)
-            current_revision = shot.revision
-
-        fields: list[dict] = []
+        fields = []
+        changed_count = 0
         for key, label in VersionService.COMPARE_FIELDS:
-            before = version_snapshot.get(key)
-            after = other_snapshot.get(key)
+            before = snapshot.get(key)
+            after = getattr(shot, key, None)
+            changed = before != after
+            if changed:
+                changed_count += 1
             fields.append({
                 "key": key,
                 "label": label,
                 "before": before,
                 "after": after,
-                "changed": before != after,
+                "changed": changed,
             })
 
         return {
             "version": version,
-            "other_version_id": other_version_id,
-            "against_current": against_current,
-            "current_revision": current_revision,
-            "changed_count": sum(1 for field in fields if field["changed"]),
+            "current_revision": shot.revision,
+            "changed_count": changed_count,
             "fields": fields,
         }
 
