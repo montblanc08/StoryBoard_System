@@ -56,8 +56,10 @@ export function NavRail({ productionId }: NavRailProps) {
   return (
     <nav
       aria-label="项目工作区导航"
-      className={`relative z-20 flex h-14 w-full shrink-0 flex-row border-b border-border bg-background transition-all duration-200 select-none after:pointer-events-none after:absolute after:right-0 after:top-0 after:h-14 after:w-7 after:bg-gradient-to-l after:from-background after:to-transparent md:h-auto md:flex-col md:border-b-0 md:border-r md:after:hidden ${
-        collapsed ? 'md:w-16' : 'md:w-56'
+      className={`relative z-20 flex h-[var(--ff-shell-mobile-nav-h)] w-full shrink-0 flex-row border-b border-border bg-background transition-[width] duration-[var(--ff-motion-normal)] select-none after:pointer-events-none after:absolute after:right-0 after:top-0 after:h-[var(--ff-shell-mobile-nav-h)] after:w-7 after:bg-gradient-to-l after:from-background after:to-transparent md:h-auto md:flex-col md:border-b-0 md:border-r md:after:hidden ${
+        collapsed
+          ? 'md:w-[var(--ff-shell-nav-collapsed-w)]'
+          : 'md:w-[var(--ff-shell-nav-expanded-w)]'
       }`}
     >
       {/* Navigation List */}
@@ -70,10 +72,10 @@ export function NavRail({ productionId }: NavRailProps) {
             <Link
               key={item.href}
               href={item.href}
-              className={`group flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2.5 text-xs transition md:gap-3 ${
+              className={`group flex h-9 shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-2.5 text-xs transition-colors md:gap-3 ${
                 isActive
-                  ? 'bg-accent text-accent-foreground font-bold shadow-md shadow-foreground/10'
-                  : 'text-muted-foreground hover:bg-card hover:text-foreground'
+                  ? 'bg-accent font-medium text-accent-foreground'
+                  : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'
               }`}
               title={collapsed ? item.label : undefined}
             >
@@ -90,7 +92,7 @@ export function NavRail({ productionId }: NavRailProps) {
         <Button variant="ghost" size="sm"
           onClick={() => setCollapsed(!collapsed)}
           aria-label={collapsed ? '展开侧边栏' : '收起侧边栏'}
-          className="flex w-full items-center justify-center gap-2 rounded-lg p-2 text-muted-foreground hover:bg-card hover:text-foreground transition text-xs"
+          className="flex w-full items-center justify-center gap-2 text-xs text-muted-foreground"
         >
           {collapsed ? <Icons.ChevronRight className="h-4 w-4" /> : <Icons.ChevronLeft className="h-4 w-4" />}
           {!collapsed && <span>收起侧边栏</span>}
