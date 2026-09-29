@@ -13,6 +13,11 @@ import { ShotInspector } from '@/components/shot/ShotInspector';
 import { ShotTrashModal } from '@/components/shot/ShotTrashModal';
 import { InlineEditCell } from '@/components/shot/InlineEditCell';
 import { ShotColumnManager } from '@/components/shot/ShotColumnManager';
+import {
+  ShotTableContextMenu,
+  type ShotTableContextColumnKey,
+  type ShotTableContextTarget
+} from '@/components/shot/ShotTableContextMenu';
 import { BulkActionToolbar } from '@/components/storyboard/BulkActionToolbar';
 import { shotMovementLabel } from '@/lib/shot-display';
 import {
@@ -33,6 +38,36 @@ const ROW_PADDING: Record<ShotTableRowHeight, string> = {
   auto: 'py-2'
 };
 
+function shotColumnValue(
+  shot: Shot,
+  column: ShotTableContextColumnKey
+): string | number {
+  switch (column) {
+    case 'display_number':
+      return shot.display_number || '';
+    case 'primary_method':
+      return shot.primary_method || '';
+    case 'shot_size':
+      return shot.shot_size || '';
+    case 'lens_mm':
+      return shot.lens_mm ?? 0;
+    case 'camera_movement':
+      return shotMovementLabel(shot);
+    case 'description':
+      return shot.description || '';
+    case 'voice_over':
+      return shot.voice_over || '';
+    case 'duration_frames':
+      return shot.duration_frames || 0;
+    case 'department':
+      return shot.department || '';
+    case 'owner_id':
+      return shot.owner_id || '';
+    case 'status':
+      return shot.status || '';
+  }
+}
+
 export default function ShotListPage() {
   const params = useParams();
   const id = typeof params?.id === 'string' ? params.id : '';
@@ -43,11 +78,12 @@ export default function ShotListPage() {
 
   const [isTrashOpen, setIsTrashOpen] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
-  const [sortKey, setSortKey] = useState<'default' | 'display_number' | 'duration_frames' | 'status'>('default');
+  const [sortKey, setSortKey] = useState<'default' | ShotTableContextColumnKey>('default');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [tablePresentation, setTablePresentation] = useState<ShotTablePresentationPreferences>(
     () => defaultShotTablePresentationPreferences()
   );
+  const [contextTarget, setContextTarget] = useState<ShotTableContextTarget | null>(null);
 
   const {
     filters,
@@ -193,6 +229,68 @@ export default function ShotListPage() {
     }
   };
 
+  const autoFitColumn = (column: ShotTableColumnKey) => {
+    const labelLength = SHOT_TABLE_COLUMN_LABELS[column].length;
+    const longestContent = shots.reduce((max, shot) => {
+      const value = String(shotColumnValue(shot, column));
+      return Math.max(max, Math.min(value.length, 80));
+    }, 0);
+    const desiredWidth = Math.max(labelLength * 14 + 40, longestContent * 7.5 + 32);
+
+    commitTablePresentation(current => ({
+      ...current,
+      columnWidths: {
+        ...current.columnWidths,
+        [column]: clampShotTableColumnWidth(column, desiredWidth)
+      }
+    }));
+  };
+
+  const openColumnContextMenu = (
+    column: ShotTableContextColumnKey,
+    element: HTMLElement,
+    x: number,
+    y: number
+  ) => {
+    setContextTarget({
+      kind: 'column',
+      column,
+      x,
+      y,
+      returnFocus: element
+    });
+  };
+
+  const openRowContextMenu = (
+    shot: Shot,
+    element: HTMLElement,
+    x: number,
+    y: number
+  ) => {
+    const validSelectedIds = selectedShotIds.filter(selectedId =>
+      shots.some(candidate => candidate.id === selectedId)
+    );
+    const shotIds =
+      selectedShotIds.includes(shot.id) && validSelectedIds.length > 1
+        ? validSelectedIds
+        : [shot.id];
+
+    if (!selectedShotIds.includes(shot.id)) {
+      selectShot(shot.id, false, false, visibleShots.map(item => item.id));
+    }
+
+    setContextTarget({
+      kind: 'row',
+      x,
+      y,
+      returnFocus: element,
+      shotId: shot.id,
+      shotIds,
+      displayNumber: shot.display_number,
+      name: shot.name
+    });
+  };
+
   const inspectedShot = shots.find(shot => shot.id === inspectedShotId) || null;
 
   const methodOptions = useMemo(
@@ -246,19 +344,8 @@ export default function ShotListPage() {
     if (sortKey === 'default') return filtered;
 
     return [...filtered].sort((a, b) => {
-      let left: string | number = '';
-      let right: string | number = '';
-
-      if (sortKey === 'display_number') {
-        left = a.display_number || '';
-        right = b.display_number || '';
-      } else if (sortKey === 'duration_frames') {
-        left = a.duration_frames || 0;
-        right = b.duration_frames || 0;
-      } else if (sortKey === 'status') {
-        left = a.status || '';
-        right = b.status || '';
-      }
+      const left = shotColumnValue(a, sortKey);
+      const right = shotColumnValue(b, sortKey);
 
       const comparison =
         typeof left === 'number' && typeof right === 'number'
@@ -429,8 +516,11 @@ export default function ShotListPage() {
               options={[
                 { value: 'default', label: '默认镜头顺序' },
                 { value: 'display_number', label: '按镜号' },
-                { value: 'duration_frames', label: '按时长' },
-                { value: 'status', label: '按状态' }
+                { value: 'primary_method', label: '按制作方式' },
+                ...tablePresentation.columnOrder.map(column => ({
+                  value: column,
+                  label: '按' + SHOT_TABLE_COLUMN_LABELS[column]
+                }))
               ]}
               className="h-9 text-xs"
             />
@@ -489,13 +579,57 @@ export default function ShotListPage() {
                 <tr>
                   <th
                     scope="col"
-                    className="sticky left-0 z-30 w-20 border-r border-border bg-card px-3 py-2.5"
+                    tabIndex={0}
+                    onContextMenu={event => {
+                      event.preventDefault();
+                      openColumnContextMenu(
+                        'display_number',
+                        event.currentTarget,
+                        event.clientX,
+                        event.clientY
+                      );
+                    }}
+                    onKeyDown={event => {
+                      if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+                        event.preventDefault();
+                        const rect = event.currentTarget.getBoundingClientRect();
+                        openColumnContextMenu(
+                          'display_number',
+                          event.currentTarget,
+                          rect.left + Math.min(48, rect.width / 2),
+                          rect.top + Math.min(30, rect.height / 2)
+                        );
+                      }
+                    }}
+                    className="sticky left-0 z-30 w-20 border-r border-border bg-card px-3 py-2.5 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                   >
                     镜号
                   </th>
                   <th
                     scope="col"
-                    className="sticky left-20 z-30 w-28 border-r border-border bg-card px-3 py-2.5"
+                    tabIndex={0}
+                    onContextMenu={event => {
+                      event.preventDefault();
+                      openColumnContextMenu(
+                        'primary_method',
+                        event.currentTarget,
+                        event.clientX,
+                        event.clientY
+                      );
+                    }}
+                    onKeyDown={event => {
+                      if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+                        event.preventDefault();
+                        const rect = event.currentTarget.getBoundingClientRect();
+                        openColumnContextMenu(
+                          'primary_method',
+                          event.currentTarget,
+                          rect.left + Math.min(48, rect.width / 2),
+                          rect.top + Math.min(30, rect.height / 2)
+                        );
+                      }
+                    }}
+                    className="sticky left-20 z-30 w-28 border-r border-border bg-card px-3 py-2.5 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                   >
                     制作方式
                   </th>
@@ -503,7 +637,29 @@ export default function ShotListPage() {
                     <th
                       key={column}
                       scope="col"
-                      className={`relative px-3 py-2.5 ${
+                      tabIndex={0}
+                      onContextMenu={event => {
+                        event.preventDefault();
+                        openColumnContextMenu(
+                          column,
+                          event.currentTarget,
+                          event.clientX,
+                          event.clientY
+                        );
+                      }}
+                      onKeyDown={event => {
+                        if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+                          event.preventDefault();
+                          const rect = event.currentTarget.getBoundingClientRect();
+                          openColumnContextMenu(
+                            column,
+                            event.currentTarget,
+                            rect.left + Math.min(48, rect.width / 2),
+                            rect.top + Math.min(30, rect.height / 2)
+                          );
+                        }
+                      }}
+                      className={`relative px-3 py-2.5 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
                         column === 'duration_frames'
                           ? 'text-right'
                           : column === 'status'
@@ -546,8 +702,26 @@ export default function ShotListPage() {
                         );
                       }}
                       onDoubleClick={() => openInspector(shot.id)}
+                      onContextMenu={event => {
+                        event.preventDefault();
+                        openRowContextMenu(
+                          shot,
+                          event.currentTarget,
+                          event.clientX,
+                          event.clientY
+                        );
+                      }}
                       onKeyDown={event => {
-                        if (event.key === 'Enter') {
+                        if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+                          event.preventDefault();
+                          const rect = event.currentTarget.getBoundingClientRect();
+                          openRowContextMenu(
+                            shot,
+                            event.currentTarget,
+                            rect.left + Math.min(48, rect.width / 2),
+                            rect.top + Math.min(30, rect.height / 2)
+                          );
+                        } else if (event.key === 'Enter') {
                           event.preventDefault();
                           openInspector(shot.id);
                         } else if (event.key === ' ') {
@@ -713,6 +887,28 @@ export default function ShotListPage() {
           </>
         )}
       </div>
+
+      <ShotTableContextMenu
+        productionId={production.id}
+        target={contextTarget}
+        sortKey={sortKey}
+        sortDirection={sortDirection}
+        onOpenChange={open => {
+          if (!open) setContextTarget(null);
+        }}
+        onOpenInspector={openInspector}
+        onClearSelection={clearSelection}
+        onSort={(column, direction) => {
+          setSortKey(column);
+          setSortDirection(direction);
+        }}
+        onClearSort={() => {
+          setSortKey('default');
+          setSortDirection('asc');
+        }}
+        onAutoFitColumn={autoFitColumn}
+        onHideColumn={column => handleColumnVisibleChange(column, false)}
+      />
 
       <BulkActionToolbar
         production={production}
