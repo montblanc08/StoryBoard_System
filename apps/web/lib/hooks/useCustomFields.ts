@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiClient } from '@/lib/api-client';
+import { ApiError, apiClient } from '@/lib/api-client';
 
 export type CustomFieldType =
   | 'text'
@@ -170,6 +170,14 @@ export function usePatchCustomFieldValue(productionId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['shots', productionId] });
       queryClient.invalidateQueries({ queryKey: ['custom-field-values', productionId] });
+    },
+    onError: error => {
+      if (
+        error instanceof ApiError &&
+        (error.status === 409 || error.code === 'CUSTOM_FIELD_REVISION_CONFLICT')
+      ) {
+        queryClient.invalidateQueries({ queryKey: ['shots', productionId] });
+      }
     }
   });
 }
