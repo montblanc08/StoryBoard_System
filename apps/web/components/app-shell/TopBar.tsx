@@ -6,7 +6,6 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { Production } from '@frameforge/types';
 import { useAuthStore } from '@/stores/authStore';
-import { PresenceBar } from '@/components/PresenceBar';
 
 interface TopBarProps {
   production?: Production | null;
@@ -49,7 +48,7 @@ export function TopBar({ production }: TopBarProps) {
 
       {/* Right: Controls, Theme, i18n & User Profile */}
       <div className="flex shrink-0 items-center gap-1 text-xs sm:gap-3">
-        {production && <PresenceBar productionId={production.id} />}
+        {/* Presence stays disconnected until authenticated Redis-backed realtime is ready. */}
 
         {/* Locale Toggle */}
         <Button variant="outline" size="sm"
