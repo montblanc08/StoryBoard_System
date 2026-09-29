@@ -1,8 +1,8 @@
 'use client';
 
-import { Button, Icons, Input, Select } from '@frameforge/ui';
+import { Button, Checkbox, Icons, Input, Popover, Select } from '@frameforge/ui';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import type { Shot } from '@frameforge/types';
 import { useProduction, useShots, useUpdateShot } from '@/lib/hooks/useProduction';
@@ -13,6 +13,23 @@ import { ShotInspector } from '@/components/shot/ShotInspector';
 import { ShotTrashModal } from '@/components/shot/ShotTrashModal';
 import { InlineEditCell } from '@/components/shot/InlineEditCell';
 import { shotMovementLabel } from '@/lib/shot-display';
+
+const OPTIONAL_COLUMNS = [
+  { key: 'shotSize', label: '景别' },
+  { key: 'lens', label: '焦段' },
+  { key: 'movement', label: '机位运镜' },
+  { key: 'description', label: '画面内容与构图' },
+  { key: 'voiceOver', label: '对应旁白' },
+  { key: 'duration', label: '时长 / 帧数' },
+  { key: 'department', label: '部门' },
+  { key: 'owner', label: '负责人' },
+  { key: 'status', label: '状态' }
+] as const;
+
+type OptionalColumnKey = (typeof OPTIONAL_COLUMNS)[number]['key'];
+const DEFAULT_COLUMN_VISIBILITY = Object.fromEntries(
+  OPTIONAL_COLUMNS.map(column => [column.key, true])
+) as Record<OptionalColumnKey, boolean>;
 import { BulkActionToolbar } from '@/components/storyboard/BulkActionToolbar';
 
 export default function ShotListPage() {
@@ -27,6 +44,7 @@ export default function ShotListPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [sortKey, setSortKey] = useState<'default' | 'display_number' | 'duration_frames' | 'status'>('default');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [columnVisibility, setColumnVisibility] = useState<Record<OptionalColumnKey, boolean>>({ ...DEFAULT_COLUMN_VISIBILITY });
   const {
     filters,
     setFilter,
@@ -40,6 +58,30 @@ export default function ShotListPage() {
     openInspector,
     closeInspector
   } = useWorkspaceStore();
+
+  useEffect(() => {
+    if (!id || typeof window === 'undefined') return;
+    try {
+      const raw = window.localStorage.getItem(`frameforge:shot-table:${id}:columns`);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<Record<OptionalColumnKey, boolean>>;
+      const next = { ...DEFAULT_COLUMN_VISIBILITY };
+      for (const column of OPTIONAL_COLUMNS) {
+        if (typeof parsed[column.key] === 'boolean') next[column.key] = parsed[column.key] as boolean;
+      }
+      setColumnVisibility(next);
+    } catch {
+      setColumnVisibility({ ...DEFAULT_COLUMN_VISIBILITY });
+    }
+  }, [id]);
+
+  useEffect(() => {
+    if (!id || typeof window === 'undefined') return;
+    window.localStorage.setItem(
+      `frameforge:shot-table:${id}:columns`,
+      JSON.stringify(columnVisibility)
+    );
+  }, [id, columnVisibility]);
 
   const inspectedShot = shots.find(s => s.id === inspectedShotId) || null;
 
@@ -187,6 +229,54 @@ export default function ShotListPage() {
               详情
             </Button>
 
+            <Popover
+              label="列管理"
+              trigger={
+                <Button variant="ghost" size="sm" className="h-8 text-xs">
+                  <Icons.Columns3 className="h-3.5 w-3.5" />
+                  列管理
+                </Button>
+              }
+            >
+              <div className="w-64 space-y-3">
+                <div>
+                  <p className="text-xs font-semibold text-foreground">显示列</p>
+                  <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
+                    镜号和制作方式保持固定；其他列可按当前浏览器工作区显示或隐藏。
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  {OPTIONAL_COLUMNS.map(column => (
+                    <label
+                      key={column.key}
+                      className="flex min-h-9 cursor-pointer items-center gap-2 rounded-md px-2 text-xs hover:bg-accent"
+                    >
+                      <Checkbox
+                        checked={columnVisibility[column.key]}
+                        onCheckedChange={checked =>
+                          setColumnVisibility(current => ({
+                            ...current,
+                            [column.key]: checked === true
+                          }))
+                        }
+                      />
+                      <span className="min-w-0 flex-1 truncate">{column.label}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="border-t border-border pt-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setColumnVisibility({ ...DEFAULT_COLUMN_VISIBILITY })}
+                    className="w-full justify-start text-xs"
+                  >
+                    恢复默认列
+                  </Button>
+                </div>
+              </div>
+            </Popover>
+
             <Button variant="ghost" size="sm" onClick={() => setIsTrashOpen(true)} className="h-8 text-xs hover:text-foreground">
               <Icons.Trash2 className="h-3.5 w-3.5" />
               废纸篓
@@ -274,15 +364,15 @@ export default function ShotListPage() {
                 <tr>
                   <th scope="col" className="sticky left-0 z-30 w-20 border-r border-border bg-card px-3 py-2.5">镜号</th>
                   <th scope="col" className="sticky left-20 z-30 w-28 border-r border-border bg-card px-3 py-2.5">制作方式</th>
-                  <th className="py-2.5 px-3 w-20">景别</th>
-                  <th className="py-2.5 px-3 w-20">焦段</th>
-                  <th className="py-2.5 px-3 w-28">机位运镜</th>
-                  <th className="py-2.5 px-3 min-w-[200px]">画面内容与构图</th>
-                  <th className="py-2.5 px-3 min-w-[200px]">对应旁白</th>
-                  <th className="py-2.5 px-3 w-24 text-right">时长/帧数</th>
-                  <th className="py-2.5 px-3 w-20">部门</th>
-                  <th className="py-2.5 px-3 w-24">负责人</th>
-                  <th className="py-2.5 px-3 w-24 text-center">状态</th>
+                  {columnVisibility.shotSize && <th className="py-2.5 px-3 w-20">景别</th>}
+                  {columnVisibility.lens && <th className="py-2.5 px-3 w-20">焦段</th>}
+                  {columnVisibility.movement && <th className="py-2.5 px-3 w-28">机位运镜</th>}
+                  {columnVisibility.description && <th className="py-2.5 px-3 min-w-[200px]">画面内容与构图</th>}
+                  {columnVisibility.voiceOver && <th className="py-2.5 px-3 min-w-[200px]">对应旁白</th>}
+                  {columnVisibility.duration && <th className="py-2.5 px-3 w-24 text-right">时长/帧数</th>}
+                  {columnVisibility.department && <th className="py-2.5 px-3 w-20">部门</th>}
+                  {columnVisibility.owner && <th className="py-2.5 px-3 w-24">负责人</th>}
+                  {columnVisibility.status && <th className="py-2.5 px-3 w-24 text-center">状态</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -322,23 +412,34 @@ export default function ShotListPage() {
                       <td className={`sticky left-20 z-10 w-28 border-r border-border px-3 py-2 ${isSelected ? 'bg-accent' : 'bg-card group-hover:bg-accent'}`}>
                         <MethodBadge method={shot.primary_method} size="sm" />
                       </td>
-                      <td className="py-2 px-3 text-foreground font-mono">
-                        {shot.shot_size || '全景'}
-                      </td>
-                      <td className="py-2 px-3 text-muted-foreground font-mono">
-                        {shot.lens_mm ? `${shot.lens_mm}mm` : '—'}
-                      </td>
-                      <td className="py-2 px-3 text-foreground truncate max-w-[120px]">
-                        {shotMovementLabel(shot)}
-                      </td>
-                      <td className="py-2 px-3 text-foreground">
-                        <InlineEditCell productionId={production.id} shot={shot} field="description" value={shot.description || ''} placeholder="双击输入画面描述" />
-                      </td>
-                      <td className="py-2 px-3 text-foreground">
-                        <InlineEditCell productionId={production.id} shot={shot} field="voice_over" value={shot.voice_over || ''} placeholder="双击输入旁白" />
-                      </td>
-                      <td className="py-2 px-3 text-right font-mono">
-                        <div className="flex items-center justify-end gap-1.5">
+                      {columnVisibility.shotSize && (
+                        <td className="py-2 px-3 text-foreground font-mono">
+                          {shot.shot_size || '全景'}
+                        </td>
+                      )}
+                      {columnVisibility.lens && (
+                        <td className="py-2 px-3 text-muted-foreground font-mono">
+                          {shot.lens_mm ? `${shot.lens_mm}mm` : '—'}
+                        </td>
+                      )}
+                      {columnVisibility.movement && (
+                        <td className="py-2 px-3 text-foreground truncate max-w-[120px]">
+                          {shotMovementLabel(shot)}
+                        </td>
+                      )}
+                      {columnVisibility.description && (
+                        <td className="py-2 px-3 text-foreground">
+                          <InlineEditCell productionId={production.id} shot={shot} field="description" value={shot.description || ''} placeholder="双击输入画面描述" />
+                        </td>
+                      )}
+                      {columnVisibility.voiceOver && (
+                        <td className="py-2 px-3 text-foreground">
+                          <InlineEditCell productionId={production.id} shot={shot} field="voice_over" value={shot.voice_over || ''} placeholder="双击输入旁白" />
+                        </td>
+                      )}
+                      {columnVisibility.duration && (
+                        <td className="py-2 px-3 text-right font-mono">
+                          <div className="flex items-center justify-end gap-1.5">
                           <span className="font-bold text-foreground">{shot.duration_frames}f</span>
                           <span className="text-[10px] text-muted-foreground">({durationSec}s)</span>
                           <Button
@@ -351,17 +452,24 @@ export default function ShotListPage() {
                           >
                             {shot.timing_locked ? <Icons.Lock className="h-3 w-3" /> : <Icons.LockOpen className="h-3 w-3" />}
                           </Button>
-                        </div>
-                      </td>
-                      <td className="py-2 px-3 text-muted-foreground font-mono">
-                        {shot.department || 'Camera'}
-                      </td>
-                      <td className="py-2 px-3 text-foreground">
-                        {shot.owner_id || '—'}
-                      </td>
-                      <td className="py-2 px-3 text-center">
-                        <StatusBadge status={shot.status} />
-                      </td>
+                          </div>
+                        </td>
+                      )}
+                      {columnVisibility.department && (
+                        <td className="py-2 px-3 text-muted-foreground font-mono">
+                          {shot.department || 'Camera'}
+                        </td>
+                      )}
+                      {columnVisibility.owner && (
+                        <td className="py-2 px-3 text-foreground">
+                          {shot.owner_id || '—'}
+                        </td>
+                      )}
+                      {columnVisibility.status && (
+                        <td className="py-2 px-3 text-center">
+                          <StatusBadge status={shot.status} />
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
