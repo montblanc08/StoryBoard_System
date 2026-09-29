@@ -61,19 +61,6 @@ class ShotVersionMergeResult(BaseModel):
     merged_version_id: str
     backup_version_id: Optional[str] = None
 
-class ShotVersionFieldDiff(BaseModel):
-    field: str
-    version_value: Any = None
-    other_value: Any = None
-
-
-class ShotVersionCompareResult(BaseModel):
-    version_id: str
-    other_version_id: Optional[str] = None
-    against_current: bool
-    shot_id: str
-    differences: list[ShotVersionFieldDiff]
-
 class ShotVersionCompareField(BaseModel):
     key: str
     label: str
@@ -84,6 +71,8 @@ class ShotVersionCompareField(BaseModel):
 
 class ShotVersionCompareResult(BaseModel):
     version: ShotVersionOut
-    current_revision: int
+    other_version_id: Optional[str] = None
+    against_current: bool
+    current_revision: Optional[int] = None
     changed_count: int
     fields: list[ShotVersionCompareField]
