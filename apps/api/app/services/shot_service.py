@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import DomainError, NotFoundError, ConflictError
+from app.models.collaboration import AuditLog
 from app.models.production import Production
 from app.models.shot import Panel, Shot
 from app.schemas.shot import BulkUpdateShotsRequest, ShotCreate, ShotPatch, ShotReorderRequest
@@ -27,6 +28,23 @@ class ShotService:
         "primary_method", "department", "owner_id", "status",
         "sequence_id", "scene_id", "lens_mm",
     })
+
+    @staticmethod
+    def _audit_shot_mutation(
+        db: AsyncSession,
+        *,
+        user_id: str,
+        action: str,
+        shot_id: str,
+        metadata: dict | None = None,
+    ) -> None:
+        db.add(AuditLog(
+            user_id=user_id,
+            action=action,
+            entity_type="shot",
+            entity_id=shot_id,
+            metadata_json=metadata or {},
+        ))
 
     @staticmethod
     async def create_shot(db: AsyncSession, production_id: str, req: ShotCreate, user_id: str) -> Shot:
@@ -82,6 +100,13 @@ class ShotService:
             duration_frames=req.duration_frames
         )
         db.add(panel)
+        ShotService._audit_shot_mutation(
+            db,
+            user_id=user_id,
+            action="shot.create",
+            shot_id=shot.id,
+            metadata={"revision": shot.revision, "production_id": production_id},
+        )
         await db.flush()
         return shot
 
@@ -101,17 +126,24 @@ class ShotService:
                 }
             )
 
-        changed = False
+        changed_fields: list[str] = []
         for field, val in req.changes.items():
             if field in ShotService.PATCH_FIELDS:
                 current_val = getattr(shot, field)
                 if current_val != val:
                     setattr(shot, field, val)
-                    changed = True
+                    changed_fields.append(field)
 
-        if changed:
+        if changed_fields:
             shot.revision += 1
             shot.updated_at = datetime.now(timezone.utc)
+            ShotService._audit_shot_mutation(
+                db,
+                user_id=user_id,
+                action="shot.patch",
+                shot_id=shot.id,
+                metadata={"changed_fields": changed_fields, "revision": shot.revision},
+            )
             await db.flush()
 
         return shot
@@ -126,6 +158,14 @@ class ShotService:
 
         shot.deleted_at = datetime.now(timezone.utc)
         shot.updated_at = shot.deleted_at
+        shot.revision += 1
+        ShotService._audit_shot_mutation(
+            db,
+            user_id=user_id,
+            action="shot.trash",
+            shot_id=shot.id,
+            metadata={"revision": shot.revision},
+        )
         await db.flush()
         return True
 
@@ -140,6 +180,13 @@ class ShotService:
         shot.deleted_at = None
         shot.revision += 1
         shot.updated_at = datetime.now(timezone.utc)
+        ShotService._audit_shot_mutation(
+            db,
+            user_id=user_id,
+            action="shot.restore",
+            shot_id=shot.id,
+            metadata={"revision": shot.revision},
+        )
         await db.flush()
         return shot
 
@@ -151,6 +198,13 @@ class ShotService:
         if not shot:
             return False
 
+        ShotService._audit_shot_mutation(
+            db,
+            user_id=user_id,
+            action="shot.purge",
+            shot_id=shot.id,
+            metadata={"production_id": shot.production_id, "revision": shot.revision},
+        )
         await db.delete(shot)
         await db.flush()
         return True
@@ -198,7 +252,15 @@ class ShotService:
                 continue
             shot.deleted_at = now
             shot.updated_at = now
+            shot.revision += 1
             moved_count += 1
+            ShotService._audit_shot_mutation(
+                db,
+                user_id=user_id,
+                action="shot.trash",
+                shot_id=shot.id,
+                metadata={"revision": shot.revision, "bulk": True},
+            )
 
         if moved_count:
             await db.flush()
@@ -282,10 +344,22 @@ class ShotService:
                 unchanged_count += 1
                 continue
 
+            previous_sort_index = shot.sort_index
             shot.sort_index = target_sort_index
             shot.revision += 1
             shot.updated_at = now
             reordered_count += 1
+            ShotService._audit_shot_mutation(
+                db,
+                user_id=user_id,
+                action="shot.reorder",
+                shot_id=shot.id,
+                metadata={
+                    "revision": shot.revision,
+                    "previous_sort_index": previous_sort_index,
+                    "sort_index": target_sort_index,
+                },
+            )
 
         if reordered_count:
             await db.flush()
@@ -360,19 +434,30 @@ class ShotService:
 
         for sid in shot_ids:
             shot = shots[sid]
-            changed = False
+            changed_fields: list[str] = []
             for field, value in req.updates.items():
                 if getattr(shot, field) != value:
                     setattr(shot, field, value)
-                    changed = True
+                    changed_fields.append(field)
 
-            if not changed:
+            if not changed_fields:
                 unchanged_count += 1
                 continue
 
             shot.revision += 1
             shot.updated_at = now
             updated_count += 1
+            ShotService._audit_shot_mutation(
+                db,
+                user_id=user_id,
+                action="shot.bulk_patch",
+                shot_id=shot.id,
+                metadata={
+                    "changed_fields": changed_fields,
+                    "revision": shot.revision,
+                    "bulk": True,
+                },
+            )
 
         if updated_count:
             await db.flush()
