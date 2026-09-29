@@ -431,10 +431,6 @@ export default function ShotListPage() {
     });
   }, [shots, filters, sortKey, sortDirection, customFieldValueMatrix]);
 
-  if (!production) return null;
-
-  const fps = production.fps_num / (production.fps_den || 1);
-
   const visibleShotIds = visibleShots.map(item => item.id);
   const visibleColumns = tablePresentation.columnOrder.filter(
     column => !tablePresentation.hiddenColumns.includes(column)
@@ -501,6 +497,10 @@ export default function ShotListPage() {
     filters.status === 'all' &&
     visibleShots.length === shots.length &&
     shots.length > 1;
+
+  if (!production) return null;
+
+  const fps = production.fps_num / (production.fps_den || 1);
 
   const moveShotByKeyboard = async (shotId: string, direction: -1 | 1) => {
     if (!canReorder || reorderShots.isPending) return;
@@ -844,6 +844,7 @@ export default function ShotListPage() {
                         className="absolute inset-y-0 right-0 z-20 w-2 cursor-col-resize touch-none border-0 bg-transparent p-0 outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       />
                     </th>
+                  ))}
                   {visibleCustomFields.map(field => (
                     <th
                       key={field.id}
@@ -857,7 +858,6 @@ export default function ShotListPage() {
                         自定义 · {field.field_type}
                       </span>
                     </th>
-                  ))}
                   ))}
                 </tr>
               </thead>
