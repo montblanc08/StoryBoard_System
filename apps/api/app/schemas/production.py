@@ -95,6 +95,11 @@ class ShotReorderItem(BaseModel):
 
 
 class ShotReorderRequest(BaseModel):
+    production_id: str
+    # Exact active-shot order observed by the client before the drag. The
+    # server rejects stale/partial clients before mutating any row.
+    base_order: list[str]
+    # The target order must contain the complete current active shot set.
     items: list[ShotReorderItem]
 
 
