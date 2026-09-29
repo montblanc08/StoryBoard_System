@@ -16,6 +16,15 @@ class Comment(Base):
     asset_id: Mapped[Optional[str]] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"), nullable=True)
     user_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     body: Mapped[str] = mapped_column(Text)
+    timecode: Mapped[str] = mapped_column(String(32), default="")
+    quote_field: Mapped[str] = mapped_column(String(128), default="")
+    quote_text: Mapped[str] = mapped_column(Text, default="")
+    parent_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("comments.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    is_resolved: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     deleted_at: Mapped[Optional[datetime]] = mapped_column(nullable=True, index=True)
 
 
@@ -27,6 +36,26 @@ class Approval(Base):
     status: Mapped[str] = mapped_column(String(64), default="approved")
     user_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class ReviewDecision(Base):
+    """Immutable review decision bound to the Shot revision/version context."""
+
+    __tablename__ = "review_decisions"
+
+    shot_id: Mapped[str] = mapped_column(
+        ForeignKey("shots.id", ondelete="CASCADE"),
+        index=True,
+    )
+    version_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("shot_versions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    previous_status: Mapped[str] = mapped_column(String(64))
+    next_status: Mapped[str] = mapped_column(String(64))
+    action_label: Mapped[str] = mapped_column(String(64))
+    created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
 
 
 class ShotVersion(Base):
