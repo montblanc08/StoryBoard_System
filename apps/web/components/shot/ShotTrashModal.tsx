@@ -78,7 +78,7 @@ export function ShotTrashModal({ productionId, onClose }: ShotTrashModalProps) {
             <div className="py-12 text-center text-xs font-mono text-muted-foreground">正在加载废纸篓...</div>
           ) : trashShots.length === 0 ? (
             <div className="py-12 text-center text-sm text-muted-foreground">
-              废纸篓是空的。<br />已删除的镜头将保留 30 天，随后被彻底清理。
+              废纸篓是空的。<br />已删除的镜头可在此恢复；彻底删除后不可恢复。
             </div>
           ) : (
             <div className="space-y-2">
