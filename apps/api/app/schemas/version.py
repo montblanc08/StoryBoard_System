@@ -43,9 +43,6 @@ class ShotVersionOut(BaseModel):
     updated_at: datetime
 
 
-class ShotVersionDetailOut(ShotVersionOut):
-    snapshot: dict[str, Any]
-
 
 class ShotVersionRestoreResult(BaseModel):
     changed: bool
