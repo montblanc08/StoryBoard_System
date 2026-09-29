@@ -69,11 +69,17 @@ class _Result:
         return _Scalars(self._shots)
 
 
+class _AuditLog:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
 class _Session:
     def __init__(self, shots):
         self.shots = shots if isinstance(shots, list) else [shots]
         self.flush_count = 0
         self.deleted = []
+        self.added = []
 
     async def execute(self, statement):
         return _Result(self.shots)
@@ -83,6 +89,9 @@ class _Session:
 
     async def delete(self, entity):
         self.deleted.append(entity)
+
+    def add(self, entity):
+        self.added.append(entity)
 
 
 class _DomainError(Exception):
@@ -117,6 +126,7 @@ def _service_class():
         "ShotReorderRequest": object,
         "BulkUpdateShotsRequest": object,
         "Shot": _Shot,
+        "AuditLog": _AuditLog,
         "select": lambda model: _Select(),
         "NotFoundError": _NotFoundError,
         "DomainError": _DomainError,
@@ -171,6 +181,9 @@ class ShotServiceMutationContractTest(unittest.TestCase):
         self.assertIs(result, shot)
         self.assertEqual((shot.name, shot.created_by, shot.revision), ("Revised", "creator-1", 4))
         self.assertEqual(db.flush_count, 1)
+        self.assertEqual(len(db.added), 1)
+        self.assertEqual(db.added[0].action, "shot.patch")
+        self.assertEqual(db.added[0].metadata_json["changed_fields"], ["name"])
         with self.assertRaises(_ConflictError) as conflict:
             asyncio.run(service.patch_shot(db, shot.id, request, "editor-2"))
         self.assertEqual(
@@ -247,8 +260,7 @@ class ShotServiceMutationContractTest(unittest.TestCase):
         self.assertEqual([shot.department for shot in shots], ["art", "art"])
         self.assertEqual([shot.revision for shot in shots], [4, 6])
         self.assertEqual(db.flush_count, 1)
-
-
+        self.assertEqual([entry.action for entry in db.added], ["shot.bulk_patch", "shot.bulk_patch"])
 
     def test_reorder_noop_does_not_increment_revision(self):
         shots = [_Shot("shot-1", revision=3), _Shot("shot-2", revision=5)]
@@ -315,6 +327,7 @@ class ShotServiceMutationContractTest(unittest.TestCase):
         self.assertEqual([shot.sort_index for shot in shots], [2000.0, 1000.0])
         self.assertEqual([shot.revision for shot in shots], [4, 6])
         self.assertEqual(db.flush_count, 1)
+        self.assertEqual([entry.action for entry in db.added], ["shot.reorder", "shot.reorder"])
 
     def test_reorder_rejects_partial_target_set_before_mutation(self):
         shots = [_Shot("shot-1", revision=3), _Shot("shot-2", revision=5)]
