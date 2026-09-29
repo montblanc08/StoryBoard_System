@@ -25,4 +25,5 @@ class User(Base):
     role_id: Mapped[Optional[str]] = mapped_column(ForeignKey("roles.id", ondelete="SET NULL"), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    role: Mapped[Optional[Role]] = relationship(back_populates="users")
     role: Mapped[Optional[Role]] = relationship(back_populates="users", lazy="selectin")

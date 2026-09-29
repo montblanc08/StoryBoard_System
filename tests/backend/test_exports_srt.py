@@ -84,3 +84,57 @@ async def test_srt_uses_legacy_timing_voiceover_and_download_bytes(export_client
         "2\r\n01:00:03,000 --> 01:00:04,000\r\n第二句\r\n"
     ).encode("utf-8-sig")
     assert int(response.headers["content-length"]) == len(response.content)
+
+
+@pytest.mark.asyncio
+async def test_edl_export(export_client):
+    token = create_access_token({"sub": "export-user"})
+    response = await export_client.get(
+        "/api/v1/productions/export-production/export/edl",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+    assert "attachment" in response.headers["content-disposition"]
+    assert ".edl" in response.headers["content-disposition"]
+    text = response.text
+    assert "TITLE:" in text
+    assert "FCM:" in text
+    assert "001  AX" in text
+    assert "第一句" in text
+
+
+@pytest.mark.asyncio
+async def test_otio_export(export_client):
+    import json
+    token = create_access_token({"sub": "export-user"})
+    response = await export_client.get(
+        "/api/v1/productions/export-production/export/otio",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+    assert "attachment" in response.headers["content-disposition"]
+    assert ".otio" in response.headers["content-disposition"]
+    data = json.loads(response.text)
+    assert data["OTIO_SCHEMA"] == "Timeline.1"
+    assert "tracks" in data
+    clips = data["tracks"]["children"][0]["children"]
+    assert len(clips) == 3
+
+
+@pytest.mark.asyncio
+async def test_csv_export(export_client):
+    token = create_access_token({"sub": "export-user"})
+    response = await export_client.get(
+        "/api/v1/productions/export-production/export/csv",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+    assert "attachment" in response.headers["content-disposition"]
+    assert ".csv" in response.headers["content-disposition"]
+    content = response.content
+    assert content.startswith(b"\xef\xbb\xbf")  # UTF-8 BOM for Excel
+    text = content.decode("utf-8-sig")
+    assert "镜号" in text
+    assert "对应解说词旁白" in text
+    assert "第一句" in text
+

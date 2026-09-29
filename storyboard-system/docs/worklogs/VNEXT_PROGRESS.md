@@ -196,3 +196,32 @@ CONVERGENCE & CUTOVER — 2026-09-29，`7b3a24c` 基线。本文件下方旧里�
 - All existing tests pass without modification.
 - Architecture boundary gate passes.
 - No production deployment or data modification.
+
+---
+
+# DELIVERABLES EXPORT PARITY & CONFIG HARDENING — 2026-09-29 16:00 (Session 3)
+
+## Accomplished Milestones
+1. **Deliverable Exports Parity (EDL, OTIO, CSV, SRT)**:
+   - Updated `apps/api/app/api/v1/exports.py`: OTIO endpoint now serializes JSON document with `Content-Disposition: attachment; filename*=UTF-8''...` for direct browser/client downloads.
+   - Updated `apps/api/app/services/exporter.py`: Support both canonical `Shot` model attributes (`voice_over`, `camera_movement`) and DTO attributes (`voiceover`, `movement`) across CMX 3600 EDL and UTF-8 BOM CSV exporters.
+   - Updated `apps/web/app/(workspace)/production/[id]/deliverables/page.tsx`: Enabled CSV, EDL, OTIO, and SRT deliverable exports via `apiDownload()`, with automatic UTF-8 sanitization and safe fallback filenames.
+   - Added integration test coverage in `tests/backend/test_exports_srt.py` for EDL, OTIO, and CSV exports (all 5 tests in suite passing).
+
+2. **Backend Configuration & Model Hardening**:
+   - Fixed `apps/api/app/core/config.py`: Cleaned up path construction and eliminated duplicate adjacent string literals in `DATABASE_URL` and `DATABASE_SYNC_URL`.
+   - Fixed `apps/api/app/models/user.py`: Added `lazy="selectin"` to `User.role` relationship preventing async greenlet serialization errors during authentication.
+   - Fixed `apps/api/main.py`: Cleaned lifespan startup indentation and removed duplicate CORS argument.
+
+3. **Status Ledger Alignment**:
+   - Updated `storyboard-system/docs/API_ROUTE_PARITY_MATRIX.md`: Export row reflects verified integration of `edl`, `otio`, `srt`, and `csv`.
+   - Updated `storyboard-system/docs/CANONICAL_OWNER_MATRIX.md`: Export capability updated to `INTEGRATED_NOT_CUT_OVER (SRT/EDL/OTIO/CSV)`.
+   - Updated `storyboard-system/docs/ACTIVE_WORKSTREAMS.md`: M3 status updated with deliverable exports parity.
+
+## Full Test Suite Results
+- `tests/backend` (Pytest): **20/20 passed** in 4.0s.
+- `storyboard-system/tests`: **116/116 passed** (3 skipped) in 15.2s.
+- `tools/architecture_boundary_gate.py`: **PASS**.
+- `npm run check` (storyboard-system): **PASS**.
+- `npx tsc --noEmit` (packages/ui): **PASS**.
+- `npx tsc --noEmit` (apps/web): **PASS**.

@@ -1,6 +1,7 @@
 """Export API Routes for CMX 3600 EDL, OpenTimelineIO, SubRip SRT, and CSV."""
 from __future__ import annotations
 
+import json
 import re
 import urllib.parse
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -70,7 +71,15 @@ async def export_otio(
 
     fps = prod.fps_num / (prod.fps_den or 1)
     otio_doc = generate_otio(shots, fps=fps, title=prod.name)
-    return otio_doc
+    content = json.dumps(otio_doc, indent=2, ensure_ascii=False)
+    safe_name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", prod.name).strip(" .")[:160] or "Timeline"
+    filename = f"{safe_name}.otio"
+    encoded_filename = urllib.parse.quote(filename)
+    return Response(
+        content=content,
+        media_type="application/json; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"}
+    )
 
 
 @router.get("/srt")

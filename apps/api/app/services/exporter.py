@@ -64,8 +64,9 @@ def generate_cmx3600_edl(shots: list[Any], fps: float = 25.0, is_drop_frame: boo
             clip_name += f"_{getattr(s, 'name')}"
         lines.append(f"* FROM CLIP NAME: {clip_name[:80]}")
 
-        if getattr(s, "voiceover", None):
-            lines.append(f"* COMMENT: VO: {getattr(s, 'voiceover')[:120]}")
+        vo = getattr(s, "voice_over", None) or getattr(s, "voiceover", None)
+        if vo:
+            lines.append(f"* COMMENT: VO: {vo[:120]}")
 
         lines.append("")
         record_in = record_out
@@ -214,15 +215,19 @@ def generate_csv(shots: list[Any], fps: float = 25.0) -> str:
         sec = f"{dur / fps:.2f}"
         tc = frames_to_smpte(dur, fps)
 
+        cam_move = getattr(s, "camera_movement", None)
+        move_str = cam_move.get("type", "") if isinstance(cam_move, dict) else (cam_move or getattr(s, "movement", ""))
+        vo_str = getattr(s, "voice_over", None) or getattr(s, "voiceover", "")
+
         writer.writerow([
             getattr(s, "display_number", ""),
             getattr(s, "name", ""),
             getattr(s, "primary_method", "LIVE"),
             getattr(s, "shot_size", ""),
             getattr(s, "lens_mm", ""),
-            getattr(s, "movement", ""),
+            move_str,
             getattr(s, "description", ""),
-            getattr(s, "voiceover", ""),
+            vo_str,
             sec,
             dur,
             tc,
