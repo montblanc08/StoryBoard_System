@@ -140,7 +140,7 @@ async def list_trash_shots(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """List soft-deleted shots for a production (30-day Trash semantics)."""
+    """List soft-deleted shots for a production. Retention cleanup is not implemented here."""
     result = await db.execute(
         select(Shot).where(
             Shot.production_id == production_id,
