@@ -1,0 +1,170 @@
+name: FRAMEFORGE CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frameforge-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: "true"
+  ENVIRONMENT: "test"
+  NEXT_TELEMETRY_DISABLED: "1"
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  architecture-boundaries:
+    name: Architecture boundaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run architecture boundary gate
+        run: python storyboard-system/tools/architecture_boundary_gate.py
+
+  vnext-backend:
+    name: VNext API contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: apps/api/requirements.txt
+
+      - name: Install API dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r apps/api/requirements.txt
+          # The contract suite uses isolated SQLite databases even though
+          # PostgreSQL is the production target.
+          python -m pip install "aiosqlite>=0.20.0"
+
+      - name: Run API contract tests
+        run: python -m pytest tests/backend -q
+
+  vnext-web:
+    name: VNext Web build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install monorepo dependencies
+        run: npm ci
+
+      - name: Build shared contracts
+        run: npm run build --workspace=@frameforge/contracts
+
+      - name: Build shared timecode
+        run: npm run build --workspace=@frameforge/timecode
+
+      - name: Build shared types
+        run: npm run build --workspace=@frameforge/types
+
+      - name: Build canonical UI package
+        run: npm run build --workspace=@frameforge/ui
+
+      - name: Build Next.js application
+        run: npm run build --workspace=@frameforge/web
+
+  legacy-regression:
+    name: Legacy regression and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: storyboard-system/requirements.txt
+
+      - name: Install Legacy Python dependencies
+        working-directory: storyboard-system
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run Legacy Python regression
+        working-directory: storyboard-system
+        run: python -m unittest discover -s tests -p "test_*.py" -v
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: storyboard-system/package-lock.json
+
+      - name: Install Legacy frontend dependencies
+        working-directory: storyboard-system
+        run: npm ci --workspaces=false
+
+      - name: Typecheck and build Legacy workspace
+        working-directory: storyboard-system
+        run: npm run check
+
+  ci-gate:
+    name: CI gate
+    if: always()
+    needs:
+      - architecture-boundaries
+      - vnext-backend
+      - vnext-web
+      - legacy-regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Require all validation jobs
+        env:
+          ARCHITECTURE_RESULT: ${{ needs.architecture-boundaries.result }}
+          BACKEND_RESULT: ${{ needs.vnext-backend.result }}
+          WEB_RESULT: ${{ needs.vnext-web.result }}
+          LEGACY_RESULT: ${{ needs.legacy-regression.result }}
+        run: |
+          printf 'architecture=%s\nbackend=%s\nweb=%s\nlegacy=%s\n' \
+            "$ARCHITECTURE_RESULT" "$BACKEND_RESULT" "$WEB_RESULT" "$LEGACY_RESULT"
+
+          test "$ARCHITECTURE_RESULT" = "success"
+          test "$BACKEND_RESULT" = "success"
+          test "$WEB_RESULT" = "success"
+          test "$LEGACY_RESULT" = "success"
