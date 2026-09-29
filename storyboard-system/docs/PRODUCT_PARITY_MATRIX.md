@@ -40,7 +40,7 @@ Status vocabulary:
 | Grouping | Present | Present | BLOCKED | Not yet migrated. |
 | Bulk Actions | Present | Present | INTEGRATED_NOT_CUT_OVER | Shot Table mounts the canonical bulk toolbar; method/status/department edits use revision-aware atomic `ShotService` writes and bulk trash uses one project-scoped atomic request. Panel/custom-field/audit parity and fresh rendered visual QA remain incomplete. |
 | Context Menu | Present | Present | BLOCKED | Not yet migrated. |
-| Shot Reorder | Present | Present | IMPLEMENTED_NOT_INTEGRATED | Reorder now runs through revision-aware atomic `ShotService` semantics and V-Web supplies server revisions. Canonical drag/reorder UI plus baseline ordering/audit/browser parity are still missing. |
+| Shot Reorder | Present | Present | IMPLEMENTED_NOT_INTEGRATED | Canonical command now requires one production, the complete active-shot set, exact client `base_order`, and per-shot revisions before any mutation; V-Web hook sends that contract. Canonical drag/reorder UI plus baseline collaboration lease, snapshot/audit and browser parity are still missing. |
 | Undo / Redo | Present | Present | BLOCKED | Not yet migrated. |
 | Save Status / Dirty Draft | Present | Present | INTEGRATED_NOT_CUT_OVER | Inspector now tracks changed fields and preserves drafts; browser/visual regression still required. |
 | Production Steps | Present | Present | BLOCKED | Not yet migrated. |
