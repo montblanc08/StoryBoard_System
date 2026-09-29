@@ -1,7 +1,7 @@
 """Canonical Shot version snapshot routes."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import get_current_user
@@ -12,6 +12,7 @@ from app.schemas.version import (
     ShotBranchCreate,
     ShotVersionCreate,
     ShotVersionMerge,
+    ShotVersionCompareResult,
     ShotVersionMergeResult,
     ShotVersionOut,
     ShotVersionRestore,
@@ -110,6 +111,22 @@ async def create_shot_branch(
     try:
         version = await VersionService.create_branch(db, shot_id, req, current_user)
         return _version_dict(version)
+    except DomainError as error:
+        raise _http(error)
+
+
+@router.get(
+    "/versions/{version_id}/compare",
+    response_model=ShotVersionCompareResult,
+)
+async def compare_shot_version(
+    version_id: str,
+    other_version_id: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        return await VersionService.compare_version(db, version_id, other_version_id)
     except DomainError as error:
         raise _http(error)
 
