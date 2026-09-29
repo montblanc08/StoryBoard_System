@@ -46,23 +46,11 @@ export function useUpdateShot(productionId: string) {
         }
       });
     },
-    onMutate: async ({ id, changes }) => {
-      await queryClient.cancelQueries({ queryKey: ['shots', productionId] });
-      const previousShots = queryClient.getQueryData<Shot[]>(['shots', productionId]);
-
-      if (previousShots) {
-        queryClient.setQueryData<Shot[]>(['shots', productionId], old => {
-          if (!old) return [];
-          return old.map(s => (s.id === id ? { ...s, ...changes, revision: s.revision + 1 } : s));
-        });
-      }
-
-      return { previousShots };
-    },
-    onError: (err, _vars, context) => {
-      if (context?.previousShots) {
-        queryClient.setQueryData(['shots', productionId], context.previousShots);
-      }
+    // The server owns revision assignment. A no-op PATCH may keep the same revision.
+    onSuccess: (savedShot) => {
+      queryClient.setQueryData<Shot[]>(['shots', productionId], old =>
+        old?.map(s => (s.id === savedShot.id ? savedShot : s)) ?? []
+      );
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['shots', productionId] });

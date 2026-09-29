@@ -8,6 +8,19 @@ from app.models.shot import Panel, Shot
 from app.schemas.shot import ShotCreate, ShotPatch
 
 class ShotService:
+    # Patchable shot data only. Identity, ownership, revision, timestamps,
+    # deletion and ordering are managed by their dedicated commands.
+    PATCH_FIELDS = frozenset({
+        "sequence_id", "scene_id", "display_number", "name", "description",
+        "action", "performance", "composition", "director_notes",
+        "duration_frames", "timing_locked", "shot_size", "camera_angle",
+        "camera_height", "lens_mm", "camera", "sensor", "aperture",
+        "shutter", "camera_movement", "dialogue", "voice_over", "subtitle",
+        "music_notes", "sfx_notes", "primary_method", "secondary_methods",
+        "department", "owner_id", "status", "approval_status", "vfx_required",
+        "continuity_notes", "risk_notes",
+    })
+
     @staticmethod
     async def create_shot(db: AsyncSession, production_id: str, req: ShotCreate, user_id: str) -> Shot:
         # Verify production
@@ -88,7 +101,7 @@ class ShotService:
 
         changed = False
         for field, val in req.changes.items():
-            if hasattr(shot, field) and field not in ("id", "production_id", "revision", "created_at"):
+            if field in ShotService.PATCH_FIELDS:
                 current_val = getattr(shot, field)
                 if current_val != val:
                     setattr(shot, field, val)

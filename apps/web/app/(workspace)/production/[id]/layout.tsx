@@ -22,7 +22,7 @@ export default function ProductionLayout({
 
   if (isLoading) {
     return (
-      <div className="flex h-screen w-screen flex-col bg-background">
+      <div className="flex h-screen h-[100dvh] w-screen flex-col bg-background">
         <TopBar />
         <div className="flex flex-1 items-center justify-center text-muted-foreground font-mono text-xs">
           <div className="flex items-center gap-3">
@@ -36,7 +36,7 @@ export default function ProductionLayout({
 
   if (error || !production) {
     return (
-      <div className="flex h-screen w-screen flex-col bg-background">
+      <div className="flex h-screen h-[100dvh] w-screen flex-col bg-background">
         <TopBar />
         <div className="flex flex-1 flex-col items-center justify-center text-center p-8">
           <Icons.TriangleAlert className="h-12 w-12 text-destructive mb-3" />
@@ -55,7 +55,7 @@ export default function ProductionLayout({
   }
 
   return (
-    <div className="flex h-screen w-screen flex-col bg-background overflow-hidden select-none">
+    <div className="flex h-screen h-[100dvh] w-screen flex-col overflow-hidden bg-background pb-[env(safe-area-inset-bottom)] select-none">
       {/* Top Header */}
       <TopBar production={production} />
       {/* <PresenceSync /> */}

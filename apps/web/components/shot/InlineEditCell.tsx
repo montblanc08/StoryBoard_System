@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Input } from '@frameforge/ui';
+import { Button, Input } from '@frameforge/ui';
 import { useUpdateShot } from '@/lib/hooks/useProduction';
 import type { Shot } from '@frameforge/types';
 import { ApiError } from '@/lib/api-client';
@@ -28,6 +28,8 @@ export function InlineEditCell({
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [hasConflict, setHasConflict] = useState(false);
   
   const inputRef = useRef<HTMLInputElement>(null);
   const updateShot = useUpdateShot(productionId);
@@ -44,11 +46,13 @@ export function InlineEditCell({
   const handleDoubleClick = (e: React.MouseEvent) => {
     e.stopPropagation(); // Prevent opening the inspector
     setEditValue(value !== null && value !== undefined ? String(value) : '');
+    setSaveError(null);
+    setHasConflict(false);
     setIsEditing(true);
   };
 
-  const saveChange = async () => {
-    if (!isEditing || isSaving) return;
+  const saveChange = async (retryConflict = false) => {
+    if (!isEditing || isSaving || (hasConflict && !retryConflict)) return;
     
     let finalValue: string | number | null = editValue;
     if (type === 'number') {
@@ -67,14 +71,16 @@ export function InlineEditCell({
         revision: shot.revision,
         changes: { [field]: finalValue }
       });
+      setSaveError(null);
+      setHasConflict(false);
       setIsEditing(false);
     } catch (err: unknown) {
       if (err instanceof ApiError && (err.status === 409 || err.code === 'SHOT_REVISION_CONFLICT')) {
-        alert('并发版本冲突：该镜头已被修改，请刷新。');
+        setHasConflict(true);
+        setSaveError('镜头已在别处修改。当前输入已保留，请核对后重试或放弃。');
       } else {
-        alert('保存失败，请重试');
+        setSaveError(err instanceof Error ? err.message : '保存失败，请重试');
       }
-      setIsEditing(false);
     } finally {
       setIsSaving(false);
     }
@@ -84,7 +90,7 @@ export function InlineEditCell({
     e.stopPropagation(); // prevent row keyboard selection
     if (e.key === 'Enter') {
       e.preventDefault();
-      saveChange();
+      void saveChange();
     } else if (e.key === 'Escape') {
       e.preventDefault();
       setIsEditing(false);
@@ -99,11 +105,24 @@ export function InlineEditCell({
           type={type}
           value={editValue}
           onChange={(e) => setEditValue(e.target.value)}
-          onBlur={saveChange}
+          onBlur={() => { if (!saveError) void saveChange(); }}
           onKeyDown={handleKeyDown}
           disabled={isSaving}
           className="h-7 w-full min-w-[60px] px-1.5 py-0 text-xs bg-background border-ring"
         />
+        {saveError && (
+          <div role="alert" className="absolute left-0 top-full z-30 mt-1 min-w-64 rounded-md border border-warning/40 bg-popover p-2 text-xs text-foreground shadow-lg">
+            <p>{saveError}</p>
+            <div className="mt-2 flex gap-2">
+              <Button size="sm" variant="outline" onMouseDown={e => e.preventDefault()} onClick={() => void saveChange(hasConflict)}>
+                {hasConflict ? '以当前版本重试' : '重试保存'}
+              </Button>
+              <Button size="sm" variant="ghost" onMouseDown={e => e.preventDefault()} onClick={() => { setSaveError(null); setHasConflict(false); setIsEditing(false); }}>
+                放弃输入
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }

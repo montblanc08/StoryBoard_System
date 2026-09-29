@@ -61,28 +61,28 @@ export default function ShotListPage() {
   };
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden">
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
       {/* Table Toolbar */}
-      <div className="flex items-center justify-between border-b border-border bg-card/90 px-6 py-2.5 z-10">
-        <div className="flex items-center gap-3">
-          <div className="relative flex items-center">
+      <div className="z-10 grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border-b border-border bg-card/90 px-3 py-2 sm:flex sm:justify-between sm:px-6 sm:py-2.5">
+        <div className="contents sm:flex sm:min-w-0 sm:items-center sm:gap-3">
+          <div className="relative col-span-2 flex min-w-0 items-center sm:col-auto">
             <Icons.Search className="absolute left-2.5 h-3.5 w-3.5 text-muted-foreground" />
             <Input
               type="text"
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="搜索镜头数据表..."
-              className="w-64 pl-8"
+              className="w-full min-w-0 pl-8 sm:w-64"
             />
           </div>
-          <span className="text-xs font-mono text-muted-foreground">
+          <span className="min-w-0 text-xs font-mono text-muted-foreground">
             共 <span className="font-bold text-foreground">{filteredShots.length}</span> 个镜头
           </span>
         </div>
 
-        <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground">
-          <span>单击行即可在右侧展开检查器</span>
-          <Button variant="ghost" size="sm" onClick={() => setIsTrashOpen(true)} className="ml-4 h-7 text-xs hover:text-foreground">
+        <div className="flex items-center justify-end gap-2 text-xs font-mono text-muted-foreground">
+          <span className="hidden lg:inline">双击镜头打开详情</span>
+          <Button variant="ghost" size="sm" onClick={() => setIsTrashOpen(true)} className="h-8 text-xs hover:text-foreground">
             <Icons.Trash2 className="mr-1.5 h-3.5 w-3.5" />
             废纸篓
           </Button>
@@ -92,18 +92,18 @@ export default function ShotListPage() {
       {isTrashOpen && <ShotTrashModal productionId={production.id} onClose={() => setIsTrashOpen(false)} />}
 
       {/* Table & Inspector Container */}
-      <div className="flex flex-1 overflow-hidden">
-        <div className="flex-1 overflow-y-auto">
+      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+        <div className="min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain" role="region" aria-label="镜头制作表" tabIndex={0}>
           {isLoading ? (
             <div className="flex h-64 items-center justify-center font-mono text-xs text-muted-foreground">
               正在加载镜头制作表...
             </div>
           ) : (
-            <table className="w-full text-left text-xs border-collapse font-sans">
+            <table className="w-full min-w-[1200px] table-fixed border-collapse text-left font-sans text-xs">
               <thead className="sticky top-0 z-10 bg-card border-b border-border text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
                 <tr>
-                  <th className="py-2.5 px-3 w-16">镜号</th>
-                  <th className="py-2.5 px-3 w-28">制作方式</th>
+                  <th scope="col" className="sticky left-0 z-30 w-20 border-r border-border bg-card px-3 py-2.5">镜号</th>
+                  <th scope="col" className="sticky left-20 z-30 w-28 border-r border-border bg-card px-3 py-2.5">制作方式</th>
                   <th className="py-2.5 px-3 w-20">景别</th>
                   <th className="py-2.5 px-3 w-20">焦段</th>
                   <th className="py-2.5 px-3 w-28">机位运镜</th>
@@ -129,16 +129,17 @@ export default function ShotListPage() {
                       onDoubleClick={() => {
                         openInspector(shot.id);
                       }}
-                      className={`cursor-pointer transition-colors duration-100 ${
+                      aria-selected={isSelected}
+                      className={`group cursor-pointer transition-colors duration-100 ${
                         isSelected
                           ? 'bg-accent hover:bg-accent/80'
                           : 'hover:bg-accent'
                       }`}
                     >
-                      <td className="py-2 px-3 font-mono font-bold text-foreground">
+                      <td className={`sticky left-0 z-10 w-20 border-r border-border px-3 py-2 font-mono font-bold text-foreground ${isSelected ? 'bg-accent' : 'bg-card group-hover:bg-accent'}`}>
                         {shot.display_number}
                       </td>
-                      <td className="py-2 px-3">
+                      <td className={`sticky left-20 z-10 w-28 border-r border-border px-3 py-2 ${isSelected ? 'bg-accent' : 'bg-card group-hover:bg-accent'}`}>
                         <MethodBadge method={shot.primary_method} size="sm" />
                       </td>
                       <td className="py-2 px-3 text-foreground font-mono">
@@ -189,13 +190,18 @@ export default function ShotListPage() {
           )}
         </div>
 
-        {/* Inspector on click */}
+        {/* Inspector opens on double-click; it overlays the table on narrow screens. */}
         {isInspectorOpen && inspectedShot && (
-          <ShotInspector
-            shot={inspectedShot}
-            production={production}
-            onClose={closeInspector}
-          />
+          <>
+            <div className="fixed inset-0 z-40 bg-background/70 md:hidden" onClick={closeInspector} aria-hidden="true" />
+            <div className="fixed inset-x-2 top-[58px] bottom-[calc(env(safe-area-inset-bottom)+8px)] z-50 min-w-0 overflow-hidden rounded-lg border border-border bg-card shadow-2xl [&>aside]:h-full [&>aside]:w-full md:static md:inset-auto md:z-auto md:w-[380px] md:shrink-0 md:rounded-none md:border-0 md:shadow-none md:[&>aside]:w-[380px]">
+              <ShotInspector
+                shot={inspectedShot}
+                production={production}
+                onClose={closeInspector}
+              />
+            </div>
+          </>
         )}
       </div>
     </div>

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Button, Input, TextArea, Icons, Select, Checkbox } from '@frameforge/ui';
 import type { Shot, Production } from '@frameforge/types';
 import { framesToTimecode, framesToSeconds } from '@frameforge/timecode';
@@ -16,13 +16,37 @@ interface ShotInspectorProps {
   onClose: () => void;
 }
 
+type ShotDraft = { form: Partial<Shot>; snapshot: Partial<Shot>; changes: Partial<Shot>; revision: number };
+
+function editableShotValues(shot: Shot): Partial<Shot> {
+  return {
+    name: shot.name ?? '', display_number: shot.display_number,
+    description: shot.description ?? '', voice_over: shot.voice_over ?? '',
+    dialogue: shot.dialogue ?? '', subtitle: shot.subtitle ?? '',
+    director_notes: shot.director_notes ?? '', primary_method: shot.primary_method,
+    department: shot.department, owner_id: shot.owner_id ?? '',
+    status: shot.status, duration_frames: shot.duration_frames,
+    timing_locked: shot.timing_locked, shot_size: shot.shot_size ?? null,
+    lens_mm: shot.lens_mm ?? null, camera: shot.camera ?? null,
+    camera_angle: shot.camera_angle ?? null, camera_height: shot.camera_height ?? null,
+    action: shot.action ?? '', composition: shot.composition ?? '',
+    vfx_required: shot.vfx_required
+  };
+}
+
 export function ShotInspector({ shot, production, onClose }: ShotInspectorProps) {
   const queryClient = useQueryClient();
   const updateShot = useUpdateShot(production.id);
   const deleteShot = useDeleteShot(production.id);
 
   const [formData, setFormData] = useState<Partial<Shot>>({});
-  const [isDirty, setIsDirty] = useState(false);
+  const [serverSnapshot, setServerSnapshot] = useState<Partial<Shot>>({});
+  const [changedFields, setChangedFields] = useState<Partial<Shot>>({});
+  const [baseRevision, setBaseRevision] = useState(0);
+  const isDirty = Object.keys(changedFields).length > 0;
+  const [showClosePrompt, setShowClosePrompt] = useState(false);
+  const currentShotIdRef = useRef<string | null>(null);
+  const draftsRef = useRef(new Map<string, ShotDraft>());
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'conflict' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [conflictDetails, setConflictDetails] = useState<{ server_revision?: number; client_revision?: number } | null>(null);
@@ -30,35 +54,30 @@ export function ShotInspector({ shot, production, onClose }: ShotInspectorProps)
   const [activeTab, setActiveTab] = useState<'creative' | 'camera' | 'pipeline' | 'timing'>('creative');
 
   useEffect(() => {
-    if (shot) {
-      setFormData({
-        name: shot.name || '',
-        display_number: shot.display_number,
-        description: shot.description || '',
-        voice_over: shot.voice_over || '',
-        dialogue: shot.dialogue || '',
-        subtitle: shot.subtitle || '',
-        director_notes: shot.director_notes || '',
-        primary_method: shot.primary_method,
-        department: shot.department,
-        owner_id: shot.owner_id || '',
-        status: shot.status,
-        duration_frames: shot.duration_frames,
-        timing_locked: shot.timing_locked,
-        shot_size: shot.shot_size || '全景',
-        lens_mm: shot.lens_mm || 50,
-        camera: shot.camera || 'ARRI Alexa Mini',
-        camera_angle: shot.camera_angle || '平视',
-        camera_height: shot.camera_height || '胸高',
-        action: shot.action || '',
-        composition: shot.composition || '',
-        vfx_required: shot.vfx_required || false
+    if (!shot) return;
+    const values = editableShotValues(shot);
+    if (currentShotIdRef.current === shot.id && isDirty) return;
+    if (currentShotIdRef.current && currentShotIdRef.current !== shot.id && isDirty) {
+      draftsRef.current.set(currentShotIdRef.current, {
+        form: formData, snapshot: serverSnapshot, changes: changedFields, revision: baseRevision
       });
-      setIsDirty(false);
+    }
+    const savedDraft = currentShotIdRef.current === shot.id ? undefined : draftsRef.current.get(shot.id);
+    currentShotIdRef.current = shot.id;
+    if (savedDraft) {
+      setFormData(savedDraft.form);
+      setServerSnapshot(savedDraft.snapshot);
+      setChangedFields(savedDraft.changes);
+      setBaseRevision(savedDraft.revision);
+    } else {
+      setFormData(values);
+      setServerSnapshot(values);
+      setChangedFields({});
+      setBaseRevision(shot.revision);
+    }
       setSaveStatus('idle');
       setErrorMessage(null);
       setConflictDetails(null);
-    }
   }, [shot]);
 
   if (!shot) return null;
@@ -69,22 +88,33 @@ export function ShotInspector({ shot, production, onClose }: ShotInspectorProps)
 
   const handleFieldChange = (field: keyof Shot, value: unknown) => {
     setFormData(prev => ({ ...prev, [field]: value }));
-    setIsDirty(true);
+    setChangedFields(prev => {
+      const next = { ...prev };
+      if (Object.is(value, serverSnapshot[field])) delete (next as Record<string, unknown>)[field];
+      else (next as Record<string, unknown>)[field] = value;
+      return next;
+    });
     if (saveStatus !== 'idle') setSaveStatus('idle');
   };
 
   const handleSave = async () => {
+    if (!Object.keys(changedFields).length || !shot) return;
     try {
       setSaveStatus('saving');
       setErrorMessage(null);
       setConflictDetails(null);
-      await updateShot.mutateAsync({
+      const savedShot = await updateShot.mutateAsync({
         id: shot.id,
-        revision: shot.revision,
-        changes: formData
+        revision: baseRevision,
+        changes: changedFields
       });
+      const values = editableShotValues(savedShot);
+      setFormData(values);
+      setServerSnapshot(values);
+      setChangedFields({});
+      setBaseRevision(savedShot.revision);
+      draftsRef.current.delete(shot.id);
       setSaveStatus('saved');
-      setIsDirty(false);
     } catch (err: unknown) {
       if (err instanceof ApiError && (err.status === 409 || err.code === 'SHOT_REVISION_CONFLICT')) {
         setSaveStatus('conflict');
@@ -100,9 +130,24 @@ export function ShotInspector({ shot, production, onClose }: ShotInspectorProps)
 
   const handleRefetch = () => {
     queryClient.invalidateQueries({ queryKey: ['shots', production.id] });
+    // Keep the draft and its original revision so a concurrent edit stays explicit.
+  };
+
+  const handleDiscard = () => {
+    const values = editableShotValues(shot);
+    setFormData(values);
+    setServerSnapshot(values);
+    setChangedFields({});
+    setBaseRevision(shot.revision);
+    draftsRef.current.delete(shot.id);
     setSaveStatus('idle');
     setErrorMessage(null);
-    setConflictDetails(null);
+    setShowClosePrompt(false);
+  };
+
+  const handleClose = () => {
+    if (isDirty) setShowClosePrompt(true);
+    else onClose();
   };
 
   const handleDelete = async () => {
@@ -146,7 +191,7 @@ export function ShotInspector({ shot, production, onClose }: ShotInspectorProps)
           <Button
             variant="ghost"
             size="sm"
-            onClick={onClose}
+            onClick={handleClose}
             aria-label="关闭镜头详情"
             className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
           >
@@ -154,6 +199,16 @@ export function ShotInspector({ shot, production, onClose }: ShotInspectorProps)
           </Button>
         </div>
       </div>
+
+      {showClosePrompt && (
+        <div role="alertdialog" aria-label="未保存的镜头修改" className="mx-4 mt-3 rounded border border-warning/40 bg-warning/10 p-3 text-xs">
+          <p className="font-medium">此镜头有未保存的修改。</p>
+          <div className="mt-2 flex gap-2">
+            <Button size="sm" onClick={() => setShowClosePrompt(false)}>继续编辑</Button>
+            <Button size="sm" variant="outline" onClick={() => { handleDiscard(); onClose(); }}>放弃修改并关闭</Button>
+          </div>
+        </div>
+      )}
 
       {/* Revision Conflict Banner (409) */}
       {saveStatus === 'conflict' && (
@@ -173,8 +228,9 @@ export function ShotInspector({ shot, production, onClose }: ShotInspectorProps)
           <div className="flex items-center gap-2 pt-1">
             <Button variant="outline" size="sm" onClick={handleRefetch} className="h-7 text-xs">
               <Icons.RefreshCw className="h-3.5 w-3.5 mr-1" />
-              拉取最新版本数据
+              拉取最新版本（保留草稿）
             </Button>
+            <Button variant="outline" size="sm" onClick={handleDiscard} className="h-7 text-xs">放弃草稿</Button>
           </div>
         </div>
       )}
