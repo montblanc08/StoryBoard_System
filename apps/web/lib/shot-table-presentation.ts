@@ -166,6 +166,20 @@ export function loadShotTablePresentationPreferences(
       };
     }
 
+    // Compatibility bridge for the short-lived order/visibility v2 slice.
+    const interimRaw = storage.getItem(`frameforge:shot-table:${productionId}:column-layout-v2`);
+    if (interimRaw) {
+      const interim = JSON.parse(interimRaw) as { order?: unknown; hidden?: unknown };
+      fallback.columnOrder = normalizeShotTableColumnOrder(interim.order);
+      fallback.hiddenColumns = Array.isArray(interim.hidden)
+        ? interim.hidden.filter(
+            (item): item is ShotTableColumnKey =>
+              typeof item === 'string' && COLUMN_KEYS.has(item as ShotTableColumnKey)
+          )
+        : [];
+      return fallback;
+    }
+
     // One-time compatibility bridge for the earlier visibility-only slice.
     const legacyRaw = storage.getItem(`frameforge:shot-table:${productionId}:columns`);
     if (legacyRaw) {
