@@ -5,7 +5,10 @@ import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/authStore';
 import type { Production } from '@frameforge/types';
-import { Badge, Button, Card, Field, Icons, Input, Select } from '@frameforge/ui';
+import {
+  Badge, Button, Card, Dialog, DialogContent, DialogDescription, DialogFooter,
+  DialogHeader, DialogTitle, Field, Icons, Input, Select
+} from '@frameforge/ui';
 import { ProjectCover } from '@/components/ProjectCover';
 
 export default function ProductionsPage() {
@@ -175,18 +178,17 @@ export default function ProductionsPage() {
         )}
       </main>
 
-      {/* New Production Modal */}
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
-          <Card className="w-full max-w-lg p-6 shadow-2xl">
-            <div className="flex items-center justify-between mb-4 pb-3 border-b border-border">
-              <h3 className="text-sm font-bold text-foreground">{t('newProduction')}</h3>
-              <Button variant="ghost" size="icon" aria-label="关闭" onClick={() => setShowModal(false)} className="text-muted-foreground">
-                <Icons.X />
-              </Button>
-            </div>
+      {/* New Production Dialog — shared shadcn/Radix primitive, functional form preserved. */}
+      <Dialog open={showModal} onOpenChange={setShowModal}>
+        <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-lg">
+          <DialogHeader className="border-b border-border pb-3 pr-8">
+            <DialogTitle className="text-sm">{t('newProduction')}</DialogTitle>
+            <DialogDescription className="sr-only">
+              创建新的影视制作项目并设置制作类型、帧率、画幅比例与目标时长。
+            </DialogDescription>
+          </DialogHeader>
 
-            <form onSubmit={handleCreate} className="space-y-4 text-xs">
+          <form onSubmit={handleCreate} className="space-y-4 text-xs">
               <Field label="项目名称">
                 <Input
                   type="text"
@@ -256,24 +258,21 @@ export default function ProductionsPage() {
                 </Field>
               </div>
 
-              <div className="mt-6 flex items-center justify-end gap-3 pt-4 border-t border-border">
-                <Button
-                  variant="outline"
-                  type="button"
-                  onClick={() => setShowModal(false)}
-                >
-                  取消
-                </Button>
-                <Button
-                  type="submit"
-                >
-                  创建项目
-                </Button>
-              </div>
-            </form>
-          </Card>
-        </div>
-      )}
+            <DialogFooter className="border-t border-border pt-4">
+              <Button
+                variant="outline"
+                type="button"
+                onClick={() => setShowModal(false)}
+              >
+                取消
+              </Button>
+              <Button type="submit">
+                创建项目
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
