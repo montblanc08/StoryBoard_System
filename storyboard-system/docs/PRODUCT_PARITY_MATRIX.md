@@ -16,7 +16,7 @@ This document tracks the recovery of existing FRAMEFORGE product capabilities in
 | Capability | Existing Legacy State | VNext Target State | Current V-Web Status | Note |
 | :--- | :--- | :--- | :--- | :--- |
 | Read-first Table (No forced forms) | Present | Present | 🟢 IMPLEMENTED | Restored density |
-| Inline Double-click Editing | Present | Present | 🔴 MISSING | Frequent edits should be inline, deep edits in inspector |
+| Inline Double-click Editing | Present | Present | 🟢 PRESENT | Frequent edits should be inline, deep edits in inspector |
 | Row Single Click | Select | Select | 🟢 IMPLEMENTED | Decoupled from Inspector open |
 | Row Double Click | N/A | Open Inspector | 🟢 IMPLEMENTED | Decoupled from selection |
 | Column Manager (Resize/Reorder) | Present | Present | 🔴 MISSING | High density professional tools missing |
@@ -41,7 +41,7 @@ This document tracks the recovery of existing FRAMEFORGE product capabilities in
 | Capability | Existing Legacy State | VNext Target State | Current V-Web Status | Note |
 | :--- | :--- | :--- | :--- | :--- |
 | Strict No-Op Revision | Present | Present | 🟢 IMPLEMENTED | ShotService extracts and enforces |
-| Shot Command Parity | Present | Present | 🔴 BLOCKED | Still coupled to HTTP, needs architecture separation |
+| Shot Command Parity | Present | Present | 🟡 PARTIAL | Still coupled to HTTP, needs architecture separation |
 | 409 Conflict Rehearsal | Partial | Strict | 🟢 CUTOVER_READY | E2E QA passes |
 | Ephemeral Presence | Active | Redis PubSub | 🔴 BLOCKED | Needs WS auth + Redis multi-worker |
 | Real-time Sync | Active | Websocket/SSE | 🔴 BLOCKED | Needs WS auth + Redis multi-worker |

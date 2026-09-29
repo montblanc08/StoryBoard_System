@@ -29,17 +29,8 @@ export function ShotInspector({ shot, production, onClose }: ShotInspectorProps)
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [activeTab, setActiveTab] = useState<'creative' | 'camera' | 'pipeline' | 'timing'>('creative');
 
-  const currentShotIdRef = React.useRef<string | null>(null);
-
   useEffect(() => {
-    if (!shot) {
-      currentShotIdRef.current = null;
-      return;
-    }
-
-    const isDifferentShot = currentShotIdRef.current !== shot.id;
-    
-    if (isDifferentShot || !isDirty) {
+    if (shot) {
       setFormData({
         name: shot.name || '',
         display_number: shot.display_number,
@@ -63,16 +54,12 @@ export function ShotInspector({ shot, production, onClose }: ShotInspectorProps)
         composition: shot.composition || '',
         vfx_required: shot.vfx_required || false
       });
-      
-      if (isDifferentShot) {
-        setIsDirty(false);
-        setSaveStatus('idle');
-        setErrorMessage(null);
-        setConflictDetails(null);
-        currentShotIdRef.current = shot.id;
-      }
+      setIsDirty(false);
+      setSaveStatus('idle');
+      setErrorMessage(null);
+      setConflictDetails(null);
     }
-  }, [shot, isDirty]);
+  }, [shot]);
 
   if (!shot) return null;
 

@@ -11,6 +11,7 @@ import { MethodBadge } from '@/components/shot/MethodBadge';
 import { StatusBadge } from '@/components/shot/StatusBadge';
 import { ShotInspector } from '@/components/shot/ShotInspector';
 import { ShotTrashModal } from '@/components/shot/ShotTrashModal';
+import { InlineEditCell } from '@/components/shot/InlineEditCell';
 import { shotMovementLabel } from '@/lib/shot-display';
 
 export default function ShotListPage() {
@@ -150,10 +151,10 @@ export default function ShotListPage() {
                         {shotMovementLabel(shot)}
                       </td>
                       <td className="py-2 px-3 text-foreground">
-                        <div className="line-clamp-1">{shot.description || '—'}</div>
+                        <InlineEditCell productionId={production.id} shot={shot} field="description" value={shot.description || ''} placeholder="双击输入画面描述" />
                       </td>
                       <td className="py-2 px-3 text-foreground">
-                        <div className="line-clamp-1">{shot.voice_over || <span className="text-muted-foreground italic">无旁白</span>}</div>
+                        <InlineEditCell productionId={production.id} shot={shot} field="voice_over" value={shot.voice_over || ''} placeholder="双击输入旁白" />
                       </td>
                       <td className="py-2 px-3 text-right font-mono">
                         <div className="flex items-center justify-end gap-1.5">

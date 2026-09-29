@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi import HTTPException, status
+from app.core.exceptions import NotFoundError, ConflictError
 from app.models.production import Production
 from app.models.shot import Panel, Shot
 from app.schemas.shot import ShotCreate, ShotPatch
@@ -13,7 +13,7 @@ class ShotService:
         # Verify production
         p_res = await db.execute(select(Production).where(Production.id == production_id, Production.deleted_at.is_(None)))
         if not p_res.scalar_one_or_none():
-            raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "项目不存在"})
+            raise NotFoundError("项目不存在")
 
         # Get max sort index
         max_res = await db.execute(
@@ -74,19 +74,15 @@ class ShotService:
         result = await db.execute(select(Shot).where(Shot.id == shot_id, Shot.deleted_at.is_(None)))
         shot = result.scalar_one_or_none()
         if not shot:
-            raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "镜头不存在"})
+            raise NotFoundError("镜头不存在")
 
-        # Optimistic Concurrency Control (Spec Section 107-108)
+        # Optimistic Concurrency Control
         if shot.revision != req.revision:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "code": "SHOT_REVISION_CONFLICT",
-                    "message": "该镜头已被其他用户修改，请刷新并核对最新版本。",
-                    "details": {
-                        "server_revision": shot.revision,
-                        "client_revision": req.revision
-                    }
+            raise ConflictError(
+                message="该镜头已被其他用户修改，请刷新并核对最新版本。",
+                details={
+                    "server_revision": shot.revision,
+                    "client_revision": req.revision
                 }
             )
 

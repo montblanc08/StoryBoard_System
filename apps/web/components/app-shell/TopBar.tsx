@@ -49,8 +49,7 @@ export function TopBar({ production }: TopBarProps) {
 
       {/* Right: Controls, Theme, i18n & User Profile */}
       <div className="flex shrink-0 items-center gap-1 text-xs sm:gap-3">
-        {/* Feature Gate: Presence is disabled until WS Auth and Redis are implemented */}
-        {/* {production && <PresenceBar productionId={production.id} />} */}
+        {production && <PresenceBar productionId={production.id} />}
 
         {/* Locale Toggle */}
         <Button variant="outline" size="sm"
