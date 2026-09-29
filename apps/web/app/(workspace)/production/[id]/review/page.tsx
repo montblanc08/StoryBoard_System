@@ -1,180 +1,322 @@
 'use client';
 
-import { Button, Card, Input } from '@frameforge/ui';
-
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { useProduction, useShots, useUpdateShot } from '@/lib/hooks/useProduction';
+import { Button, Card, Icons, TextArea } from '@frameforge/ui';
+import { useProduction, useShots } from '@/lib/hooks/useProduction';
+import {
+  type ReviewAction,
+  useApplyReviewDecision,
+  useCreateReviewComment,
+  useResolveReviewComment,
+  useReviewComments,
+  useReviewDecisions
+} from '@/lib/hooks/useReview';
 import { StatusBadge } from '@/components/shot/StatusBadge';
 import { MethodBadge } from '@/components/shot/MethodBadge';
 import { shotMovementLabel } from '@/lib/shot-display';
 
 export default function ReviewPage() {
   const params = useParams();
-  const id = typeof params?.id === 'string' ? params.id : '';
+  const productionId = typeof params?.id === 'string' ? params.id : '';
 
-  const { data: production } = useProduction(id);
-  const { data: shots = [] } = useShots(id);
-  const updateShot = useUpdateShot(id);
+  const { data: production } = useProduction(productionId);
+  const { data: shots = [], isLoading } = useShots(productionId);
 
   const [activeShotIndex, setActiveShotIndex] = useState(0);
   const [commentText, setCommentText] = useState('');
-  const [comments, setComments] = useState<Record<string, { id: string; user: string; text: string; time: string }[]>>({
-    '001': [
-      { id: 'c1', user: '李制片', text: '开篇渤海海面航拍气势不错，注意调色保持冷色调质感。', time: '10:30' }
-    ]
-  });
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  if (!production || shots.length === 0) return null;
+  useEffect(() => {
+    if (activeShotIndex >= shots.length) setActiveShotIndex(0);
+  }, [activeShotIndex, shots.length]);
 
   const currentShot = shots[activeShotIndex] || shots[0];
+  const shotId = currentShot?.id || '';
 
-  const handleApprove = async () => {
-    await updateShot.mutateAsync({
-      id: currentShot.id,
-      revision: currentShot.revision,
-      changes: { status: 'approved' }
-    });
+  const { data: comments = [], isLoading: commentsLoading } = useReviewComments(shotId);
+  const { data: decisions = [] } = useReviewDecisions(shotId);
+  const createComment = useCreateReviewComment(shotId);
+  const resolveComment = useResolveReviewComment(shotId);
+  const applyDecision = useApplyReviewDecision(productionId, shotId);
+
+  const runDecision = async (action: ReviewAction) => {
+    if (!currentShot) return;
+    setActionError(null);
+    try {
+      await applyDecision.mutateAsync({
+        revision: currentShot.revision,
+        action
+      });
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '审片操作失败');
+    }
   };
 
-  const handleRequestChanges = async () => {
-    await updateShot.mutateAsync({
-      id: currentShot.id,
-      revision: currentShot.revision,
-      changes: { status: 'changes_requested' }
-    });
+  const handleAddComment = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const body = commentText.trim();
+    if (!body || !currentShot) return;
+    setActionError(null);
+    try {
+      await createComment.mutateAsync(body);
+      setCommentText('');
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '发送批注失败');
+    }
   };
 
-  const handleAddComment = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!commentText.trim()) return;
-    const shotNum = currentShot.display_number;
-    const existing = comments[shotNum] || [];
-    setComments({
-      ...comments,
-      [shotNum]: [
-        ...existing,
-        { id: String(Date.now()), user: '制作审片员', text: commentText, time: '刚刚' }
-      ]
-    });
-    setCommentText('');
-  };
+  if (isLoading || !production) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        正在加载审片工作区...
+      </div>
+    );
+  }
 
-  const shotComments = comments[currentShot.display_number] || [];
+  if (!currentShot) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        当前项目还没有可审阅的镜头。
+      </div>
+    );
+  }
+
+  const canSubmit = ['draft', 'in_progress', 'changes_requested'].includes(currentShot.status);
+  const isInReview = currentShot.status === 'review';
 
   return (
-    <div className="flex h-full w-full overflow-hidden">
-      {/* Left: Shot Queue List */}
-      <aside className="w-72 border-r border-border bg-background flex flex-col">
-        <div className="p-4 border-b border-border bg-card/60">
-          <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">审片镜头队列 ({shots.length})</h3>
+    <div className="flex h-full min-h-0 w-full flex-col overflow-hidden lg:flex-row">
+      <aside className="flex max-h-52 w-full shrink-0 flex-col border-b border-border bg-background lg:max-h-none lg:w-72 lg:border-b-0 lg:border-r">
+        <div className="border-b border-border bg-card/60 p-4">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-foreground">
+            审片镜头队列 ({shots.length})
+          </h3>
         </div>
 
         <div className="flex-1 overflow-y-auto divide-y divide-border">
-          {shots.map((shot, idx) => (
-            <div
+          {shots.map((shot, index) => (
+            <button
               key={shot.id}
-              onClick={() => setActiveShotIndex(idx)}
-              className={`p-3 cursor-pointer transition flex items-center justify-between text-xs ${
-                idx === activeShotIndex
-                  ? 'bg-accent text-accent-foreground border-l-4 border-ring'
-                  : 'hover:bg-accent text-foreground'
+              type="button"
+              onClick={() => {
+                setActiveShotIndex(index);
+                setActionError(null);
+              }}
+              className={`flex w-full items-center justify-between gap-3 p-3 text-left text-xs transition-colors ${
+                index === activeShotIndex
+                  ? 'bg-accent text-accent-foreground'
+                  : 'text-foreground hover:bg-accent/70'
               }`}
             >
-              <div className="space-y-0.5 truncate">
-                <div className="flex items-center gap-2 font-mono font-bold">
-                  <span className="text-foreground">{shot.display_number}</span>
+              <span className="min-w-0 space-y-0.5">
+                <span className="flex items-center gap-2 font-mono font-bold">
+                  <span className="shrink-0">{shot.display_number}</span>
                   <span className="truncate">{shot.name || `镜头 ${shot.display_number}`}</span>
-                </div>
-                <div className="text-[10px] text-muted-foreground">{shot.duration_frames}f · {shot.primary_method}</div>
-              </div>
-
+                </span>
+                <span className="block text-[10px] text-muted-foreground">
+                  {shot.duration_frames}f · {shot.primary_method}
+                </span>
+              </span>
               <StatusBadge status={shot.status} />
-            </div>
+            </button>
           ))}
         </div>
       </aside>
 
-      {/* Center: Frame Review Monitor & Discussion */}
-      <div className="flex-1 flex flex-col overflow-y-auto bg-background p-8 space-y-6">
-        {/* Monitor Frame */}
-        <div className="relative w-full max-w-3xl mx-auto aspect-video rounded-xl border border-border bg-card shadow-2xl p-6 flex flex-col justify-between overflow-hidden">
-          <div className="flex items-center justify-between z-10">
-            <span className="font-mono text-sm font-bold text-foreground">
-              SHOT {currentShot.display_number}
-            </span>
-            <div className="flex items-center gap-2">
-              <MethodBadge method={currentShot.primary_method} />
-              <StatusBadge status={currentShot.status} />
+      <main className="min-h-0 flex-1 overflow-y-auto bg-background p-4 sm:p-6 lg:p-8">
+        <div className="mx-auto flex w-full max-w-4xl flex-col gap-5">
+          <Card className="flex aspect-video min-h-[280px] flex-col justify-between overflow-hidden p-6">
+            <div className="flex items-center justify-between gap-3">
+              <span className="font-mono text-sm font-bold text-foreground">
+                SHOT {currentShot.display_number}
+              </span>
+              <div className="flex items-center gap-2">
+                <MethodBadge method={currentShot.primary_method} />
+                <StatusBadge status={currentShot.status} />
+              </div>
             </div>
-          </div>
 
-          <div className="text-center space-y-3 z-10">
-            <h2 className="text-lg font-bold text-foreground">{currentShot.name}</h2>
-            <p className="text-xs text-foreground max-w-lg mx-auto leading-relaxed">{currentShot.description}</p>
-            {currentShot.voice_over && (
-              <div className="bg-background/80 border border-border p-3 rounded text-xs text-foreground max-w-lg mx-auto">
-                <span className="font-bold text-foreground mr-2">旁白:</span>
-                {currentShot.voice_over}
+            <div className="mx-auto max-w-2xl space-y-3 text-center">
+              <h2 className="text-lg font-semibold text-foreground">
+                {currentShot.name || `镜头 ${currentShot.display_number}`}
+              </h2>
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                {currentShot.description || '暂无画面描述'}
+              </p>
+              {currentShot.voice_over && (
+                <div className="rounded-md border border-border bg-muted/40 p-3 text-left text-sm text-foreground">
+                  <span className="mr-2 font-semibold">旁白</span>
+                  {currentShot.voice_over}
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 font-mono text-xs text-muted-foreground">
+              <span>
+                {currentShot.shot_size || '—'} · {currentShot.lens_mm ? `${currentShot.lens_mm}mm` : '—'} · {shotMovementLabel(currentShot)}
+              </span>
+              <span className="font-bold text-foreground">{currentShot.duration_frames} 帧</span>
+            </div>
+          </Card>
+
+          <Card className="p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="mr-auto">
+                <div className="text-sm font-semibold text-foreground">审片决策</div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  决策会绑定当前镜头 revision，并写入独立审片记录。
+                </div>
+              </div>
+
+              {canSubmit && (
+                <Button
+                  onClick={() => runDecision('submit')}
+                  disabled={applyDecision.isPending}
+                >
+                  提交意见
+                </Button>
+              )}
+
+              {isInReview && (
+                <>
+                  <Button
+                    variant="outline"
+                    onClick={() => runDecision('withdraw')}
+                    disabled={applyDecision.isPending}
+                  >
+                    撤回意见
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={() => runDecision('request_changes')}
+                    disabled={applyDecision.isPending}
+                  >
+                    驳回意见
+                  </Button>
+                  <Button
+                    onClick={() => runDecision('approve')}
+                    disabled={applyDecision.isPending}
+                  >
+                    同意意见
+                  </Button>
+                </>
+              )}
+
+              {!canSubmit && !isInReview && (
+                <span className="text-xs text-muted-foreground">
+                  当前状态没有可执行的审片动作。
+                </span>
+              )}
+            </div>
+
+            {actionError && (
+              <div role="alert" className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
+                {actionError}
               </div>
             )}
-          </div>
 
-          <div className="flex items-center justify-between text-xs font-mono text-muted-foreground z-10">
-            <span>{currentShot.shot_size} · {currentShot.lens_mm}mm · {shotMovementLabel(currentShot)}</span>
-            <span className="font-bold text-foreground">{currentShot.duration_frames} 帧</span>
-          </div>
-        </div>
-
-        {/* Approval Actions Bar */}
-        <div className="flex items-center justify-center gap-4 max-w-3xl mx-auto w-full">
-          <Button
-            variant="destructive"
-            onClick={handleRequestChanges}
-            className="flex-1"
-          >
-            提出修改意见 (Request Changes)
-          </Button>
-          <Button
-            onClick={handleApprove}
-            className="flex-1"
-          >
-            通过审批 (Approve Shot)
-          </Button>
-        </div>
-
-        {/* Comments & Notes */}
-        <Card className="max-w-3xl mx-auto w-full p-6 space-y-4 text-xs">
-          <h3 className="font-bold text-foreground text-sm">审片批注与意见 ({shotComments.length})</h3>
-
-          <div className="space-y-3">
-            {shotComments.map(c => (
-              <div key={c.id} className="rounded border border-border bg-background p-3 space-y-1">
-                <div className="flex items-center justify-between text-muted-foreground font-mono text-[11px]">
-                  <span className="font-bold text-foreground">{c.user}</span>
-                  <span>{c.time}</span>
+            {decisions.length > 0 && (
+              <div className="mt-4 border-t border-border pt-3">
+                <div className="mb-2 text-xs font-semibold text-foreground">最近决策</div>
+                <div className="space-y-1.5">
+                  {decisions.slice(0, 4).map(decision => (
+                    <div
+                      key={decision.id}
+                      className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"
+                    >
+                      <span>
+                        {decision.action_label} · {decision.previous_status} → {decision.next_status}
+                      </span>
+                      <span className="font-mono">
+                        {new Date(decision.created_at).toLocaleString()}
+                      </span>
+                    </div>
+                  ))}
                 </div>
-                <p className="text-foreground">{c.text}</p>
               </div>
-            ))}
-          </div>
+            )}
+          </Card>
 
-          <form onSubmit={handleAddComment} className="flex gap-2 pt-2">
-            <Input
-              type="text"
-              value={commentText}
-              onChange={e => setCommentText(e.target.value)}
-              placeholder="添加该镜头的导演审片批注..."
-              className="flex-1"
-            />
-            <Button
-              type="submit"
-            >
-              发送批注
-            </Button>
-          </form>
-        </Card>
-      </div>
+          <Card className="p-5">
+            <div className="mb-4 flex items-center gap-2">
+              <Icons.MessageSquare className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+              <h3 className="text-sm font-semibold text-foreground">
+                审片批注与意见 ({comments.length})
+              </h3>
+            </div>
+
+            <div className="space-y-3">
+              {commentsLoading ? (
+                <div className="py-6 text-center text-xs text-muted-foreground">正在加载批注...</div>
+              ) : comments.length === 0 ? (
+                <div className="rounded-md border border-dashed border-border p-6 text-center text-xs text-muted-foreground">
+                  暂无批注。
+                </div>
+              ) : (
+                comments.map(comment => (
+                  <div
+                    key={comment.id}
+                    className={`rounded-md border border-border p-3 ${
+                      comment.is_resolved ? 'bg-muted/30 opacity-70' : 'bg-background'
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                      <span className="font-semibold text-foreground">
+                        {comment.author_name || '内部用户'}
+                      </span>
+                      <span className="font-mono">
+                        {new Date(comment.created_at).toLocaleString()}
+                      </span>
+                    </div>
+
+                    {comment.quote_text && (
+                      <div className="mt-2 border-l-2 border-border pl-3 text-xs text-muted-foreground">
+                        {comment.quote_text}
+                      </div>
+                    )}
+
+                    <p className="mt-2 whitespace-pre-wrap text-sm text-foreground">
+                      {comment.body}
+                    </p>
+
+                    <div className="mt-2 flex justify-end">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => resolveComment.mutate({
+                          id: comment.id,
+                          resolved: !comment.is_resolved
+                        })}
+                        disabled={resolveComment.isPending}
+                      >
+                        {comment.is_resolved ? '重新打开' : '标记已处理'}
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <form onSubmit={handleAddComment} className="mt-4 space-y-2 border-t border-border pt-4">
+              <TextArea
+                rows={3}
+                value={commentText}
+                onChange={event => setCommentText(event.target.value)}
+                placeholder="添加该镜头的导演审片批注..."
+              />
+              <div className="flex justify-end">
+                <Button
+                  type="submit"
+                  disabled={!commentText.trim() || createComment.isPending}
+                >
+                  {createComment.isPending ? '发送中…' : '发送批注'}
+                </Button>
+              </div>
+            </form>
+          </Card>
+        </div>
+      </main>
     </div>
   );
 }
