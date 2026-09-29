@@ -699,3 +699,71 @@ When no legitimate blocker exists and the user requested continued migration, co
 ## 27. No False Completion
 
 Never claim:
+
+- “fully migrated”;
+- “React complete”;
+- “FastAPI complete”;
+- “PostgreSQL complete”;
+- “Presence complete”;
+- “AI complete”;
+- “Legacy removed”;
+
+unless real consumers, runtime ownership, tests, and removal gates support the statement.
+
+Prefer exact status language, for example:
+
+> The target implementation exists and passes its isolated tests, but the real workspace still consumes the Legacy owner. State: IMPLEMENTED_NOT_INTEGRATED.
+
+Accuracy is more important than optimistic progress reporting.
+
+---
+
+## 28. Efficient Long-Running Migration Loop
+
+For long tasks, use a bounded loop:
+
+`Inspect → choose one coherent slice → establish owners → implement → targeted verify → integrate real consumer → broader verify → update canonical docs/matrix → commit → push → re-read dynamic state → continue.`
+
+Do not accumulate many unverified architectural changes before testing.
+
+Do not postpone documentation truth reconciliation until the very end.
+
+Do not rewrite a confusing subsystem before tracing its consumer, state, event, request, mutation, and persistence path.
+
+---
+
+## 29. Final Reporting
+
+At a meaningful checkpoint or legitimate stop condition, report concisely:
+
+- Completed
+- Verified
+- Migration state
+- Tests / browser QA
+- Commit
+- Push status
+- Remaining blocker
+- Next unblocked slice
+
+Do not dump a transcript of every command.
+
+Report architectural outcomes and evidence.
+
+---
+
+## 30. Core Principle
+
+When uncertain, prefer:
+
+`evidence over assumption`  
+`integration over scaffolding`  
+`one owner over parallel owners`  
+`runtime truth over naming`  
+`real consumer verification over isolated existence`  
+`small coherent slices over broad rewrites`  
+`documentation truth over optimistic status`  
+`continuation over premature completion`
+
+The objective is not to make FRAMEFORGE look migrated.
+
+The objective is to make FRAMEFORGE actually converge.
