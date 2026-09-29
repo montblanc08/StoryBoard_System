@@ -105,6 +105,10 @@ class BulkUpdateShotsRequest(BaseModel):
     revisions: dict[str, int] = Field(default_factory=dict)
 
 
+class BulkTrashShotsRequest(BaseModel):
+    shot_ids: list[str]
+
+
 class ShotOut(BaseModel):
     id: str
     production_id: str
