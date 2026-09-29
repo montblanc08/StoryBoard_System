@@ -23,12 +23,10 @@ class ShotService:
 
     @staticmethod
     async def create_shot(db: AsyncSession, production_id: str, req: ShotCreate, user_id: str) -> Shot:
-        # Verify production
         p_res = await db.execute(select(Production).where(Production.id == production_id, Production.deleted_at.is_(None)))
         if not p_res.scalar_one_or_none():
             raise NotFoundError("项目不存在")
 
-        # Get max sort index
         max_res = await db.execute(
             select(func.coalesce(func.max(Shot.sort_index), 0.0)).where(Shot.production_id == production_id)
         )
@@ -69,7 +67,6 @@ class ShotService:
         )
         db.add(shot)
 
-        # Add default panel
         panel = Panel(
             id=str(uuid.uuid4()),
             shot_id=sid,
@@ -79,7 +76,6 @@ class ShotService:
         )
         db.add(panel)
         await db.flush()
-
         return shot
 
     @staticmethod
@@ -89,7 +85,6 @@ class ShotService:
         if not shot:
             raise NotFoundError("镜头不存在")
 
-        # Optimistic Concurrency Control
         if shot.revision != req.revision:
             raise ConflictError(
                 message="该镜头已被其他用户修改，请刷新并核对最新版本。",
@@ -113,3 +108,42 @@ class ShotService:
             await db.flush()
 
         return shot
+
+    @staticmethod
+    async def trash_shot(db: AsyncSession, shot_id: str, user_id: str) -> bool:
+        """Soft-delete an active shot. Already-missing/deleted shots stay idempotent."""
+        result = await db.execute(select(Shot).where(Shot.id == shot_id, Shot.deleted_at.is_(None)))
+        shot = result.scalar_one_or_none()
+        if not shot:
+            return False
+
+        shot.deleted_at = datetime.now(timezone.utc)
+        shot.updated_at = shot.deleted_at
+        await db.flush()
+        return True
+
+    @staticmethod
+    async def restore_shot(db: AsyncSession, shot_id: str, user_id: str) -> Shot:
+        """Restore a trashed shot and advance the authoritative revision exactly once."""
+        result = await db.execute(select(Shot).where(Shot.id == shot_id, Shot.deleted_at.is_not(None)))
+        shot = result.scalar_one_or_none()
+        if not shot:
+            raise NotFoundError("镜头不在废纸篓中")
+
+        shot.deleted_at = None
+        shot.revision += 1
+        shot.updated_at = datetime.now(timezone.utc)
+        await db.flush()
+        return shot
+
+    @staticmethod
+    async def purge_shot(db: AsyncSession, shot_id: str, user_id: str) -> bool:
+        """Permanently delete a shot only when it is already in Trash."""
+        result = await db.execute(select(Shot).where(Shot.id == shot_id, Shot.deleted_at.is_not(None)))
+        shot = result.scalar_one_or_none()
+        if not shot:
+            return False
+
+        await db.delete(shot)
+        await db.flush()
+        return True
