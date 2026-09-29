@@ -150,7 +150,7 @@ export default function ProductionsPage() {
                 }}
                 className="group flex cursor-pointer items-center gap-4 p-4 transition hover:bg-accent/40"
               >
-                <ProjectCover name={prod.name} coverMediaId={(prod as any).cover_media_id} />
+                <ProjectCover name={prod.name} />
                 <div className="min-w-0 flex-1 space-y-1.5">
                   <h3 className="truncate text-base font-bold tracking-tight text-foreground">{prod.name}</h3>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-mono text-muted-foreground">
