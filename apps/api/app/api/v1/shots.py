@@ -93,11 +93,7 @@ async def delete_shot(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    result = await db.execute(select(Shot).where(Shot.id == id, Shot.deleted_at.is_(None)))
-    shot = result.scalar_one_or_none()
-    if shot:
-        shot.deleted_at = datetime.now(timezone.utc)
-        await db.flush()
+    await ShotService.trash_shot(db, id, current_user.id)
     return None
 
 
@@ -108,15 +104,11 @@ async def restore_shot(
     current_user: User = Depends(get_current_user)
 ) -> dict:
     """Restore a soft-deleted shot."""
-    result = await db.execute(select(Shot).where(Shot.id == id, Shot.deleted_at.is_not(None)))
-    shot = result.scalar_one_or_none()
-    if not shot:
-        raise HTTPException(status_code=404, detail="Shot not found in trash")
-    shot.deleted_at = None
-    # Bump revision to notify clients of state change
-    shot.revision += 1
-    await db.flush()
-    return {"ok": True, "id": id}
+    try:
+        shot = await ShotService.restore_shot(db, id, current_user.id)
+        return {"ok": True, "id": shot.id, "revision": shot.revision}
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail={"code": e.code, "message": e.message})
 
 
 @router.delete("/shots/{id}/purge", status_code=status.HTTP_204_NO_CONTENT)
@@ -125,12 +117,8 @@ async def purge_shot(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Permanently delete a shot."""
-    result = await db.execute(select(Shot).where(Shot.id == id, Shot.deleted_at.is_not(None)))
-    shot = result.scalar_one_or_none()
-    if shot:
-        await db.delete(shot)
-        await db.flush()
+    """Permanently delete a shot that is already in Trash."""
+    await ShotService.purge_shot(db, id, current_user.id)
     return None
 
 
