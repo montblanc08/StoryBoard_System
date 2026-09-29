@@ -35,7 +35,8 @@ Status vocabulary:
 | Saved View / Column Layout | Present | Present | BLOCKED | Not yet migrated. |
 | Row Height | Present | Present | BLOCKED | Not yet migrated. |
 | Search | Present | Present | INTEGRATED_NOT_CUT_OVER | Basic local search exists; parity with baseline search/filter semantics is incomplete. |
-| Filtering & Sorting | Present | Present | BLOCKED | Not yet migrated. |
+| Multi-select | Present | Present | INTEGRATED_NOT_CUT_OVER | Shift-range and Ctrl/Cmd toggle selection now use the canonical workspace selection owner; bulk-action UI parity remains incomplete. |
+| Filtering & Sorting | Present | Present | INTEGRATED_NOT_CUT_OVER | Canonical V-Web now consumes workspace search plus method/department/status filters and client sorting; advanced baseline filter semantics and persisted saved views remain. |
 | Grouping | Present | Present | BLOCKED | Not yet migrated. |
 | Bulk Actions | Present | Present | BLOCKED | Canonical UI is still missing. V-API bulk writes now use revision-aware atomic `ShotService` semantics and suppress no-op revisions; Panel/custom-field/audit parity remains incomplete. |
 | Context Menu | Present | Present | BLOCKED | Not yet migrated. |
