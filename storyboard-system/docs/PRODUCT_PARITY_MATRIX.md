@@ -40,7 +40,7 @@ Status vocabulary:
 | Grouping | Present | Present | BLOCKED | Not yet migrated. |
 | Bulk Actions | Present | Present | INTEGRATED_NOT_CUT_OVER | Shot Table mounts the canonical bulk toolbar; method/status/department edits use revision-aware atomic `ShotService` writes and bulk trash uses one project-scoped atomic request. Panel/custom-field/audit parity and fresh rendered visual QA remain incomplete. |
 | Context Menu | Present | Present | BLOCKED | Not yet migrated. |
-| Shot Reorder | Present | Present | BLOCKED | API exists but canonical UI/command parity is incomplete. |
+| Shot Reorder | Present | Present | IMPLEMENTED_NOT_INTEGRATED | Reorder now runs through revision-aware atomic `ShotService` semantics and V-Web supplies server revisions. Canonical drag/reorder UI plus baseline ordering/audit/browser parity are still missing. |
 | Undo / Redo | Present | Present | BLOCKED | Not yet migrated. |
 | Save Status / Dirty Draft | Present | Present | INTEGRATED_NOT_CUT_OVER | Inspector now tracks changed fields and preserves drafts; browser/visual regression still required. |
 | Production Steps | Present | Present | BLOCKED | Not yet migrated. |
@@ -54,7 +54,7 @@ Status vocabulary:
 | Capability | Baseline | VNext target | Status | Gap / evidence |
 | :--- | :--- | :--- | :--- | :--- |
 | Strict No-Op Revision | Present | Present | INTEGRATED_NOT_CUT_OVER | `ShotService.patch_shot` suppresses revision changes for no-op writes and has a focused contract test. |
-| Shot Command Parity | Present | Present | INTEGRATED_NOT_CUT_OVER | Create/PATCH, trash/restore/purge, and bulk writes now flow through `ShotService`; reorder plus actor/audit/history and full Panel/asset semantics still need convergence. |
+| Shot Command Parity | Present | Present | INTEGRATED_NOT_CUT_OVER | Create/PATCH, trash/restore/purge, bulk writes and reorder now flow through `ShotService`; actor/audit/history and full Panel/asset/custom-field semantics still need convergence. |
 | 409 Conflict | Present | Strict | INTEGRATED_NOT_CUT_OVER | API conflict path and draft-preserving UI exist; full end-to-end/browser conflict resolution is not yet cutover-ready. |
 | Ephemeral Presence | Active | Authenticated Redis-backed | BLOCKED | Canonical UI consumer must remain disconnected until WS auth + Redis multi-worker semantics are complete. |
 | Real-time Sync | Active | Authenticated realtime | BLOCKED | No authoritative cutover yet. |
