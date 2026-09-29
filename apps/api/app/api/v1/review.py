@@ -55,6 +55,7 @@ def _comment_dict(comment, author_name: str = "") -> dict:
         "shot_id": comment.shot_id,
         "user_id": comment.user_id,
         "author_name": author_name,
+        "role": comment.role,
         "body": comment.body,
         "timecode": comment.timecode,
         "quote_field": comment.quote_field,
