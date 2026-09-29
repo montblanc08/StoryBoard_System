@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -56,3 +56,16 @@ class ShotVersionMergeResult(BaseModel):
     revision: int
     merged_version_id: str
     backup_version_id: Optional[str] = None
+
+class ShotVersionFieldDiff(BaseModel):
+    field: str
+    version_value: Any = None
+    other_value: Any = None
+
+
+class ShotVersionCompareResult(BaseModel):
+    version_id: str
+    other_version_id: Optional[str] = None
+    against_current: bool
+    shot_id: str
+    differences: list[ShotVersionFieldDiff]
