@@ -50,11 +50,17 @@ class _Result:
         return SimpleNamespace(all=lambda: self.rows)
 
 
+class _AuditLog:
+    def __init__(self, **kwargs):
+        self.__dict__.update(kwargs)
+
+
 class _Session:
     def __init__(self, rows):
         self.rows = rows
         self.flush_count = 0
         self.delete_count = 0
+        self.added = []
 
     async def execute(self, statement):
         return _Result(self.rows)
@@ -65,6 +71,9 @@ class _Session:
     async def delete(self, shot):
         self.delete_count += 1
         self.rows = [row for row in self.rows if row is not shot]
+
+    def add(self, entity):
+        self.added.append(entity)
 
 
 class _DomainError(Exception):
@@ -88,8 +97,10 @@ def _service_class():
         "AsyncSession": object,
         "ShotCreate": object,
         "ShotPatch": object,
+        "ShotReorderRequest": object,
         "BulkUpdateShotsRequest": object,
         "Shot": _Shot,
+        "AuditLog": _AuditLog,
         "select": lambda model: _Select(),
         "NotFoundError": LookupError,
         "DomainError": _DomainError,
@@ -120,7 +131,11 @@ class ShotServiceTrashContractTest(unittest.TestCase):
         self.assertEqual(result["moved_count"], 1)
         self.assertEqual(result["already_trashed_count"], 1)
         self.assertIsNotNone(active.deleted_at)
+        self.assertEqual(active.revision, 3)
         self.assertEqual(db.flush_count, 1)
+        self.assertEqual(len(db.added), 1)
+        self.assertEqual(db.added[0].action, "shot.trash")
+        self.assertTrue(db.added[0].metadata_json["bulk"])
 
         foreign = _Shot("shot-c", "production-2")
         scoped_db = _Session([active, foreign])
@@ -148,10 +163,12 @@ class ShotServiceTrashContractTest(unittest.TestCase):
         self.assertIs(restored, shot)
         self.assertIsNone(shot.deleted_at)
         self.assertEqual(shot.revision, 3)
+        self.assertEqual(db.added[-1].action, "shot.restore")
 
         shot.deleted_at = datetime(2026, 1, 2, tzinfo=timezone.utc)
         self.assertTrue(asyncio.run(service.purge_shot(db, shot.id, "editor-1")))
         self.assertEqual(db.delete_count, 1)
+        self.assertEqual(db.added[-1].action, "shot.purge")
 
 
 if __name__ == "__main__":
