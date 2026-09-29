@@ -14,7 +14,7 @@ from app.models.collaboration import AuditLog, ShotVersion
 from app.models.shot import Shot
 from app.models.user import User
 from app.schemas.shot import ShotPatch
-from app.schemas.version import ShotVersionCreate, ShotVersionRestore
+from app.schemas.version import ShotBranchCreate, ShotVersionCreate, ShotVersionMerge, ShotVersionRestore
 from app.services.shot_service import ShotService
 
 
@@ -175,6 +175,64 @@ class VersionService:
         return version
 
     @staticmethod
+    async def create_branch(
+        db: AsyncSession,
+        shot_id: str,
+        req: ShotBranchCreate,
+        user: User,
+    ) -> ShotVersion:
+        """Create a named immutable branch snapshot.
+
+        When a parent version is supplied the new branch starts from that
+        snapshot, matching the functional baseline. Without a parent it starts
+        from the currently persisted Shot.
+        """
+        if not VersionService._has_permission(user, "shot.write"):
+            raise DomainError("当前账号没有创建镜头版本分支的权限", code="FORBIDDEN")
+
+        shot = await VersionService._active_shot(db, shot_id, for_update=True)
+        parent = None
+        snapshot = VersionService._snapshot(shot)
+
+        if req.parent_version_id:
+            result = await db.execute(
+                select(ShotVersion).where(
+                    ShotVersion.id == req.parent_version_id,
+                    ShotVersion.shot_id == shot_id,
+                )
+            )
+            parent = result.scalar_one_or_none()
+            if not parent:
+                raise DomainError("父版本不存在或不属于当前镜头", code="INVALID_VERSION_PARENT")
+            snapshot = dict(parent.snapshot or {})
+
+        branch_name = req.branch_name.strip()
+        version = await VersionService._create_snapshot_row(
+            db,
+            shot=shot,
+            snapshot=snapshot,
+            name=req.name.strip() or f"分支 {branch_name}",
+            branch_name=branch_name,
+            parent_version_id=parent.id if parent else None,
+            merge_parent_id=None,
+            user_id=user.id,
+        )
+        VersionService._audit(
+            db,
+            user_id=user.id,
+            action="version.branch.create",
+            version_id=version.id,
+            shot_id=shot.id,
+            metadata={
+                "version_number": version.version_number,
+                "branch_name": version.branch_name,
+                "parent_version_id": version.parent_version_id,
+            },
+        )
+        await db.flush()
+        return version
+
+    @staticmethod
     async def accept_version(
         db: AsyncSession,
         version_id: str,
@@ -287,5 +345,92 @@ class VersionService:
             "shot_id": saved.id,
             "revision": saved.revision,
             "restored_version_id": version.id,
+            "backup_version_id": backup.id,
+        }
+
+    @staticmethod
+    async def merge_version(
+        db: AsyncSession,
+        version_id: str,
+        req: ShotVersionMerge,
+        user: User,
+    ) -> dict:
+        """Apply a branch/version snapshot to the current Shot with backup.
+
+        This preserves the baseline's explicit snapshot-merge semantics. It is
+        not an automatic field-level three-way merge.
+        """
+        if not VersionService._has_permission(user, "shot.write"):
+            raise DomainError("当前账号没有合并镜头版本的权限", code="FORBIDDEN")
+
+        result = await db.execute(select(ShotVersion).where(ShotVersion.id == version_id))
+        version = result.scalar_one_or_none()
+        if not version:
+            raise NotFoundError("版本不存在")
+
+        shot = await VersionService._active_shot(db, version.shot_id, for_update=True)
+        if shot.revision != req.revision:
+            raise ConflictError(
+                message="镜头已被其他用户修改，请刷新后再合并版本。",
+                details={
+                    "shot_id": shot.id,
+                    "server_revision": shot.revision,
+                    "client_revision": req.revision,
+                },
+            )
+
+        snapshot = version.snapshot if isinstance(version.snapshot, dict) else {}
+        changes = {
+            field: snapshot[field]
+            for field in ShotService.PATCH_FIELDS
+            if field in snapshot and getattr(shot, field) != snapshot[field]
+        }
+        if not changes:
+            return {
+                "changed": False,
+                "shot_id": shot.id,
+                "revision": shot.revision,
+                "merged_version_id": version.id,
+                "backup_version_id": None,
+            }
+
+        backup = await VersionService._create_snapshot_row(
+            db,
+            shot=shot,
+            snapshot=VersionService._snapshot(shot),
+            name="合并前备份",
+            branch_name=req.branch_name,
+            parent_version_id=None,
+            merge_parent_id=version.id,
+            user_id=user.id,
+        )
+
+        saved = await ShotService.patch_shot(
+            db,
+            shot.id,
+            ShotPatch(revision=req.revision, changes=changes),
+            user.id,
+        )
+
+        VersionService._audit(
+            db,
+            user_id=user.id,
+            action="version.merge",
+            version_id=version.id,
+            shot_id=shot.id,
+            metadata={
+                "version_number": version.version_number,
+                "backup_version_id": backup.id,
+                "revision": saved.revision,
+                "changed_fields": sorted(changes),
+            },
+        )
+        await db.flush()
+
+        return {
+            "changed": True,
+            "shot_id": saved.id,
+            "revision": saved.revision,
+            "merged_version_id": version.id,
             "backup_version_id": backup.id,
         }
