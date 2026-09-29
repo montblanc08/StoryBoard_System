@@ -11,6 +11,7 @@ from app.models.user import User
 from app.schemas.version import (
     ShotBranchCreate,
     ShotVersionCreate,
+    ShotVersionDetailOut,
     ShotVersionMerge,
     ShotVersionCompareResult,
     ShotVersionMergeResult,
@@ -127,6 +128,19 @@ async def compare_shot_version(
 ):
     try:
         return await VersionService.compare_version(db, version_id, other_version_id)
+    except DomainError as error:
+        raise _http(error)
+
+
+@router.get("/versions/{version_id}", response_model=ShotVersionDetailOut)
+async def get_shot_version(
+    version_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        version = await VersionService.get_version(db, version_id)
+        return {**_version_dict(version), "snapshot": version.snapshot}
     except DomainError as error:
         raise _http(error)
 
