@@ -33,7 +33,7 @@ export const DEFAULT_SHOT_TABLE_COLUMN_ORDER: ShotTableColumnKey[] = [
   'status'
 ];
 
-const COLUMN_LABELS: Record<ShotTableColumnKey, string> = {
+export const SHOT_TABLE_COLUMN_LABELS: Record<ShotTableColumnKey, string> = {
   shot_size: '景别',
   lens_mm: '焦段',
   camera_movement: '机位运镜',
@@ -87,10 +87,10 @@ export function ShotColumnManager({
                 <Checkbox
                   checked={visible}
                   onCheckedChange={checked => onVisibleChange(column, checked === true)}
-                  aria-label={visible ? `隐藏${COLUMN_LABELS[column]}` : `显示${COLUMN_LABELS[column]}`}
+                  aria-label={visible ? `隐藏${SHOT_TABLE_COLUMN_LABELS[column]}` : `显示${SHOT_TABLE_COLUMN_LABELS[column]}`}
                 />
                 <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-                  {COLUMN_LABELS[column]}
+                  {SHOT_TABLE_COLUMN_LABELS[column]}
                 </span>
                 <Button
                   type="button"
@@ -99,7 +99,7 @@ export function ShotColumnManager({
                   disabled={index === 0}
                   onClick={() => onMove(column, -1)}
                   className="h-7 px-2 text-[11px]"
-                  aria-label={`上移${COLUMN_LABELS[column]}`}
+                  aria-label={`上移${SHOT_TABLE_COLUMN_LABELS[column]}`}
                 >
                   上移
                 </Button>
@@ -110,7 +110,7 @@ export function ShotColumnManager({
                   disabled={index === columnOrder.length - 1}
                   onClick={() => onMove(column, 1)}
                   className="h-7 px-2 text-[11px]"
-                  aria-label={`下移${COLUMN_LABELS[column]}`}
+                  aria-label={`下移${SHOT_TABLE_COLUMN_LABELS[column]}`}
                 >
                   下移
                 </Button>
