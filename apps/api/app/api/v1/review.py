@@ -123,7 +123,7 @@ async def update_comment(
         comment = await ReviewService.update_comment(db, comment_id, req, current_user)
         # Consumers refetch the canonical comment list after mutation; keep the
         # immediate response identity-safe without inventing another author's name.
-        author_name = current_user.display_name or current_user.email if comment.user_id == current_user.id else ""
+        author_name = (current_user.display_name or current_user.email) if comment.user_id == current_user.id else ""
         return _comment_dict(comment, author_name)
     except DomainError as error:
         raise _domain_http(error)
