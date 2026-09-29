@@ -47,7 +47,7 @@ Status vocabulary:
 | Comments | Present | Present | BLOCKED | Not yet migrated. |
 | Versions | Present | Present | BLOCKED | Not yet migrated. |
 | Share | Present | Present | BLOCKED | VNext share contract is not baseline-parity. |
-| Shot Trash | Present | Present | INTEGRATED_NOT_CUT_OVER | Soft delete/list/restore/purge exist, but command/audit/tests and retention behavior are incomplete. |
+| Shot Trash | Present | Present | INTEGRATED_NOT_CUT_OVER | Soft delete/list/restore/purge route through `ShotService` and lifecycle API coverage exists; actor/audit history and any real retention policy remain incomplete. |
 
 ## 3. Server State & Collaboration
 | Capability | Baseline | VNext target | Status | Gap / evidence |
