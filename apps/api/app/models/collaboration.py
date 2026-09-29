@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
 
@@ -61,6 +61,13 @@ class ReviewDecision(Base):
 
 class ShotVersion(Base):
     __tablename__ = "shot_versions"
+    __table_args__ = (
+        UniqueConstraint(
+            "shot_id",
+            "version_number",
+            name="uq_shot_versions_shot_version_number",
+        ),
+    )
 
     shot_id: Mapped[str] = mapped_column(ForeignKey("shots.id", ondelete="CASCADE"), index=True)
     version_number: Mapped[int] = mapped_column(Integer, default=1)
