@@ -48,13 +48,13 @@ Status vocabulary:
 | Comments | Present | Present | BLOCKED | Not yet migrated. |
 | Versions | Present | Present | BLOCKED | Not yet migrated. |
 | Share | Present | Present | BLOCKED | VNext share contract is not baseline-parity. |
-| Shot Trash | Present | Present | INTEGRATED_NOT_CUT_OVER | Soft delete/list/restore/purge plus project-scoped bulk trash route through `ShotService`; canonical UI cache refresh and irreversible confirmation are wired. Actor/audit history and any real retention policy remain incomplete. |
+| Shot Trash | Present | Present | INTEGRATED_NOT_CUT_OVER | Soft delete/list/restore/purge plus project-scoped bulk trash route through `ShotService`; trash/restore now advance revision and all lifecycle mutations emit audit rows. Retention policy and immutable version-history parity remain incomplete. |
 
 ## 3. Server State & Collaboration
 | Capability | Baseline | VNext target | Status | Gap / evidence |
 | :--- | :--- | :--- | :--- | :--- |
 | Strict No-Op Revision | Present | Present | INTEGRATED_NOT_CUT_OVER | `ShotService.patch_shot` suppresses revision changes for no-op writes and has a focused contract test. |
-| Shot Command Parity | Present | Present | INTEGRATED_NOT_CUT_OVER | Create/PATCH, trash/restore/purge, bulk writes and reorder now flow through `ShotService`; actor/audit/history and full Panel/asset/custom-field semantics still need convergence. |
+| Shot Command Parity | Present | Present | INTEGRATED_NOT_CUT_OVER | Create/PATCH, trash/restore/purge, bulk writes and reorder flow through `ShotService`; real mutations now advance authoritative revision where applicable and emit `AuditLog` rows with actor/action metadata. Immutable ShotVersion/history plus full Panel/asset/custom-field semantics still need convergence. |
 | 409 Conflict | Present | Strict | INTEGRATED_NOT_CUT_OVER | API conflict path and draft-preserving UI exist; full end-to-end/browser conflict resolution is not yet cutover-ready. |
 | Ephemeral Presence | Active | Authenticated Redis-backed | BLOCKED | Canonical UI consumer must remain disconnected until WS auth + Redis multi-worker semantics are complete. |
 | Real-time Sync | Active | Authenticated realtime | BLOCKED | No authoritative cutover yet. |
