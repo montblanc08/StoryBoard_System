@@ -30,11 +30,74 @@ import {
   useCreateShotVersion,
   useMergeShotVersion,
   useRestoreShotVersion,
+  useShotVersionDetail,
   useShotVersions
 } from '@/lib/hooks/useVersions';
 import { StatusBadge } from '@/components/shot/StatusBadge';
 import { MethodBadge } from '@/components/shot/MethodBadge';
 import { shotMovementLabel } from '@/lib/shot-display';
+
+const VERSION_FIELD_LABELS: Record<string, string> = {
+  sequence_id: '篇章',
+  scene_id: '场景',
+  display_number: '镜号',
+  name: '镜头标题',
+  description: '画面描述',
+  action: '动作',
+  performance: '表演',
+  composition: '构图',
+  director_notes: '导演备注',
+  duration_frames: '时长',
+  timing_locked: '时长锁定',
+  shot_size: '景别',
+  camera_angle: '机位角度',
+  camera_height: '机位高度',
+  lens_mm: '焦段',
+  camera: '摄影机',
+  sensor: '传感器',
+  aperture: '光圈',
+  shutter: '快门',
+  camera_movement: '运镜',
+  dialogue: '对白',
+  voice_over: '旁白',
+  subtitle: '字幕',
+  music_notes: '音乐',
+  sfx_notes: '音效',
+  primary_method: '主要制作方式',
+  secondary_methods: '辅助制作方式',
+  department: '部门',
+  owner_id: '负责人',
+  status: '状态',
+  approval_status: '审批状态',
+  vfx_required: 'VFX',
+  continuity_notes: '连续性',
+  risk_notes: '风险备注'
+};
+
+function formatVersionValue(value: unknown) {
+  if (value === null || value === undefined || value === '') return '—';
+  if (typeof value === 'boolean') return value ? '是' : '否';
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  return String(value);
+}
+
+function versionValueEqual(left: unknown, right: unknown) {
+  if (Object.is(left, right)) return true;
+  if (typeof left === 'object' || typeof right === 'object') {
+    try {
+      return JSON.stringify(left) === JSON.stringify(right);
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
 
 export default function ReviewPage() {
   const params = useParams();
@@ -65,6 +128,8 @@ export default function ReviewPage() {
   const resolveComment = useResolveReviewComment(shotId);
   const applyDecision = useApplyReviewDecision(productionId, shotId);
   const { data: versions = [], isLoading: versionsLoading } = useShotVersions(shotId);
+  const { data: selectedVersionDetail, isLoading: versionDetailLoading } =
+    useShotVersionDetail(selectedVersionId);
   const createVersion = useCreateShotVersion(shotId);
   const createBranch = useCreateShotBranch(shotId);
   const acceptVersion = useAcceptShotVersion(shotId);
@@ -189,6 +254,17 @@ export default function ReviewPage() {
 
   const canSubmit = ['draft', 'in_progress', 'changes_requested'].includes(currentShot.status);
   const isInReview = currentShot.status === 'review';
+  const currentShotRecord = currentShot as unknown as Record<string, unknown>;
+  const versionChanges = selectedVersionDetail
+    ? Object.entries(selectedVersionDetail.snapshot)
+        .filter(([field, before]) => !versionValueEqual(before, currentShotRecord[field]))
+        .map(([field, before]) => ({
+          field,
+          label: VERSION_FIELD_LABELS[field] || field,
+          before,
+          after: currentShotRecord[field]
+        }))
+    : [];
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col overflow-hidden lg:flex-row">
@@ -369,6 +445,63 @@ export default function ReviewPage() {
                 })
               )}
             </div>
+
+            {selectedVersionId && (
+              <div className="mt-4 border-t border-border pt-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="text-sm font-semibold text-foreground">版本比较</div>
+                    <div className="mt-0.5 text-xs text-muted-foreground">
+                      所选版本 vs 当前镜头 · 仅显示发生变化的字段
+                    </div>
+                  </div>
+                  {selectedVersionDetail && (
+                    <Badge variant="outline">
+                      v{String(selectedVersionDetail.version_number).padStart(3, '0')}
+                    </Badge>
+                  )}
+                </div>
+
+                {versionDetailLoading ? (
+                  <div className="py-5 text-center text-xs text-muted-foreground">
+                    正在读取版本快照...
+                  </div>
+                ) : selectedVersionDetail && versionChanges.length === 0 ? (
+                  <div className="mt-3 rounded-md border border-dashed border-border p-4 text-center text-xs text-muted-foreground">
+                    当前镜头与该版本在已迁移的镜头字段范围内没有差异。
+                  </div>
+                ) : selectedVersionDetail ? (
+                  <div className="mt-3 space-y-2">
+                    {versionChanges.map(change => (
+                      <div
+                        key={change.field}
+                        className="grid gap-2 rounded-md border border-border p-2.5 sm:grid-cols-[120px_minmax(0,1fr)_minmax(0,1fr)]"
+                      >
+                        <div className="text-xs font-medium text-foreground">
+                          {change.label}
+                        </div>
+                        <div className="min-w-0 rounded-md bg-destructive/10 p-2">
+                          <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                            版本
+                          </div>
+                          <del className="block break-words text-xs text-foreground decoration-destructive/70">
+                            {formatVersionValue(change.before)}
+                          </del>
+                        </div>
+                        <div className="min-w-0 rounded-md bg-accent/60 p-2">
+                          <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                            当前
+                          </div>
+                          <ins className="block break-words text-xs text-foreground no-underline">
+                            {formatVersionValue(change.after)}
+                          </ins>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            )}
           </Card>
 
           <Card className="p-4">
