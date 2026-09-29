@@ -152,3 +152,60 @@ async def test_version_snapshot_accept_restore_and_noop_restore():
             "restored_version_id": v1["id"],
             "backup_version_id": None,
         }
+
+        branch_res = await client.post(
+            f"/api/v1/shots/{shot_id}/branches",
+            headers=headers,
+            json={
+                "branch_name": "alternate-cut",
+                "name": "Alternate cut from v2",
+                "parent_version_id": v2["id"],
+            },
+        )
+        assert branch_res.status_code == 201
+        branch = branch_res.json()
+        assert branch["version_number"] == 4
+        assert branch["branch_name"] == "alternate-cut"
+        assert branch["parent_version_id"] == v2["id"]
+
+        stale_merge = await client.post(
+            f"/api/v1/versions/{branch['id']}/merge",
+            headers=headers,
+            json={"revision": 2, "branch_name": "main"},
+        )
+        assert stale_merge.status_code == 409
+        assert stale_merge.json()["error"]["code"] == "SHOT_REVISION_CONFLICT"
+
+        merged = await client.post(
+            f"/api/v1/versions/{branch['id']}/merge",
+            headers=headers,
+            json={"revision": 3, "branch_name": "main"},
+        )
+        assert merged.status_code == 200
+        merged_body = merged.json()
+        assert merged_body["changed"] is True
+        assert merged_body["revision"] == 4
+        assert merged_body["merged_version_id"] == branch["id"]
+        assert merged_body["backup_version_id"]
+
+        current_after_merge = await client.get(
+            f"/api/v1/productions/{production_id}/shots",
+            headers=headers,
+        )
+        assert current_after_merge.status_code == 200
+        merged_shot = current_after_merge.json()[0]
+        assert merged_shot["name"] == "Changed"
+        assert merged_shot["description"] == "Second state"
+        assert merged_shot["lens_mm"] == 85
+        assert merged_shot["revision"] == 4
+
+        versions_after_merge = await client.get(
+            f"/api/v1/shots/{shot_id}/versions",
+            headers=headers,
+        )
+        assert versions_after_merge.status_code == 200
+        merged_versions = versions_after_merge.json()
+        assert [row["version_number"] for row in merged_versions] == [5, 4, 3, 2, 1]
+        merge_backup = merged_versions[0]
+        assert merge_backup["name"] == "合并前备份"
+        assert merge_backup["merge_parent_id"] == branch["id"]
