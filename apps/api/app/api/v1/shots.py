@@ -181,15 +181,28 @@ async def reorder_shots(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Transactional numeric reorder (Spec Section 46-47)."""
-    for item in req.items:
-        await db.execute(
-            update(Shot)
-            .where(Shot.id == item.id)
-            .values(sort_index=item.sort_index, updated_at=datetime.now(timezone.utc))
+    """Revision-aware atomic numeric reorder through the canonical ShotService."""
+    try:
+        return await ShotService.reorder_shots(db, req, current_user.id)
+    except NotFoundError as e:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": e.code, "message": e.message},
         )
-    await db.flush()
-    return {"ok": True, "reordered_count": len(req.items)}
+    except ConflictError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "SHOT_REVISION_CONFLICT",
+                "message": e.message,
+                "details": e.details,
+            },
+        )
+    except DomainError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": e.code, "message": e.message},
+        )
 
 
 @router.post("/shots/bulk-update", status_code=status.HTTP_200_OK)
