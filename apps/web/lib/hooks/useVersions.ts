@@ -42,6 +42,33 @@ export function useCreateShotVersion(shotId: string) {
   });
 }
 
+export function useCreateShotBranch(shotId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      branchName,
+      parentVersionId,
+      name = ''
+    }: {
+      branchName: string;
+      parentVersionId?: string | null;
+      name?: string;
+    }) =>
+      apiClient<ShotVersion>(`/api/v1/shots/${shotId}/branches`, {
+        method: 'POST',
+        json: {
+          branch_name: branchName,
+          parent_version_id: parentVersionId || null,
+          name
+        }
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['shot-versions', shotId] });
+    }
+  });
+}
+
 export function useAcceptShotVersion(shotId: string) {
   const queryClient = useQueryClient();
 
@@ -70,6 +97,40 @@ export function useRestoreShotVersion(productionId: string, shotId: string) {
       }>(`/api/v1/versions/${versionId}/restore`, {
         method: 'POST',
         json: { revision }
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['shots', productionId] });
+      queryClient.invalidateQueries({ queryKey: ['production', productionId] });
+      queryClient.invalidateQueries({ queryKey: ['shot-versions', shotId] });
+    }
+  });
+}
+
+export function useMergeShotVersion(productionId: string, shotId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      versionId,
+      revision,
+      branchName = 'main'
+    }: {
+      versionId: string;
+      revision: number;
+      branchName?: string;
+    }) =>
+      apiClient<{
+        changed: boolean;
+        shot_id: string;
+        revision: number;
+        merged_version_id: string;
+        backup_version_id: string | null;
+      }>(`/api/v1/versions/${versionId}/merge`, {
+        method: 'POST',
+        json: {
+          revision,
+          branch_name: branchName
+        }
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['shots', productionId] });
