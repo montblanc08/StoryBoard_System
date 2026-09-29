@@ -1,7 +1,7 @@
 /** Shared shadcn primitives plus the explicit FRAMEFORGE icon surface. */
 
-export { Button, IconButton, Input, TextArea, Field, Select, UIProvider } from './primitives';
-export type { ButtonProps, IconButtonProps, FieldProps, Option, SelectProps } from './primitives';
+export { Button, IconButton, Input, TextArea, Field, Select, Popover, UIProvider } from './primitives';
+export type { ButtonProps, IconButtonProps, FieldProps, Option, PopoverProps, SelectProps } from './primitives';
 export { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from './components/card';
 export { Badge, badgeVariants } from './components/badge';
 export { Checkbox } from './components/checkbox';
