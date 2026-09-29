@@ -60,7 +60,7 @@ REQUIRED_PRODUCT_CAPABILITIES = (
     "Shot Trash",
     "Strict No-Op Revision",
     "Shot Command Parity",
-    "409 Conflict Rehearsal",
+    "409 Conflict",
     "Ephemeral Presence",
     "Real-time Sync",
 )
