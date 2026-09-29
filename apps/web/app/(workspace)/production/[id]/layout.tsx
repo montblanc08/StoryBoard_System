@@ -7,6 +7,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useProduction } from '@/lib/hooks/useProduction';
 import { TopBar } from '@/components/app-shell/TopBar';
 import { NavRail } from '@/components/app-shell/NavRail';
+import { PresenceSync } from '@/components/PresenceSync';
 
 export default function ProductionLayout({
   children
@@ -57,6 +58,7 @@ export default function ProductionLayout({
     <div className="flex h-screen w-screen flex-col bg-background overflow-hidden select-none">
       {/* Top Header */}
       <TopBar production={production} />
+      <PresenceSync />
 
       {/* Main Workspace Frame */}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row">
