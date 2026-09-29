@@ -6,7 +6,7 @@ This document tracks the recovery of existing FRAMEFORGE product capabilities in
 | Capability | Existing Legacy State | VNext Target State | Current V-Web Status | Note |
 | :--- | :--- | :--- | :--- | :--- |
 | Project Cover Image & Wash | Present | Present | 🟢 IMPLEMENTED | Recovered 96x56 cover, gradient wash, monogram fallback |
-| Project Hub Context | Present | Present | 🔴 MISSING | Project hub view before entering tools |
+| Project Hub Context | Present | Present | 🟢 IMPLEMENTED | Restored entry overview layout |
 | Workspace IA: Narration | Present | Present | 🔴 MISSING | Needs full timing and sync view |
 | Workspace IA: Moodboard | Present | Present | 🔴 MISSING | Needs image upload and board logic |
 | Workspace IA: Lighting | Present | Present | 🔴 MISSING | WebGL Lighting and top-down view |

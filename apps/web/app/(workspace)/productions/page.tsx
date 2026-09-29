@@ -139,7 +139,7 @@ export default function ProductionsPage() {
             {productions.map(prod => (
               <Card
                 key={prod.id}
-                onClick={() => router.push(`/production/${prod.id}/shots`)}
+                onClick={() => router.push(`/production/${prod.id}`)}
                 className="group flex cursor-pointer items-center gap-4 p-4 transition hover:bg-accent/40"
               >
                 <ProjectCover name={prod.name} coverMediaId={(prod as any).cover_media_id} />
