@@ -6,6 +6,20 @@ export { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 export { Badge, badgeVariants } from './components/badge';
 export { Checkbox } from './components/checkbox';
 export { NativeSelect } from './components/native-select';
+export {
+  Dialog, DialogTrigger, DialogClose, DialogPortal, DialogOverlay, DialogContent,
+  DialogHeader, DialogFooter, DialogTitle, DialogDescription
+} from './components/dialog';
+export {
+  Popover, PopoverTrigger, PopoverAnchor, PopoverClose, PopoverContent
+} from './components/popover';
+export {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuGroup, DropdownMenuPortal,
+  DropdownMenuSub, DropdownMenuRadioGroup, DropdownMenuSubTrigger,
+  DropdownMenuSubContent, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuCheckboxItem, DropdownMenuRadioItem, DropdownMenuLabel,
+  DropdownMenuSeparator, DropdownMenuShortcut
+} from './components/dropdown-menu';
 export { buttonVariants } from './components/button';
 export { cn } from './lib/utils';
 import {
