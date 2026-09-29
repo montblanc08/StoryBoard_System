@@ -1,54 +1,59 @@
 # FRAMEFORGE Product Parity Matrix
 
-This document tracks the recovery of existing FRAMEFORGE product capabilities in the VNext architecture against the Golden Baseline (5e86a0b).
+This document tracks VNext recovery against the functional golden baseline `5e86a0b`.
+Current explicit user decisions and later accepted removals override the baseline.
+
+Status vocabulary:
+- VERIFIED
+- IMPLEMENTED_NOT_INTEGRATED
+- INTEGRATED_NOT_CUT_OVER
+- CUTOVER_READY
+- CUT_OVER
+- LEGACY_RETIRED
+- BLOCKED
+- BLOCKED_VISUAL
 
 ## 1. Project Hub & Workspace Navigation
-| Capability | Existing Legacy State | VNext Target State | Current V-Web Status | Note |
+| Capability | Baseline | VNext target | Status | Gap / evidence |
 | :--- | :--- | :--- | :--- | :--- |
-| Project Cover Fallback | Present | Present | 🟡 PARTIAL | Monogram fallback exists, but media hydration missing |
-| Project Hub Context | N/A | N/A | 🔴 REMOVE / RECONCILE | Not a baseline capability, unauthorized product redesign |
-| Workspace IA: Narration | Present | Present | 🔴 MISSING | Not in sidebar |
-| Workspace IA: Moodboard | Present | Present | 🔴 MISSING | Not in sidebar |
-| Workspace IA: Lighting | Present | Present | 🔴 MISSING | WebGL Lighting |
-| Workspace IA: Review | Present | Present | 🔴 MISSING | Review & Comments |
+| Project Cover Fallback | Present | Present | INTEGRATED_NOT_CUT_OVER | Monogram + deterministic gradient is consumed by `/productions`; real media hydration is not yet available in V-API. |
+| Project Cover Media | Present | Present | BLOCKED | V-API does not yet expose `cover_media_id` plus a canonical media-byte resolver. |
+| Project Entry | Project list → selected workspace | Same | VERIFIED | `/production/[id]` now redirects to `/production/[id]/shots`; the unauthorized feature-card overview has been removed from the runtime path. |
+| Workspace IA: Narration | Present | Present | BLOCKED | Missing from canonical V-Web workspace. |
+| Workspace IA: Moodboard | Present | Present | BLOCKED | Missing from canonical V-Web workspace. |
+| Workspace IA: Lighting | Present | Present | BLOCKED | Missing from canonical V-Web workspace. |
+| Workspace IA: Review | Present | Present | BLOCKED | Review/version/comment surface not yet migrated. |
 
 ## 2. Shot Workspace Advanced Capabilities
-| Capability | Existing Legacy State | VNext Target State | Current V-Web Status | Note |
+| Capability | Baseline | VNext target | Status | Gap / evidence |
 | :--- | :--- | :--- | :--- | :--- |
-| Read-first Table (No forced forms) | Present | Present | 🟢 IMPLEMENTED | Restored density |
-| Inline Double-click Editing | Present | Present | 🟢 PRESENT | Frequent edits should be inline, deep edits in inspector |
-| Row Single Click | Select | Select | 🟢 IMPLEMENTED | Decoupled from Inspector open |
-| Row Double Click | N/A | Open Inspector | 🟢 IMPLEMENTED | Decoupled from selection |
-| Column Manager (Resize/Reorder) | Present | Present | 🔴 MISSING | High density professional tools missing |
-| Saved View / Column Layout | Present | Present | 🔴 MISSING | |
-| Row Height | Present | Present | 🔴 MISSING | |
-| Search | Present | Present | 🟡 PARTIAL | Basic search exists |
-| Filtering & Sorting | Present | Present | 🔴 MISSING | |
-| Grouping | Present | Present | 🔴 MISSING | |
-| Bulk Actions | Present | Present | 🔴 MISSING | API exists, UI missing |
-| Context Menu | Present | Present | 🔴 MISSING | Essential for professional workflows |
-| Shot Reorder | Present | Present | 🔴 MISSING | |
-| Undo / Redo | Present | Present | 🔴 MISSING | |
-| Save Status | Present | Present | 🟡 PARTIAL | Needs robust dirty draft handling |
-| Production Steps | Present | Present | 🔴 MISSING | |
-| Custom Fields | Present | Present | 🔴 MISSING | |
-| Comments | Present | Present | 🔴 MISSING | |
-| Versions | Present | Present | 🔴 MISSING | |
-| Share | Present | Present | 🔴 MISSING | |
-| Project Trash | Present | Present | 🟢 IMPLEMENTED | Full soft delete, modal restore, and purge |
+| Read-first Table | Present | Present | INTEGRATED_NOT_CUT_OVER | Real V-API consumer exists; parity still incomplete. |
+| Inline Double-click Editing | Present | Present | INTEGRATED_NOT_CUT_OVER | Description and voice-over cells use real PATCH; broader field coverage and full keyboard/conflict parity remain. |
+| Row Single Click | Select | Select | INTEGRATED_NOT_CUT_OVER | Selection no longer implicitly opens Inspector. |
+| Row Double Click | Open Inspector | Open Inspector | INTEGRATED_NOT_CUT_OVER | Real consumer exists; broader workspace parity remains. |
+| Column Manager | Present | Present | BLOCKED | Resize/reorder/visibility lifecycle not yet migrated. |
+| Saved View / Column Layout | Present | Present | BLOCKED | Not yet migrated. |
+| Row Height | Present | Present | BLOCKED | Not yet migrated. |
+| Search | Present | Present | INTEGRATED_NOT_CUT_OVER | Basic local search exists; parity with baseline search/filter semantics is incomplete. |
+| Filtering & Sorting | Present | Present | BLOCKED | Not yet migrated. |
+| Grouping | Present | Present | BLOCKED | Not yet migrated. |
+| Bulk Actions | Present | Present | BLOCKED | Backend endpoint exists, but canonical UI and command parity are incomplete. |
+| Context Menu | Present | Present | BLOCKED | Not yet migrated. |
+| Shot Reorder | Present | Present | BLOCKED | API exists but canonical UI/command parity is incomplete. |
+| Undo / Redo | Present | Present | BLOCKED | Not yet migrated. |
+| Save Status / Dirty Draft | Present | Present | INTEGRATED_NOT_CUT_OVER | Inspector now tracks changed fields and preserves drafts; browser/visual regression still required. |
+| Production Steps | Present | Present | BLOCKED | Not yet migrated. |
+| Custom Fields | Present | Present | BLOCKED | Not yet migrated. |
+| Comments | Present | Present | BLOCKED | Not yet migrated. |
+| Versions | Present | Present | BLOCKED | Not yet migrated. |
+| Share | Present | Present | BLOCKED | VNext share contract is not baseline-parity. |
+| Shot Trash | Present | Present | INTEGRATED_NOT_CUT_OVER | Soft delete/list/restore/purge exist, but command/audit/tests and retention behavior are incomplete. |
 
 ## 3. Server State & Collaboration
-| Capability | Existing Legacy State | VNext Target State | Current V-Web Status | Note |
+| Capability | Baseline | VNext target | Status | Gap / evidence |
 | :--- | :--- | :--- | :--- | :--- |
-| Strict No-Op Revision | Present | Present | 🟢 IMPLEMENTED | ShotService extracts and enforces |
-| Shot Command Parity | Present | Present | 🟡 PARTIAL | Still coupled to HTTP, needs architecture separation |
-| 409 Conflict Rehearsal | Partial | Strict | 🟢 CUTOVER_READY | E2E QA passes |
-| Ephemeral Presence | Active | Redis PubSub | 🔴 BLOCKED | Needs WS auth + Redis multi-worker |
-| Real-time Sync | Active | Websocket/SSE | 🔴 BLOCKED | Needs WS auth + Redis multi-worker |
-
-*Legend:*
-- 🔴 MISSING: Dropped in VNext, needs recovery
-- 🟡 PARTIAL: Partially implemented or buggy
-- 🟢 IMPLEMENTED: Built in V-Web
-- 🟢 CUTOVER_READY: Proved parity with legacy
-- 🟢 CUT_OVER: Replaced legacy completely
+| Strict No-Op Revision | Present | Present | INTEGRATED_NOT_CUT_OVER | `ShotService.patch_shot` suppresses revision changes for no-op writes and has a focused contract test. |
+| Shot Command Parity | Present | Present | INTEGRATED_NOT_CUT_OVER | Create/PATCH use `ShotService`; trash, reorder, bulk, actor/audit/history still bypass the full canonical command boundary. |
+| 409 Conflict | Present | Strict | INTEGRATED_NOT_CUT_OVER | API conflict path and draft-preserving UI exist; full end-to-end/browser conflict resolution is not yet cutover-ready. |
+| Ephemeral Presence | Active | Authenticated Redis-backed | BLOCKED | Canonical UI consumer must remain disconnected until WS auth + Redis multi-worker semantics are complete. |
+| Real-time Sync | Active | Authenticated realtime | BLOCKED | No authoritative cutover yet. |
