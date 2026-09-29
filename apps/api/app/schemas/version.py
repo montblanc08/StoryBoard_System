@@ -73,3 +73,17 @@ class ShotVersionCompareResult(BaseModel):
     against_current: bool
     shot_id: str
     differences: list[ShotVersionFieldDiff]
+
+class ShotVersionCompareField(BaseModel):
+    key: str
+    label: str
+    before: Any = None
+    after: Any = None
+    changed: bool
+
+
+class ShotVersionCompareResult(BaseModel):
+    version: ShotVersionOut
+    current_revision: int
+    changed_count: int
+    fields: list[ShotVersionCompareField]
