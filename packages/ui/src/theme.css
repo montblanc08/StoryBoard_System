@@ -1,57 +1,88 @@
-/* Shared shadcn semantic theme, mapped to the established FrameForge V4.7 palette. */
+/* FRAMEFORGE canonical shadcn/ui visual baseline.
+ *
+ * Visual source: shadcn/ui "new-york" geometry with neutral semantic surfaces.
+ * Product behavior source: FRAMEFORGE functional baseline 5e86a0b.
+ *
+ * Do not use this file to recreate Legacy V7 visual effects. Keep business
+ * semantics in apps/web and use these variables only for shared visual rules.
+ */
 
 :root,
 :root.dark {
   color-scheme: dark;
-  --background: 15 16 17;
-  --foreground: 241 241 239;
-  --card: 23 24 25;
-  --card-foreground: 241 241 239;
-  --popover: 42 43 46;
-  --popover-foreground: 241 241 239;
-  --primary: 40 117 230;
-  --primary-foreground: 255 255 255;
-  --secondary: 28 29 31;
-  --secondary-foreground: 241 241 239;
-  --muted: 35 36 38;
-  --muted-foreground: 127 126 121;
-  --accent: 35 36 38;
-  --accent-foreground: 241 241 239;
+
+  /* shadcn neutral semantic color roles */
+  --background: 10 10 11;
+  --foreground: 250 250 250;
+  --card: 15 15 17;
+  --card-foreground: 250 250 250;
+  --popover: 24 24 27;
+  --popover-foreground: 250 250 250;
+  --primary: 250 250 250;
+  --primary-foreground: 24 24 27;
+  --secondary: 39 39 42;
+  --secondary-foreground: 250 250 250;
+  --muted: 39 39 42;
+  --muted-foreground: 161 161 170;
+  --accent: 39 39 42;
+  --accent-foreground: 250 250 250;
   --destructive: 214 95 101;
   --destructive-foreground: 255 255 255;
   --warning: 214 153 72;
   --warning-foreground: 255 248 235;
-  --border: 48 49 50;
-  --input: 61 62 64;
-  --ring: 91 141 239;
+  --border: 39 39 42;
+  --input: 63 63 70;
+  --ring: 161 161 170;
+
+  /* Keep shadcn/new-york radius geometry canonical. */
   --radius: 0.5rem;
+
+  /* FRAMEFORGE typography */
   --font-ui: 'Satoshi', 'Sarasa Gothic SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
   --font-mono: 'Sarasa Term SC', 'SFMono-Regular', Consolas, Menlo, monospace;
+
+  /* Shell metrics recovered from the accepted product proportions.
+   * They are layout constraints, not a second design system.
+   */
+  --ff-shell-topbar-h: 3.125rem;          /* 50px */
+  --ff-shell-mobile-nav-h: 3.5rem;        /* 56px */
+  --ff-shell-nav-expanded-w: 14rem;       /* 224px */
+  --ff-shell-nav-collapsed-w: 4rem;       /* 64px */
+  --ff-inspector-w: 23.75rem;             /* 380px */
+  --ff-page-max-w: 72rem;                 /* 1152px */
+  --ff-content-pad: 1rem;
+  --ff-content-pad-lg: 2rem;
+  --ff-panel-gap: 1rem;
+
+  /* State motion only. No global transition: all. */
+  --ff-motion-fast: 120ms;
+  --ff-motion-normal: 180ms;
+  --ff-ease-standard: cubic-bezier(0.2, 0, 0, 1);
 }
 
 :root.light {
   color-scheme: light;
   --background: 255 255 255;
-  --foreground: 21 22 23;
-  --card: 251 251 250;
-  --card-foreground: 21 22 23;
+  --foreground: 9 9 11;
+  --card: 255 255 255;
+  --card-foreground: 9 9 11;
   --popover: 255 255 255;
-  --popover-foreground: 21 22 23;
-  --primary: 40 117 230;
-  --primary-foreground: 255 255 255;
-  --secondary: 241 241 239;
-  --secondary-foreground: 21 22 23;
-  --muted: 233 233 231;
-  --muted-foreground: 120 123 128;
-  --accent: 241 241 239;
-  --accent-foreground: 21 22 23;
-  --destructive: 214 95 101;
+  --popover-foreground: 9 9 11;
+  --primary: 24 24 27;
+  --primary-foreground: 250 250 250;
+  --secondary: 244 244 245;
+  --secondary-foreground: 24 24 27;
+  --muted: 244 244 245;
+  --muted-foreground: 113 113 122;
+  --accent: 244 244 245;
+  --accent-foreground: 24 24 27;
+  --destructive: 185 28 28;
   --destructive-foreground: 255 255 255;
-  --warning: 171 112 34;
-  --warning-foreground: 51 33 9;
-  --border: 216 216 215;
-  --input: 199 199 198;
-  --ring: 91 141 239;
+  --warning: 161 98 7;
+  --warning-foreground: 69 26 3;
+  --border: 228 228 231;
+  --input: 228 228 231;
+  --ring: 161 161 170;
 }
 
 body {
@@ -60,4 +91,13 @@ body {
   font-family: var(--font-ui);
   font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root,
+  :root.dark,
+  :root.light {
+    --ff-motion-fast: 0ms;
+    --ff-motion-normal: 0ms;
+  }
 }
