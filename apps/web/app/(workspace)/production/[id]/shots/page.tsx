@@ -112,7 +112,6 @@ export default function ShotListPage() {
     filters.status !== 'all'
   ].filter(Boolean).length;
 
-  const filteredShotIds = filteredShots.map(s => s.id);
 
   const toggleLock = async (shot: Shot, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -388,7 +387,7 @@ export default function ShotListPage() {
 
       <BulkActionToolbar
         production={production}
-        allShotIds={filteredShotIds}
+        allShotIds={visibleShotIds}
       />
     </div>
   );
