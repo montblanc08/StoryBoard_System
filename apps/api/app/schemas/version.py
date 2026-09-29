@@ -68,8 +68,6 @@ class ShotVersionCompareField(BaseModel):
 
 class ShotVersionCompareResult(BaseModel):
     version: ShotVersionOut
-    other_version_id: Optional[str] = None
-    against_current: bool
-    current_revision: Optional[int] = None
+    current_revision: int
     changed_count: int
     fields: list[ShotVersionCompareField]
