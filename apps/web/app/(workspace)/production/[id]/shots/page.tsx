@@ -195,20 +195,28 @@ export default function ShotListPage() {
 
   const inspectedShot = shots.find(shot => shot.id === inspectedShotId) || null;
 
-  if (!production) return null;
-
-  const fps = production.fps_num / (production.fps_den || 1);
-
   const methodOptions = useMemo(
-    () => Array.from(new Set(shots.map(item => item.primary_method).filter((value): value is string => Boolean(value)))).sort(),
+    () => Array.from(new Set(
+      shots
+        .map(item => item.primary_method)
+        .filter((value): value is NonNullable<typeof value> => Boolean(value))
+    )).sort(),
     [shots]
   );
   const departmentOptions = useMemo(
-    () => Array.from(new Set(shots.map(item => item.department).filter((value): value is string => Boolean(value)))).sort(),
+    () => Array.from(new Set(
+      shots
+        .map(item => item.department)
+        .filter((value): value is NonNullable<typeof value> => Boolean(value))
+    )).sort(),
     [shots]
   );
   const statusOptions = useMemo(
-    () => Array.from(new Set(shots.map(item => item.status).filter((value): value is string => Boolean(value)))).sort(),
+    () => Array.from(new Set(
+      shots
+        .map(item => item.status)
+        .filter((value): value is NonNullable<typeof value> => Boolean(value))
+    )).sort(),
     [shots]
   );
 
@@ -263,6 +271,10 @@ export default function ShotListPage() {
       return sortDirection === 'asc' ? comparison : -comparison;
     });
   }, [shots, filters, sortKey, sortDirection]);
+
+  if (!production) return null;
+
+  const fps = production.fps_num / (production.fps_den || 1);
 
   const visibleShotIds = visibleShots.map(item => item.id);
   const visibleColumns = tablePresentation.columnOrder.filter(
