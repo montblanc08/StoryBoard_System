@@ -2,7 +2,18 @@
 
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { Button, Card, Icons, TextArea } from '@frameforge/ui';
+import {
+  Badge,
+  Button,
+  Card,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogTitle,
+  Icons,
+  TextArea
+} from '@frameforge/ui';
 import { useProduction, useShots } from '@/lib/hooks/useProduction';
 import {
   type ReviewAction,
@@ -12,6 +23,12 @@ import {
   useReviewComments,
   useReviewDecisions
 } from '@/lib/hooks/useReview';
+import {
+  useAcceptShotVersion,
+  useCreateShotVersion,
+  useRestoreShotVersion,
+  useShotVersions
+} from '@/lib/hooks/useVersions';
 import { StatusBadge } from '@/components/shot/StatusBadge';
 import { MethodBadge } from '@/components/shot/MethodBadge';
 import { shotMovementLabel } from '@/lib/shot-display';
@@ -25,6 +42,8 @@ export default function ReviewPage() {
 
   const [activeShotIndex, setActiveShotIndex] = useState(0);
   const [commentText, setCommentText] = useState('');
+  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
+  const [restoreVersionId, setRestoreVersionId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -39,6 +58,15 @@ export default function ReviewPage() {
   const createComment = useCreateReviewComment(shotId);
   const resolveComment = useResolveReviewComment(shotId);
   const applyDecision = useApplyReviewDecision(productionId, shotId);
+  const { data: versions = [], isLoading: versionsLoading } = useShotVersions(shotId);
+  const createVersion = useCreateShotVersion(shotId);
+  const acceptVersion = useAcceptShotVersion(shotId);
+  const restoreVersion = useRestoreShotVersion(productionId, shotId);
+
+  useEffect(() => {
+    setSelectedVersionId(null);
+    setRestoreVersionId(null);
+  }, [shotId]);
 
   const runDecision = async (action: ReviewAction) => {
     if (!currentShot) return;
@@ -46,10 +74,45 @@ export default function ReviewPage() {
     try {
       await applyDecision.mutateAsync({
         revision: currentShot.revision,
-        action
+        action,
+        versionId: selectedVersionId
       });
     } catch (error) {
       setActionError(error instanceof Error ? error.message : '审片操作失败');
+    }
+  };
+
+  const handleCreateVersion = async () => {
+    setActionError(null);
+    try {
+      const version = await createVersion.mutateAsync({});
+      setSelectedVersionId(version.id);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '保存版本失败');
+    }
+  };
+
+  const handleAcceptVersion = async () => {
+    if (!selectedVersionId) return;
+    setActionError(null);
+    try {
+      await acceptVersion.mutateAsync(selectedVersionId);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '接受版本失败');
+    }
+  };
+
+  const handleRestoreVersion = async () => {
+    if (!restoreVersionId || !currentShot) return;
+    setActionError(null);
+    try {
+      await restoreVersion.mutateAsync({
+        versionId: restoreVersionId,
+        revision: currentShot.revision
+      });
+      setRestoreVersionId(null);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '恢复版本失败');
     }
   };
 
@@ -157,6 +220,89 @@ export default function ReviewPage() {
                 {currentShot.shot_size || '—'} · {currentShot.lens_mm ? `${currentShot.lens_mm}mm` : '—'} · {shotMovementLabel(currentShot)}
               </span>
               <span className="font-bold text-foreground">{currentShot.duration_frames} 帧</span>
+            </div>
+          </Card>
+
+          <Card className="p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-foreground">版本与审阅基线</div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  版本是不可变的镜头字段快照；选择一个版本后，后续审片决策会显式绑定该版本。
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void handleCreateVersion()}
+                disabled={createVersion.isPending}
+              >
+                {createVersion.isPending ? '保存中…' : '保存当前版本'}
+              </Button>
+            </div>
+
+            <div className="mt-3 space-y-2">
+              {versionsLoading ? (
+                <div className="py-4 text-center text-xs text-muted-foreground">正在加载版本...</div>
+              ) : versions.length === 0 ? (
+                <div className="rounded-md border border-dashed border-border p-4 text-center text-xs text-muted-foreground">
+                  暂无版本快照。保存版本后可将审片决策绑定到明确版本。
+                </div>
+              ) : (
+                versions.map(version => {
+                  const selected = selectedVersionId === version.id;
+                  return (
+                    <div
+                      key={version.id}
+                      className={`flex flex-wrap items-center gap-2 rounded-md border p-2.5 ${
+                        selected ? 'border-ring bg-accent/50' : 'border-border bg-background'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setSelectedVersionId(selected ? null : version.id)}
+                        className="min-w-0 flex-1 text-left"
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-mono text-xs font-semibold text-foreground">
+                            v{String(version.version_number).padStart(3, '0')}
+                          </span>
+                          <span className="truncate text-sm text-foreground">
+                            {version.name || '未命名版本'}
+                          </span>
+                          {version.is_accepted && (
+                            <Badge variant="secondary">Accepted</Badge>
+                          )}
+                        </div>
+                        <div className="mt-1 text-[11px] text-muted-foreground">
+                          {version.branch_name} · {new Date(version.created_at).toLocaleString()}
+                        </div>
+                      </button>
+
+                      {selected && (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => void handleAcceptVersion()}
+                            disabled={acceptVersion.isPending || version.is_accepted}
+                          >
+                            {version.is_accepted ? '已接受' : '设为接受版本'}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setRestoreVersionId(version.id)}
+                            disabled={restoreVersion.isPending}
+                          >
+                            恢复
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  );
+                })
+              )}
             </div>
           </Card>
 
@@ -318,6 +464,34 @@ export default function ReviewPage() {
           </Card>
         </div>
       </main>
+      <Dialog
+        open={Boolean(restoreVersionId)}
+        onOpenChange={open => {
+          if (!open && !restoreVersion.isPending) setRestoreVersionId(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogTitle>恢复镜头版本</DialogTitle>
+          <DialogDescription>
+            恢复会先保存当前镜头字段作为“回滚前备份”，再将所选版本写回当前镜头。该操作使用当前 revision 做冲突检查。
+          </DialogDescription>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setRestoreVersionId(null)}
+              disabled={restoreVersion.isPending}
+            >
+              取消
+            </Button>
+            <Button
+              onClick={() => void handleRestoreVersion()}
+              disabled={restoreVersion.isPending}
+            >
+              {restoreVersion.isPending ? '恢复中…' : '确认恢复'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
