@@ -215,39 +215,49 @@ class ShotService:
         req: ShotReorderRequest,
         user_id: str,
     ) -> dict[str, int | bool]:
-        """Apply an atomic revision-aware numeric reorder.
+        """Atomically reorder the complete active shot set for one production.
 
-        Ordering is a shot mutation in the functional baseline. The complete
-        selection is loaded and revision-checked before any sort index changes,
-        so a stale item cannot partially reorder the project.
+        Reorder is an editorial mutation. A stale or partial client must never
+        silently renumber only part of the production, so the request carries
+        both the complete target order and the exact base order the client saw.
         """
-        items = list(req.items)
-        if not items:
-            return {"ok": True, "reordered_count": 0, "unchanged_count": 0}
-
-        shot_ids = [item.id for item in items]
-        if len(shot_ids) != len(set(shot_ids)):
-            raise DomainError("镜头排序列表包含重复镜头", code="VALIDATION_ERROR")
 
         result = await db.execute(
             select(Shot).where(
-                Shot.id.in_(shot_ids),
+                Shot.production_id == req.production_id,
                 Shot.deleted_at.is_(None),
             )
         )
-        shots = {shot.id: shot for shot in result.scalars().all()}
-        missing_ids = [shot_id for shot_id in shot_ids if shot_id not in shots]
-        if missing_ids:
-            raise NotFoundError("部分镜头不存在或已进入废纸篓，请刷新后重试。")
+        active_shots = list(result.scalars().all())
+        active_shots.sort(key=lambda shot: (shot.sort_index, shot.id))
+        current_ids = [shot.id for shot in active_shots]
 
-        production_ids = {shots[shot_id].production_id for shot_id in shot_ids}
-        if len(production_ids) != 1:
+        target_items = list(req.items)
+        target_ids = [item.id for item in target_items]
+
+        if len(target_ids) != len(set(target_ids)):
+            raise DomainError("镜头排序列表包含重复镜头", code="VALIDATION_ERROR")
+
+        if req.base_order != current_ids:
             raise ConflictError(
-                message="排序请求包含不同项目的镜头，请刷新后重试。",
-                details={"shot_ids": shot_ids},
+                message="镜头顺序已被其他协作者调整，请同步后重试。",
+                details={
+                    "server_order": current_ids,
+                    "client_base_order": req.base_order,
+                },
             )
 
-        for item in items:
+        if len(target_ids) != len(current_ids) or set(target_ids) != set(current_ids):
+            raise ConflictError(
+                message="镜头排序数据不完整或已过期，请刷新后重试。",
+                details={
+                    "server_order": current_ids,
+                    "target_order": target_ids,
+                },
+            )
+
+        shots = {shot.id: shot for shot in active_shots}
+        for item in target_items:
             shot = shots[item.id]
             if shot.revision != item.revision:
                 raise ConflictError(
@@ -263,13 +273,16 @@ class ShotService:
         unchanged_count = 0
         now = datetime.now(timezone.utc)
 
-        for item in items:
+        # The target array is the order contract. Generate deterministic,
+        # collision-free sort indexes instead of trusting client numeric hints.
+        for index, item in enumerate(target_items):
             shot = shots[item.id]
-            if shot.sort_index == item.sort_index:
+            target_sort_index = float((index + 1) * 1000)
+            if shot.sort_index == target_sort_index:
                 unchanged_count += 1
                 continue
 
-            shot.sort_index = item.sort_index
+            shot.sort_index = target_sort_index
             shot.revision += 1
             shot.updated_at = now
             reordered_count += 1
