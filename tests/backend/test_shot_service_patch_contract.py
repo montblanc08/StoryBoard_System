@@ -28,6 +28,7 @@ class _Field:
 
 class _Shot:
     id = _Field()
+    production_id = _Field()
     deleted_at = _Field()
 
     def __init__(self, shot_id="shot-1", revision=3, department="camera"):
