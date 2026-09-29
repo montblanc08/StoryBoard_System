@@ -31,7 +31,7 @@
 | --- | --- | --- | --- |
 | M0 文档事实与根 AGENTS | 根规则从误追加的 Legacy AGENTS 分离；架构/生命周期/组件规范按并行实现与运行 owner 修正 | VERIFIED（本轮文档盘点） | 新增切片持续按 owner 矩阵同步 |
 | M1 Canonical Owner Matrix | [矩阵](CANONICAL_OWNER_MATRIX.md) 已覆盖 HTTP、持久化、AI/Presence、Workspace 及 UI | VERIFIED（盘点） | 各切片按真实调用链更新状态 |
-| M2 `@frameforge/ui` 收敛 | 根包已有 Button/IconButton/Input/TextArea/Field/Select；V-Web 登录页消费 Button/Input/Field/Select；Legacy 同名包仍供旧工作区使用 | INTEGRATED_NOT_CUT_OVER（已消费控件） | 补齐 Checkbox/Overlay/Motion、双消费者构建与浏览器验收后移除 Legacy 同名包；见 [primitive 表](UI_PRIMITIVE_PARITY.md) |
+| M2 `@frameforge/ui` 收敛 | shadcn/ui 为视觉/primitive 基线；`5e86a0b` 为功能基线。根包已有表单/Card/Checkbox 及 Dialog/Popover/DropdownMenu；项目创建真实消费 shared Dialog，Shot Table Column Manager 消费 shared Popover；Legacy 同名包仍供旧工作区使用 | INTEGRATED_NOT_CUT_OVER | 继续迁真实 Menu/Tooltip/Motion consumers，完成 overlay focus/collision/视觉与双消费者构建后再移除 Legacy 同名包；见 [primitive 表](UI_PRIMITIVE_PARITY.md) |
 | M3 API/持久化 | `apps/api` 已有路由/SQLAlchemy；[路由对等表](API_ROUTE_PARITY_MATRIX.md) 已建立；V-Web 已真实消费 SRT、EDL、OTIO、CSV 导出并有测试覆盖；Legacy `server.py` 仍是服务配置入口，第二 FastAPI 树并存 | IMPLEMENTED_NOT_INTEGRATED（整体；导出子项已集成） | 路由/事务对等、真实 PostgreSQL 隔离集成、旧 owner 退出 |
 | M4 Web 视图 | `apps/web` 有部分可挂载视图；Legacy `WorkspaceStage` 未从入口挂载 | IMPLEMENTED_NOT_INTEGRATED | 一个视图完成 render/state/request/mutation/save owner 接管 |
 | M5 AI | VNext mock/proposal 为进程内；无持久 Job/真实 Web 消费；接受路径未走普通 Command | BLOCKED | 禁用零外发、provider/job/proposal/人工接受合同 |
@@ -49,8 +49,9 @@ Current implementation target: `master`. Product behavior reference: `5e86a0b`, 
 
 | Slice | Current evidence | Status | Next gate |
 | --- | --- | --- | --- |
-| Shot PATCH contract | V-Web sends changed fields; server revision is authoritative; `ShotService` has explicit patch whitelist and no-op suppression | INTEGRATED_NOT_CUT_OVER | actor/audit/history plus bulk/reorder/trash convergence |
+| Shot PATCH contract | V-Web sends changed fields; server revision is authoritative; `ShotService` has explicit patch whitelist and no-op suppression | INTEGRATED_NOT_CUT_OVER | actor/audit/history plus Panel/asset/custom-field convergence |
 | VNext bulk Shot contract | V-Web now sends per-shot server revisions; V-API validates the whole batch before mutation, rejects stale rows with 409, and suppresses no-op revision bumps | IMPLEMENTED_NOT_INTEGRATED | add the baseline bulk-action UI plus Panel/custom-field/audit semantics before real consumer cutover |
+| VNext Shot reorder contract | V-API reorder now validates all revisions before mutation, rejects stale/cross-project batches and suppresses no-op revision bumps; V-Web hook supplies authoritative revisions | IMPLEMENTED_NOT_INTEGRATED | wire canonical drag/reorder consumer and baseline ordering/audit/browser parity |
 | Inspector draft safety | dirty drafts are preserved per Shot and rebased after a 409 refresh | INTEGRATED_NOT_CUT_OVER | browser regression for switch/refetch/conflict/close on desktop and narrow widths |
 | Inline edit | description/voice-over use real V-API PATCH and preserve input on conflict | INTEGRATED_NOT_CUT_OVER | expand field coverage and browser/keyboard conflict QA |
 | Mobile Shot table | table owns horizontal scroll, first columns are sticky, Inspector overlays on narrow widths, `100dvh`/safe-area added | BLOCKED_VISUAL | real 1440/1024/768/375/320 rendered inspection |
