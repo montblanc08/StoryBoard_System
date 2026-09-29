@@ -139,7 +139,7 @@ async def resolve_comment(
 ):
     try:
         comment = await ReviewService.resolve_comment(db, comment_id, req, current_user)
-        author_name = current_user.display_name or current_user.email if comment.user_id == current_user.id else ""
+        author_name = (current_user.display_name or current_user.email) if comment.user_id == current_user.id else ""
         return _comment_dict(comment, author_name)
     except DomainError as error:
         raise _domain_http(error)
