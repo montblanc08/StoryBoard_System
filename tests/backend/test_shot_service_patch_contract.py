@@ -255,10 +255,14 @@ class ShotServiceMutationContractTest(unittest.TestCase):
         shots[0].sort_index = 1000.0
         shots[1].sort_index = 2000.0
         db = _Session(shots)
-        request = SimpleNamespace(items=[
-            SimpleNamespace(id="shot-1", sort_index=1000.0, revision=3),
-            SimpleNamespace(id="shot-2", sort_index=2000.0, revision=5),
-        ])
+        request = SimpleNamespace(
+            production_id="production-1",
+            base_order=["shot-1", "shot-2"],
+            items=[
+                SimpleNamespace(id="shot-1", sort_index=1000.0, revision=3),
+                SimpleNamespace(id="shot-2", sort_index=2000.0, revision=5),
+            ],
+        )
 
         result = asyncio.run(_service_class().reorder_shots(db, request, "editor-1"))
 
@@ -271,10 +275,14 @@ class ShotServiceMutationContractTest(unittest.TestCase):
         shots[0].sort_index = 1000.0
         shots[1].sort_index = 2000.0
         db = _Session(shots)
-        request = SimpleNamespace(items=[
-            SimpleNamespace(id="shot-1", sort_index=2000.0, revision=3),
-            SimpleNamespace(id="shot-2", sort_index=1000.0, revision=4),
-        ])
+        request = SimpleNamespace(
+            production_id="production-1",
+            base_order=["shot-1", "shot-2"],
+            items=[
+                SimpleNamespace(id="shot-2", sort_index=1000.0, revision=4),
+                SimpleNamespace(id="shot-1", sort_index=2000.0, revision=3),
+            ],
+        )
 
         with self.assertRaises(_ConflictError) as conflict:
             asyncio.run(_service_class().reorder_shots(db, request, "editor-1"))
@@ -292,10 +300,14 @@ class ShotServiceMutationContractTest(unittest.TestCase):
         shots[0].sort_index = 1000.0
         shots[1].sort_index = 2000.0
         db = _Session(shots)
-        request = SimpleNamespace(items=[
-            SimpleNamespace(id="shot-1", sort_index=2000.0, revision=3),
-            SimpleNamespace(id="shot-2", sort_index=1000.0, revision=5),
-        ])
+        request = SimpleNamespace(
+            production_id="production-1",
+            base_order=["shot-1", "shot-2"],
+            items=[
+                SimpleNamespace(id="shot-2", sort_index=1000.0, revision=5),
+                SimpleNamespace(id="shot-1", sort_index=2000.0, revision=3),
+            ],
+        )
 
         result = asyncio.run(_service_class().reorder_shots(db, request, "editor-1"))
 
