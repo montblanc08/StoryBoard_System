@@ -12,6 +12,7 @@ from app.models.production import Production
 from app.models.user import User
 from app.models.view import SavedView
 from app.schemas.saved_view import SavedViewCreate, SavedViewUpdate
+from app.services.column_lifecycle import purged_column_keys, sanitize_saved_view_config
 
 
 class SavedViewService:
@@ -87,13 +88,16 @@ class SavedViewService:
         if not name:
             raise DomainError("视图名称不能为空", code="VALIDATION_ERROR")
 
+        blocked_keys = await purged_column_keys(db, production_id)
+        sanitized_config, _ = sanitize_saved_view_config(req.config, blocked_keys)
+
         view = SavedView(
             production_id=production_id,
             name=name,
             view_type=req.view_type,
             is_shared=req.is_shared,
             created_by=user.id,
-            config=req.config,
+            config=sanitized_config,
             revision=1,
         )
         db.add(view)
@@ -121,10 +125,12 @@ class SavedViewService:
         await SavedViewService._production(db, production_id)
 
         result = await db.execute(
-            select(SavedView).where(
+            select(SavedView)
+            .where(
                 SavedView.id == view_id,
                 SavedView.production_id == production_id,
             )
+            .with_for_update()
         )
         view = result.scalar_one_or_none()
         if not view:
@@ -153,9 +159,12 @@ class SavedViewService:
         if req.is_shared is not None and view.is_shared != req.is_shared:
             view.is_shared = req.is_shared
             changed.append("is_shared")
-        if req.config is not None and view.config != req.config:
-            view.config = req.config
-            changed.append("config")
+        if req.config is not None:
+            blocked_keys = await purged_column_keys(db, production_id)
+            sanitized_config, _ = sanitize_saved_view_config(req.config, blocked_keys)
+            if view.config != sanitized_config:
+                view.config = sanitized_config
+                changed.append("config")
 
         if not changed:
             return view
