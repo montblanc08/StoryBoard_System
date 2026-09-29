@@ -18,6 +18,7 @@ from app.api.v1.productions import router as productions_router
 from app.api.v1.review import router as review_router
 from app.api.v1.shares import router as shares_router
 from app.api.v1.shots import router as shots_router
+from app.api.v1.versions import router as versions_router
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal, Base, async_engine
 from app.services.seed import seed_database
@@ -116,6 +117,7 @@ app.include_router(auth_router, prefix=settings.API_V1_PREFIX)
 app.include_router(productions_router, prefix=settings.API_V1_PREFIX)
 app.include_router(shots_router, prefix=settings.API_V1_PREFIX)
 app.include_router(review_router, prefix=settings.API_V1_PREFIX)
+app.include_router(versions_router, prefix=settings.API_V1_PREFIX)
 app.include_router(imports_router, prefix=settings.API_V1_PREFIX)
 app.include_router(exports_router, prefix=settings.API_V1_PREFIX)
 app.include_router(shares_router, prefix=settings.API_V1_PREFIX)
