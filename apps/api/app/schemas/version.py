@@ -13,8 +13,19 @@ class ShotVersionCreate(BaseModel):
     parent_version_id: Optional[str] = None
 
 
+class ShotBranchCreate(BaseModel):
+    branch_name: str = Field(min_length=1, max_length=64)
+    name: str = Field(default="", max_length=160)
+    parent_version_id: Optional[str] = None
+
+
 class ShotVersionRestore(BaseModel):
     revision: int = Field(ge=1)
+
+
+class ShotVersionMerge(BaseModel):
+    revision: int = Field(ge=1)
+    branch_name: str = Field(default="main", min_length=1, max_length=64)
 
 
 class ShotVersionOut(BaseModel):
@@ -37,4 +48,11 @@ class ShotVersionRestoreResult(BaseModel):
     shot_id: str
     revision: int
     restored_version_id: str
+    backup_version_id: Optional[str] = None
+
+class ShotVersionMergeResult(BaseModel):
+    changed: bool
+    shot_id: str
+    revision: int
+    merged_version_id: str
     backup_version_id: Optional[str] = None
