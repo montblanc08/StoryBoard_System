@@ -9,8 +9,9 @@ from pydantic import BaseModel, Field
 
 class ReviewCommentCreate(BaseModel):
     body: str = Field(min_length=1, max_length=1000)
+    role: str = Field(default="Director", max_length=64)
     timecode: str = Field(default="", max_length=32)
-    quote_field: Literal["", "description", "voice_over", "name"] = ""
+    quote_field: Literal["", "description", "voiceover", "title", "voice_over", "name"] = ""
     quote_text: str = Field(default="", max_length=4000)
     parent_id: Optional[str] = None
 
@@ -29,6 +30,7 @@ class ReviewCommentOut(BaseModel):
     shot_id: Optional[str] = None
     user_id: Optional[str] = None
     author_name: str = ""
+    role: str = "Director"
     body: str
     timecode: str = ""
     quote_field: str = ""
