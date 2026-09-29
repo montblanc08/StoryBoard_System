@@ -15,6 +15,7 @@ class Comment(Base):
     shot_id: Mapped[Optional[str]] = mapped_column(ForeignKey("shots.id", ondelete="CASCADE"), nullable=True, index=True)
     asset_id: Mapped[Optional[str]] = mapped_column(ForeignKey("assets.id", ondelete="CASCADE"), nullable=True)
     user_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    role: Mapped[str] = mapped_column(String(64), default="Director")
     body: Mapped[str] = mapped_column(Text)
     timecode: Mapped[str] = mapped_column(String(32), default="")
     quote_field: Mapped[str] = mapped_column(String(128), default="")
