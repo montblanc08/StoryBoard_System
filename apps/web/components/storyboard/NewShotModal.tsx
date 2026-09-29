@@ -1,7 +1,20 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Button, Input, TextArea, Icons, Select } from '@frameforge/ui';
+import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Field,
+  Icons,
+  Input,
+  Select,
+  TextArea
+} from '@frameforge/ui';
 import type { Production, Sequence } from '@frameforge/types';
 import { useWorkspaceStore } from '@/stores/useWorkspaceStore';
 import { useCreateShot } from '@/lib/hooks/useProduction';
@@ -24,15 +37,13 @@ export function NewShotModal({ production, sequences, nextNumber }: NewShotModal
   const [description, setDescription] = useState('');
   const [voiceover, setVoiceover] = useState('');
   const [primaryMethod, setPrimaryMethod] = useState('live');
-  const [department, setDepartment] = useState('camera');
+  const [department] = useState('camera');
   const [durationSeconds, setDurationSeconds] = useState(3.0);
   const [shotSize, setShotSize] = useState('全景');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  if (!isNewShotModalOpen) return null;
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
     try {
       setIsSubmitting(true);
       const durationFrames = Math.max(1, Math.round(durationSeconds * fps));
@@ -52,148 +63,144 @@ export function NewShotModal({ production, sequences, nextNumber }: NewShotModal
       });
 
       setNewShotModalOpen(false);
-    } catch (err: any) {
-      alert(err.message || '创建镜头失败');
+    } catch (error: any) {
+      alert(error.message || '创建镜头失败');
     } finally {
       setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-lg rounded-xl border border-border bg-card shadow-2xl overflow-hidden">
-        {/* Header */}
-        <div className="flex h-[50px] items-center justify-between border-b border-border bg-background px-6">
-          <div className="flex items-center gap-2">
-            <Icons.Plus className="h-4 w-4 text-foreground" />
-            <h3 className="text-sm font-bold text-foreground">新建分镜镜头 (New Shot)</h3>
-          </div>
+    <Dialog open={isNewShotModalOpen} onOpenChange={setNewShotModalOpen}>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
+        <DialogHeader className="pr-8">
+          <DialogTitle className="flex items-center gap-2 text-sm">
+            <Icons.Plus className="h-4 w-4" aria-hidden="true" />
+            新建分镜镜头 (New Shot)
+          </DialogTitle>
+          <DialogDescription className="sr-only">
+            新建镜头并设置镜号、篇章、制作方式、景别、时长、画面描述和旁白。
+          </DialogDescription>
+        </DialogHeader>
 
-          <Button variant="ghost" size="sm"
-            onClick={() => setNewShotModalOpen(false)}
-            aria-label="关闭新建镜头"
-            className="text-muted-foreground hover:text-foreground"
-          >
-            <Icons.X className="h-4 w-4" />
-          </Button>
-        </div>
-
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-4 text-xs">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-muted-foreground mb-1 font-medium">镜号 (Display Number)</label>
+        <form onSubmit={handleSubmit} className="space-y-4 text-xs">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="镜号 (Display Number)">
               <Input
                 type="text"
                 required
                 value={displayNumber}
-                onChange={e => setDisplayNumber(e.target.value)}
+                onChange={event => setDisplayNumber(event.target.value)}
                 placeholder="例如：081"
-                className="w-full rounded border border-border bg-background px-3 py-2 text-foreground font-mono font-bold outline-none focus:border-ring"
+                className="font-mono font-bold"
               />
-            </div>
+            </Field>
 
-            <div>
-              <label className="block text-muted-foreground mb-1 font-medium">所属篇章 / 幕</label>
+            <Field label="所属篇章 / 幕">
               <Select
-                label="篇章"
+                label="所属篇章 / 幕"
                 value={sequenceId}
-                onChange={value => setSequenceId(value)}
-                options={sequences.map(seq => ({ value: seq.id, label: seq.display_number + ' · ' + seq.name }))}
-                className="w-full rounded border border-border bg-background px-3 py-2 text-foreground outline-none focus:border-ring"
+                onChange={setSequenceId}
+                options={sequences.map(sequence => ({
+                  value: sequence.id,
+                  label: sequence.display_number + ' · ' + sequence.name
+                }))}
               />
-            </div>
+            </Field>
           </div>
 
-          <div>
-            <label className="block text-muted-foreground mb-1 font-medium">镜头标题 / 内容概要</label>
+          <Field label="镜头标题 / 内容概要">
             <Input
               type="text"
               value={name}
-              onChange={e => setName(e.target.value)}
+              onChange={event => setName(event.target.value)}
               placeholder="例如：主大门车流与全景特写"
-              className="w-full rounded border border-border bg-background px-3 py-2 text-foreground outline-none focus:border-ring"
             />
-          </div>
+          </Field>
 
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="block text-muted-foreground mb-1 font-medium">制作方式</label>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Field label="制作方式">
               <Select
-                label="主要制作方式"
+                label="制作方式"
                 value={primaryMethod}
-                onChange={value => setPrimaryMethod(value)}
-                options={[ { value: "live", label: "实拍 (LIVE)" }, { value: "stock", label: "购买素材 (STOCK)" }, { value: "client", label: "客户素材 (CLIENT)" }, { value: "ae", label: "AE合成 (AE)" }, { value: "mg", label: "动效 (MG)" }, { value: "three_d", label: "3D三维 (3D)" }, { value: "vfx", label: "视效 (VFX)" }, { value: "still", label: "静帧 (STILL)" }, { value: "type", label: "字卡 (TYPE)" } ]}
-                className="w-full rounded border border-border bg-background px-2.5 py-2 text-foreground outline-none focus:border-ring font-mono font-semibold"
+                onChange={setPrimaryMethod}
+                options={[
+                  { value: 'live', label: '实拍 (LIVE)' },
+                  { value: 'stock', label: '购买素材 (STOCK)' },
+                  { value: 'client', label: '客户素材 (CLIENT)' },
+                  { value: 'ae', label: 'AE合成 (AE)' },
+                  { value: 'mg', label: '动效 (MG)' },
+                  { value: 'three_d', label: '3D三维 (3D)' },
+                  { value: 'vfx', label: '视效 (VFX)' },
+                  { value: 'still', label: '静帧 (STILL)' },
+                  { value: 'type', label: '字卡 (TYPE)' }
+                ]}
+                className="font-mono font-semibold"
               />
-            </div>
+            </Field>
 
-            <div>
-              <label className="block text-muted-foreground mb-1 font-medium">标准景别</label>
+            <Field label="标准景别">
               <Select
                 label="标准景别"
                 value={shotSize}
-                onChange={value => setShotSize(value)}
-                options={[ { value: "全景", label: "全景 (FS)" }, { value: "特写", label: "特写 (CU)" }, { value: "中景", label: "中景 (MS)" }, { value: "近景", label: "近景 (MCU)" }, { value: "远景", label: "远景 (WS)" }, { value: "大特写", label: "大特写 (ECU)" } ]}
-                className="w-full rounded border border-border bg-background px-2.5 py-2 text-foreground outline-none focus:border-ring"
+                onChange={setShotSize}
+                options={[
+                  { value: '全景', label: '全景 (FS)' },
+                  { value: '特写', label: '特写 (CU)' },
+                  { value: '中景', label: '中景 (MS)' },
+                  { value: '近景', label: '近景 (MCU)' },
+                  { value: '远景', label: '远景 (WS)' },
+                  { value: '大特写', label: '大特写 (ECU)' }
+                ]}
               />
-            </div>
+            </Field>
 
-            <div>
-              <label className="block text-muted-foreground mb-1 font-medium">规划时长 (秒)</label>
+            <Field label="规划时长 (秒)">
               <Input
                 type="number"
                 step="0.1"
                 min="0.1"
                 value={durationSeconds}
-                onChange={e => setDurationSeconds(Number(e.target.value))}
-                className="w-full rounded border border-border bg-background px-2.5 py-2 text-foreground font-mono outline-none focus:border-ring"
+                onChange={event => setDurationSeconds(Number(event.target.value))}
+                className="font-mono"
               />
-            </div>
+            </Field>
           </div>
 
-          <div>
-            <label className="block text-muted-foreground mb-1 font-medium">画面构图与视觉描述</label>
+          <Field label="画面构图与视觉描述">
             <TextArea
               rows={3}
               value={description}
-              onChange={e => setDescription(e.target.value)}
+              onChange={event => setDescription(event.target.value)}
               placeholder="画面主体、运镜方式与光影氛围设计..."
-              className="w-full rounded border border-border bg-background p-2.5 text-foreground outline-none focus:border-ring"
             />
-          </div>
+          </Field>
 
-          <div>
-            <label className="block text-muted-foreground mb-1 font-medium">对应解说词旁白</label>
+          <Field label="对应解说词旁白">
             <TextArea
               rows={2}
               value={voiceover}
-              onChange={e => setVoiceover(e.target.value)}
+              onChange={event => setVoiceover(event.target.value)}
               placeholder="本镜头对应的解说旁白或对白内容..."
-              className="w-full rounded border border-border bg-background p-2.5 text-foreground outline-none focus:border-ring"
             />
-          </div>
+          </Field>
 
-          {/* Footer */}
-          <div className="flex items-center justify-end gap-3 pt-3 border-t border-border">
-            <Button variant="outline" size="sm"
+          <DialogFooter className="border-t border-border pt-4">
+            <Button
+              variant="outline"
+              size="sm"
               type="button"
               onClick={() => setNewShotModalOpen(false)}
-              className="rounded border border-border px-4 py-2 font-medium text-foreground hover:bg-muted"
             >
               取消
             </Button>
-            <Button variant="default" size="sm"
-              type="submit"
-              disabled={isSubmitting}
-              className="flex items-center gap-1.5 rounded px-5 py-2 font-bold disabled:opacity-50 transition"
-            >
-              <Icons.Check className="h-4 w-4" />
+            <Button type="submit" size="sm" disabled={isSubmitting}>
+              <Icons.Check className="h-4 w-4" aria-hidden="true" />
               {isSubmitting ? '正在创建…' : '创建镜头'}
             </Button>
-          </div>
+          </DialogFooter>
         </form>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
