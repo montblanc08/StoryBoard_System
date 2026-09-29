@@ -47,6 +47,7 @@ export default function ReviewPage() {
   const [commentText, setCommentText] = useState('');
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [restoreVersionId, setRestoreVersionId] = useState<string | null>(null);
+  const [mergeVersionId, setMergeVersionId] = useState<string | null>(null);
   const [branchParentVersionId, setBranchParentVersionId] = useState<string | null>(null);
   const [branchName, setBranchName] = useState('');
   const [actionError, setActionError] = useState<string | null>(null);
@@ -73,6 +74,7 @@ export default function ReviewPage() {
   useEffect(() => {
     setSelectedVersionId(null);
     setRestoreVersionId(null);
+    setMergeVersionId(null);
     setBranchParentVersionId(null);
     setBranchName('');
   }, [shotId]);
@@ -142,14 +144,15 @@ export default function ReviewPage() {
   };
 
   const handleMergeVersion = async () => {
-    if (!selectedVersionId || !currentShot) return;
+    if (!mergeVersionId || !currentShot) return;
     setActionError(null);
     try {
       await mergeVersion.mutateAsync({
-        versionId: selectedVersionId,
+        versionId: mergeVersionId,
         revision: currentShot.revision,
         branchName: 'main'
       });
+      setMergeVersionId(null);
     } catch (error) {
       setActionError(error instanceof Error ? error.message : '合并版本失败');
     }
@@ -346,7 +349,7 @@ export default function ReviewPage() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => void handleMergeVersion()}
+                            onClick={() => setMergeVersionId(version.id)}
                             disabled={mergeVersion.isPending}
                           >
                             合并到当前
@@ -568,6 +571,35 @@ export default function ReviewPage() {
               disabled={!branchName.trim() || createBranch.isPending}
             >
               {createBranch.isPending ? '创建中…' : '创建分支'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(mergeVersionId)}
+        onOpenChange={open => {
+          if (!open && !mergeVersion.isPending) setMergeVersionId(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogTitle>合并版本到当前镜头</DialogTitle>
+          <DialogDescription>
+            该操作遵循功能基线的快照合并语义：先保存“合并前备份”，再把目标版本快照应用到当前镜头。它不是自动三方合并，并会校验当前 revision。
+          </DialogDescription>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setMergeVersionId(null)}
+              disabled={mergeVersion.isPending}
+            >
+              取消
+            </Button>
+            <Button
+              onClick={() => void handleMergeVersion()}
+              disabled={mergeVersion.isPending}
+            >
+              {mergeVersion.isPending ? '合并中…' : '确认合并'}
             </Button>
           </DialogFooter>
         </DialogContent>
