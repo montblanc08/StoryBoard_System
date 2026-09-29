@@ -12,6 +12,7 @@ import {
   DialogFooter,
   DialogTitle,
   Icons,
+  Input,
   TextArea
 } from '@frameforge/ui';
 import { useProduction, useShots } from '@/lib/hooks/useProduction';
@@ -25,7 +26,9 @@ import {
 } from '@/lib/hooks/useReview';
 import {
   useAcceptShotVersion,
+  useCreateShotBranch,
   useCreateShotVersion,
+  useMergeShotVersion,
   useRestoreShotVersion,
   useShotVersions
 } from '@/lib/hooks/useVersions';
@@ -44,6 +47,8 @@ export default function ReviewPage() {
   const [commentText, setCommentText] = useState('');
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [restoreVersionId, setRestoreVersionId] = useState<string | null>(null);
+  const [branchParentVersionId, setBranchParentVersionId] = useState<string | null>(null);
+  const [branchName, setBranchName] = useState('');
   const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -60,12 +65,16 @@ export default function ReviewPage() {
   const applyDecision = useApplyReviewDecision(productionId, shotId);
   const { data: versions = [], isLoading: versionsLoading } = useShotVersions(shotId);
   const createVersion = useCreateShotVersion(shotId);
+  const createBranch = useCreateShotBranch(shotId);
   const acceptVersion = useAcceptShotVersion(shotId);
   const restoreVersion = useRestoreShotVersion(productionId, shotId);
+  const mergeVersion = useMergeShotVersion(productionId, shotId);
 
   useEffect(() => {
     setSelectedVersionId(null);
     setRestoreVersionId(null);
+    setBranchParentVersionId(null);
+    setBranchName('');
   }, [shotId]);
 
   const runDecision = async (action: ReviewAction) => {
@@ -113,6 +122,36 @@ export default function ReviewPage() {
       setRestoreVersionId(null);
     } catch (error) {
       setActionError(error instanceof Error ? error.message : '恢复版本失败');
+    }
+  };
+
+  const handleCreateBranch = async () => {
+    if (!branchParentVersionId || !branchName.trim()) return;
+    setActionError(null);
+    try {
+      const version = await createBranch.mutateAsync({
+        branchName: branchName.trim(),
+        parentVersionId: branchParentVersionId
+      });
+      setSelectedVersionId(version.id);
+      setBranchParentVersionId(null);
+      setBranchName('');
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '创建版本分支失败');
+    }
+  };
+
+  const handleMergeVersion = async () => {
+    if (!selectedVersionId || !currentShot) return;
+    setActionError(null);
+    try {
+      await mergeVersion.mutateAsync({
+        versionId: selectedVersionId,
+        revision: currentShot.revision,
+        branchName: 'main'
+      });
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '合并版本失败');
     }
   };
 
@@ -290,6 +329,29 @@ export default function ReviewPage() {
                             {version.is_accepted ? '已接受' : '设为接受版本'}
                           </Button>
                           <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setBranchParentVersionId(version.id);
+                              setBranchName(
+                                version.branch_name === 'main'
+                                  ? `branch-v${String(version.version_number).padStart(3, '0')}`
+                                  : `${version.branch_name}-next`
+                              );
+                            }}
+                            disabled={createBranch.isPending}
+                          >
+                            创建分支
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => void handleMergeVersion()}
+                            disabled={mergeVersion.isPending}
+                          >
+                            合并到当前
+                          </Button>
+                          <Button
                             variant="outline"
                             size="sm"
                             onClick={() => setRestoreVersionId(version.id)}
@@ -464,6 +526,53 @@ export default function ReviewPage() {
           </Card>
         </div>
       </main>
+      <Dialog
+        open={Boolean(branchParentVersionId)}
+        onOpenChange={open => {
+          if (!open && !createBranch.isPending) {
+            setBranchParentVersionId(null);
+            setBranchName('');
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogTitle>创建版本分支</DialogTitle>
+          <DialogDescription>
+            新分支会从所选不可变版本快照开始，不会修改当前镜头。之后可显式将该分支版本合并回当前镜头。
+          </DialogDescription>
+          <div className="space-y-2">
+            <label htmlFor="review-branch-name" className="text-sm font-medium text-foreground">
+              分支名称
+            </label>
+            <Input
+              id="review-branch-name"
+              value={branchName}
+              onChange={event => setBranchName(event.target.value)}
+              placeholder="例如：director-alt"
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setBranchParentVersionId(null);
+                setBranchName('');
+              }}
+              disabled={createBranch.isPending}
+            >
+              取消
+            </Button>
+            <Button
+              onClick={() => void handleCreateBranch()}
+              disabled={!branchName.trim() || createBranch.isPending}
+            >
+              {createBranch.isPending ? '创建中…' : '创建分支'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog
         open={Boolean(restoreVersionId)}
         onOpenChange={open => {
