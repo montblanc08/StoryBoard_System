@@ -19,6 +19,24 @@ from app.services.shot_service import ShotService
 
 
 class VersionService:
+    # Functional baseline compare fields mapped onto canonical VNext Shot names.
+    # Panel/custom/import column comparison stays blocked until those owners move
+    # into VNext persistence; do not fabricate them from unrelated fields.
+    COMPARE_FIELDS = (
+        ("name", "镜头标题"),
+        ("description", "画面描述"),
+        ("voice_over", "对应旁白"),
+        ("duration_frames", "时长 / 帧数"),
+        ("shot_size", "景别"),
+        ("lens_mm", "焦段"),
+        ("camera_movement", "运镜"),
+        ("camera_angle", "机位角度"),
+        ("primary_method", "主要制作方式"),
+        ("department", "责任部门"),
+        ("owner_id", "负责人"),
+        ("status", "状态"),
+    )
+
     @staticmethod
     def _has_permission(user: User, permission: str) -> bool:
         permissions = getattr(getattr(user, "role", None), "permissions", None) or {}
