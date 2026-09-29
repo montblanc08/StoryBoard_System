@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Button, Icons } from '@frameforge/ui';
+import { Badge, Button, Icons } from '@frameforge/ui';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { Production } from '@frameforge/types';
@@ -16,14 +16,14 @@ export function TopBar({ production }: TopBarProps) {
   const { user, logout, locale, setLocale, theme, setTheme, t } = useAuthStore();
 
   return (
-    <header className="sticky top-0 z-30 flex h-[50px] shrink-0 items-center justify-between gap-2 border-b border-border bg-card/90 px-3 backdrop-blur sm:px-5">
+    <header className="sticky top-0 z-30 flex h-[var(--ff-shell-topbar-h)] shrink-0 items-center justify-between gap-2 border-b border-border bg-background/95 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:px-5">
       {/* Left: Brand & Breadcrumb */}
       <div className="flex min-w-0 items-center gap-3">
         <Link href="/productions" className="flex items-center gap-2.5 group">
-          <div className="flex h-7 w-7 items-center justify-center rounded bg-accent text-accent-foreground border border-border group-hover:border-ring transition shadow-sm">
-            <Icons.Film className="h-4 w-4" />
+          <div className="flex h-7 w-7 items-center justify-center rounded-md border border-border bg-muted/50 text-foreground transition-colors group-hover:bg-accent">
+            <Icons.Film className="h-4 w-4" aria-hidden="true" />
           </div>
-          <span className="font-bold text-sm tracking-tight text-foreground group-hover:text-foreground transition">
+          <span className="text-sm font-semibold tracking-tight text-foreground">
             {t('appName')}
           </span>
         </Link>
@@ -32,10 +32,10 @@ export function TopBar({ production }: TopBarProps) {
           <>
             <span className="hidden text-muted-foreground md:inline">/</span>
             <div className="hidden min-w-0 items-center gap-2 md:flex">
-              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-foreground border border-border uppercase">
+              <Badge variant="outline" className="font-mono text-[10px] uppercase">
                 {production.code || 'PROD'}
-              </span>
-              <span className="text-xs font-bold text-foreground truncate max-w-sm">
+              </Badge>
+              <span className="max-w-sm truncate text-xs font-semibold text-foreground">
                 {production.name}
               </span>
               <span className="text-[11px] font-mono text-muted-foreground hidden sm:inline">
@@ -53,7 +53,7 @@ export function TopBar({ production }: TopBarProps) {
         {/* Locale Toggle */}
         <Button variant="outline" size="sm"
           onClick={() => setLocale(locale === 'zh-CN' ? 'en-US' : 'zh-CN')}
-          className="rounded border border-border bg-background px-2 py-1 font-mono text-foreground hover:border-ring hover:text-foreground transition"
+          className="font-mono"
           title={locale === 'zh-CN' ? 'Switch to English' : '切换为简体中文'}
           aria-label={locale === 'zh-CN' ? 'Switch to English' : '切换为简体中文'}
         >
@@ -63,7 +63,6 @@ export function TopBar({ production }: TopBarProps) {
         {/* Theme Toggle */}
         <Button variant="outline" size="sm"
           onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-          className="rounded border border-border bg-background px-2.5 py-1 text-foreground hover:border-ring hover:text-foreground transition"
           title={theme === 'dark' ? '切换到亮色主题' : '切换到暗色主题'}
           aria-label={theme === 'dark' ? '切换到亮色主题' : '切换到暗色主题'}
         >
@@ -82,7 +81,7 @@ export function TopBar({ production }: TopBarProps) {
               logout();
               router.push('/login');
             }}
-            className="text-muted-foreground hover:text-destructive transition"
+            className="text-muted-foreground hover:text-destructive"
           >
             退出
           </Button>
