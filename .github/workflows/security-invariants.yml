@@ -1,0 +1,40 @@
+name: Safety Invariants
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "apps/api/**"
+      - "storyboard-system/**"
+      - "AGENTS.md"
+      - ".github/scripts/security_invariants.py"
+      - ".github/workflows/security-invariants.yml"
+  pull_request:
+    branches: [master]
+    paths:
+      - "apps/api/**"
+      - "storyboard-system/**"
+      - "AGENTS.md"
+      - ".github/scripts/security_invariants.py"
+      - ".github/workflows/security-invariants.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  invariants:
+    name: Fail-closed / AI / Presence / credential guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: apps/api/requirements.txt
+      - name: Install API configuration dependencies
+        run: python -m pip install -r apps/api/requirements.txt
+      - name: Verify safety invariants
+        run: python .github/scripts/security_invariants.py

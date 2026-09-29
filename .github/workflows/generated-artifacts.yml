@@ -1,0 +1,56 @@
+name: Legacy Generated Artifact Guard
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "storyboard-system/src/**"
+      - "storyboard-system/packages/ui/**"
+      - "storyboard-system/build.mjs"
+      - "storyboard-system/package.json"
+      - "storyboard-system/package-lock.json"
+      - "storyboard-system/static/workspace-v73.js"
+      - "storyboard-system/static/workspace-v73.css"
+      - "storyboard-system/static/vendor/**"
+      - ".github/workflows/generated-artifacts.yml"
+  pull_request:
+    branches: [master]
+    paths:
+      - "storyboard-system/src/**"
+      - "storyboard-system/packages/ui/**"
+      - "storyboard-system/build.mjs"
+      - "storyboard-system/package.json"
+      - "storyboard-system/package-lock.json"
+      - "storyboard-system/static/workspace-v73.js"
+      - "storyboard-system/static/workspace-v73.css"
+      - "storyboard-system/static/vendor/**"
+      - ".github/workflows/generated-artifacts.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic-legacy-build:
+    name: Generated bundles match source
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: storyboard-system/package-lock.json
+      - name: Install dependencies
+        working-directory: storyboard-system
+        run: npm ci --workspaces=false
+      - name: Rebuild Legacy generated assets
+        working-directory: storyboard-system
+        run: npm run check
+      - name: Reject stale or hand-edited generated bundles
+        run: |
+          git diff --exit-code -- \
+            storyboard-system/static/workspace-v73.js \
+            storyboard-system/static/workspace-v73.css \
+            storyboard-system/static/vendor

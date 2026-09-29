@@ -1,0 +1,86 @@
+name: PostgreSQL Migration Rehearsal
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "apps/api/alembic/**"
+      - "apps/api/alembic.ini"
+      - "apps/api/app/models/**"
+      - "apps/api/app/core/database.py"
+      - "apps/api/app/core/config.py"
+      - "apps/api/requirements.txt"
+      - ".github/workflows/postgres-migration.yml"
+  pull_request:
+    branches: [master]
+    paths:
+      - "apps/api/alembic/**"
+      - "apps/api/alembic.ini"
+      - "apps/api/app/models/**"
+      - "apps/api/app/core/database.py"
+      - "apps/api/app/core/config.py"
+      - "apps/api/requirements.txt"
+      - ".github/workflows/postgres-migration.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-upgrade:
+    name: Empty PostgreSQL -> Alembic head
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: frameforge
+          POSTGRES_PASSWORD: frameforge_ci
+          POSTGRES_DB: frameforge_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U frameforge -d frameforge_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ENVIRONMENT: "test"
+      DATABASE_URL: "postgresql+asyncpg://frameforge:frameforge_ci@127.0.0.1:5432/frameforge_ci"
+      DATABASE_SYNC_URL: "postgresql+psycopg://frameforge:frameforge_ci@127.0.0.1:5432/frameforge_ci"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: apps/api/requirements.txt
+      - name: Install API dependencies
+        run: python -m pip install -r apps/api/requirements.txt
+      - name: Compile Alembic environment
+        run: python -m py_compile apps/api/alembic/env.py
+      - name: Upgrade fresh PostgreSQL database to head
+        working-directory: apps/api
+        run: python -m alembic -c alembic.ini upgrade head
+      - name: Verify canonical tables and Alembic version
+        working-directory: apps/api
+        run: |
+          python - <<'PY'
+          from sqlalchemy import create_engine, inspect, text
+          from app.core.config import settings
+
+          engine = create_engine(settings.DATABASE_SYNC_URL)
+          with engine.connect() as connection:
+              tables = set(inspect(connection).get_table_names())
+              required = {"alembic_version", "users", "productions", "shots", "audit_logs"}
+              missing = sorted(required - tables)
+              if missing:
+                  raise SystemExit(f"missing migrated tables: {missing}")
+              revision = connection.execute(text("select version_num from alembic_version")).scalar_one()
+              if not revision:
+                  raise SystemExit("alembic_version is empty")
+              print(f"PASS: PostgreSQL migrated to {revision}; {len(tables)} tables present")
+          engine.dispose()
+          PY
