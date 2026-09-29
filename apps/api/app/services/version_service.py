@@ -43,10 +43,16 @@ class VersionService:
         ))
 
     @staticmethod
-    async def _active_shot(db: AsyncSession, shot_id: str) -> Shot:
-        result = await db.execute(
-            select(Shot).where(Shot.id == shot_id, Shot.deleted_at.is_(None))
-        )
+    async def _active_shot(
+        db: AsyncSession,
+        shot_id: str,
+        *,
+        for_update: bool = False,
+    ) -> Shot:
+        query = select(Shot).where(Shot.id == shot_id, Shot.deleted_at.is_(None))
+        if for_update:
+            query = query.with_for_update()
+        result = await db.execute(query)
         shot = result.scalar_one_or_none()
         if not shot:
             raise NotFoundError("镜头不存在")
@@ -118,7 +124,7 @@ class VersionService:
         if not VersionService._has_permission(user, "shot.write"):
             raise DomainError("当前账号没有保存镜头版本的权限", code="FORBIDDEN")
 
-        shot = await VersionService._active_shot(db, shot_id)
+        shot = await VersionService._active_shot(db, shot_id, for_update=True)
         parent_version_id = req.parent_version_id
 
         if parent_version_id:
@@ -181,7 +187,7 @@ class VersionService:
         version = result.scalar_one_or_none()
         if not version:
             raise NotFoundError("版本不存在")
-        await VersionService._active_shot(db, version.shot_id)
+        await VersionService._active_shot(db, version.shot_id, for_update=True)
 
         await db.execute(
             update(ShotVersion)
@@ -217,7 +223,7 @@ class VersionService:
         if not version:
             raise NotFoundError("版本不存在")
 
-        shot = await VersionService._active_shot(db, version.shot_id)
+        shot = await VersionService._active_shot(db, version.shot_id, for_update=True)
         if shot.revision != req.revision:
             raise ConflictError(
                 message="镜头已被其他用户修改，请刷新后再恢复版本。",
