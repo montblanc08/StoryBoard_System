@@ -67,6 +67,15 @@ async def test_version_snapshot_accept_restore_and_noop_restore():
         assert v1["branch_name"] == "main"
         assert v1["parent_version_id"] is None
 
+        version_detail = await client.get(
+            f"/api/v1/versions/{v1['id']}",
+            headers=headers,
+        )
+        assert version_detail.status_code == 200
+        assert version_detail.json()["snapshot"]["name"] == "Original"
+        assert version_detail.json()["snapshot"]["description"] == "First state"
+        assert version_detail.json()["snapshot"]["lens_mm"] == 35
+
         changed = await client.patch(
             f"/api/v1/shots/{shot_id}",
             headers=headers,
