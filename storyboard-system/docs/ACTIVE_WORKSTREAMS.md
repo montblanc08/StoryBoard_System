@@ -49,7 +49,7 @@ Current implementation target: `master`. Product behavior reference: `5e86a0b`, 
 
 | Slice | Current evidence | Status | Next gate |
 | --- | --- | --- | --- |
-| Shot PATCH contract | V-Web sends changed fields; server revision is authoritative; `ShotService` has explicit patch whitelist and no-op suppression | INTEGRATED_NOT_CUT_OVER | actor/audit/history plus Panel/asset/custom-field convergence |
+| Shot PATCH contract | V-Web sends changed fields; server revision is authoritative; `ShotService` suppresses no-op writes and now emits actor-scoped `AuditLog` rows for real mutations | INTEGRATED_NOT_CUT_OVER | immutable version/history plus Panel/asset/custom-field convergence |
 | VNext bulk Shot contract | V-Web now sends per-shot server revisions; V-API validates the whole batch before mutation, rejects stale rows with 409, and suppresses no-op revision bumps | IMPLEMENTED_NOT_INTEGRATED | add the baseline bulk-action UI plus Panel/custom-field/audit semantics before real consumer cutover |
 | VNext Shot reorder contract | V-API reorder now requires production scope, the complete active-shot set, exact client base order and all revisions before mutation; V-Web hook sends the same contract | IMPLEMENTED_NOT_INTEGRATED | wire canonical drag/reorder consumer; add collaboration lease plus snapshot/audit and rendered-browser parity before cutover |
 | Inspector draft safety | dirty drafts are preserved per Shot and rebased after a 409 refresh | INTEGRATED_NOT_CUT_OVER | browser regression for switch/refetch/conflict/close on desktop and narrow widths |
@@ -58,7 +58,7 @@ Current implementation target: `master`. Product behavior reference: `5e86a0b`, 
 | Presence | V-Web TopBar consumer disconnected again | BLOCKED | authenticated WS + Redis TTL/pubsub + multi-worker before reconnecting UI |
 | Project entry | unauthorized feature-card overview replaced by redirect to selected Shot workspace | VERIFIED | keep IA aligned while recovering remaining baseline capabilities |
 | Project cover | deterministic monogram/gradient fallback only; no fake media URL | INTEGRATED_NOT_CUT_OVER | canonical cover media read model + media resolver |
-| Shot Trash | soft delete/list/restore/purge now flow through `ShotService`; API lifecycle coverage exists; UI no longer promises unimplemented 30-day cleanup | INTEGRATED_NOT_CUT_OVER | actor/audit history and any real retention policy before further promotion |
+| Shot Trash | soft delete/list/restore/purge flow through `ShotService`; trash/restore advance revision, lifecycle mutations emit audit rows, and UI keeps purge explicitly irreversible | INTEGRATED_NOT_CUT_OVER | immutable history and any real retention policy before further promotion |
 | Visual warning state | shared warning tokens and Tailwind mapping restored | IMPLEMENTED_NOT_INTEGRATED | verify conflict/dirty states in light/dark browser renders |
 
 Do not begin Narration, Moodboard, Lighting, or wider product recovery until this stabilization slice has passed CI and the Shot workspace has fresh rendered-browser QA.
