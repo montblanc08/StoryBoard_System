@@ -5,7 +5,7 @@ import { Button, Icons, Input, Select } from '@frameforge/ui';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import type { Shot } from '@frameforge/types';
-import { useProduction, useShots, useUpdateShot } from '@/lib/hooks/useProduction';
+import { useProduction, useReorderShots, useShots, useUpdateShot } from '@/lib/hooks/useProduction';
 import { useWorkspaceStore } from '@/stores/useWorkspaceStore';
 import { MethodBadge } from '@/components/shot/MethodBadge';
 import { StatusBadge } from '@/components/shot/StatusBadge';
@@ -75,6 +75,7 @@ export default function ShotListPage() {
   const { data: production } = useProduction(id);
   const { data: shots = [], isLoading } = useShots(id);
   const updateShot = useUpdateShot(id);
+  const reorderShots = useReorderShots(id);
 
   const [isTrashOpen, setIsTrashOpen] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
@@ -84,6 +85,8 @@ export default function ShotListPage() {
     () => defaultShotTablePresentationPreferences()
   );
   const [contextTarget, setContextTarget] = useState<ShotTableContextTarget | null>(null);
+  const [draggedShotId, setDraggedShotId] = useState<string | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
 
   const {
     filters,
@@ -380,6 +383,48 @@ export default function ShotListPage() {
     filters.status !== 'all'
   ].filter(Boolean).length;
 
+  const canonicalOrder = useMemo(
+    () => [...shots]
+      .sort((a, b) => (a.sort_index - b.sort_index) || a.id.localeCompare(b.id))
+      .map(shot => shot.id),
+    [shots]
+  );
+
+  const canReorder =
+    sortKey === 'default' &&
+    sortDirection === 'asc' &&
+    !filters.searchQuery.trim() &&
+    filters.primaryMethod === 'all' &&
+    filters.department === 'all' &&
+    filters.status === 'all' &&
+    visibleShots.length === shots.length &&
+    shots.length > 1;
+
+  const moveShotByKeyboard = async (shotId: string, direction: -1 | 1) => {
+    if (!canReorder || reorderShots.isPending) return;
+    const currentIndex = canonicalOrder.indexOf(shotId);
+    const targetIndex = currentIndex + direction;
+    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= canonicalOrder.length) return;
+
+    const nextOrder = [...canonicalOrder];
+    [nextOrder[currentIndex], nextOrder[targetIndex]] = [
+      nextOrder[targetIndex],
+      nextOrder[currentIndex]
+    ];
+    await reorderShots.mutateAsync(nextOrder);
+  };
+
+  const commitRowDrop = async (sourceId: string, targetId: string) => {
+    if (!canReorder || reorderShots.isPending || sourceId === targetId) return;
+
+    const nextOrder = canonicalOrder.filter(id => id !== sourceId);
+    const targetIndex = nextOrder.indexOf(targetId);
+    if (targetIndex < 0) return;
+
+    nextOrder.splice(targetIndex, 0, sourceId);
+    await reorderShots.mutateAsync(nextOrder);
+  };
+
   const toggleLock = async (shot: Shot, event: React.MouseEvent) => {
     event.stopPropagation();
     await updateShot.mutateAsync({
@@ -462,6 +507,15 @@ export default function ShotListPage() {
               onRowHeightChange={handleRowHeightChange}
               onReset={resetColumnLayout}
             />
+
+            {!canReorder && shots.length > 1 && (
+              <span
+                className="hidden whitespace-nowrap text-[11px] text-muted-foreground xl:inline"
+                title="清除搜索/筛选并恢复默认升序后可拖动镜号旁的手柄调整顺序"
+              >
+                顺序已锁定
+              </span>
+            )}
 
             <Button
               variant="ghost"
@@ -693,6 +747,27 @@ export default function ShotListPage() {
                   return (
                     <tr
                       key={shot.id}
+                      onDragOver={event => {
+                        if (!canReorder || !draggedShotId) return;
+                        event.preventDefault();
+                        event.dataTransfer.dropEffect = 'move';
+                        setDropTargetId(shot.id);
+                      }}
+                      onDragLeave={event => {
+                        if (
+                          event.currentTarget.contains(event.relatedTarget as Node | null)
+                        ) return;
+                        if (dropTargetId === shot.id) setDropTargetId(null);
+                      }}
+                      onDrop={event => {
+                        if (!canReorder || !draggedShotId) return;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        const sourceId = draggedShotId;
+                        setDraggedShotId(null);
+                        setDropTargetId(null);
+                        void commitRowDrop(sourceId, shot.id);
+                      }}
                       onClick={event => {
                         selectShot(
                           shot.id,
@@ -739,14 +814,63 @@ export default function ShotListPage() {
                       aria-current={isInspected ? 'true' : undefined}
                       className={`group cursor-pointer transition-colors duration-100 ${
                         isSelected ? 'bg-accent hover:bg-accent/80' : 'hover:bg-accent'
-                      } ${isInspected ? 'ring-1 ring-inset ring-ring/50' : ''}`}
+                      } ${isInspected ? 'ring-1 ring-inset ring-ring/50' : ''} ${
+                        draggedShotId === shot.id ? 'opacity-60' : ''
+                      } ${
+                        dropTargetId === shot.id && draggedShotId !== shot.id
+                          ? 'shadow-[inset_0_2px_0_hsl(var(--ring))]'
+                          : ''
+                      }`}
                     >
                       <td
-                        className={`sticky left-0 z-10 w-20 border-r border-border px-3 ${rowPadding} font-mono font-bold text-foreground ${
+                        className={`sticky left-0 z-10 w-20 border-r border-border px-2 ${rowPadding} font-mono font-bold text-foreground ${
                           isSelected ? 'bg-accent' : 'bg-card group-hover:bg-accent'
                         }`}
                       >
-                        {shot.display_number}
+                        <div className="flex min-w-0 items-center gap-1">
+                          <button
+                            type="button"
+                            draggable={canReorder && !reorderShots.isPending}
+                            aria-label={
+                              canReorder
+                                ? `拖动镜头 ${shot.display_number} 调整顺序；方向键可逐行移动`
+                                : '当前筛选或排序状态下不可调整镜头顺序'
+                            }
+                            title={
+                              canReorder
+                                ? '拖动调整镜头顺序；聚焦后使用 ↑ / ↓ 微调'
+                                : '清除筛选并恢复默认升序后可调整镜头顺序'
+                            }
+                            disabled={!canReorder || reorderShots.isPending}
+                            onClick={event => event.stopPropagation()}
+                            onDoubleClick={event => event.stopPropagation()}
+                            onDragStart={event => {
+                              event.stopPropagation();
+                              setDraggedShotId(shot.id);
+                              setDropTargetId(null);
+                              event.dataTransfer.effectAllowed = 'move';
+                              event.dataTransfer.setData('text/plain', shot.id);
+                            }}
+                            onDragEnd={() => {
+                              setDraggedShotId(null);
+                              setDropTargetId(null);
+                            }}
+                            onKeyDown={event => {
+                              event.stopPropagation();
+                              if (event.key === 'ArrowUp') {
+                                event.preventDefault();
+                                void moveShotByKeyboard(shot.id, -1);
+                              } else if (event.key === 'ArrowDown') {
+                                event.preventDefault();
+                                void moveShotByKeyboard(shot.id, 1);
+                              }
+                            }}
+                            className="flex h-6 w-5 shrink-0 cursor-grab items-center justify-center rounded-sm text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-25"
+                          >
+                            <Icons.GripVertical className="h-3.5 w-3.5" aria-hidden="true" />
+                          </button>
+                          <span className="min-w-0 truncate">{shot.display_number}</span>
+                        </div>
                       </td>
                       <td
                         className={`sticky left-20 z-10 w-28 border-r border-border px-3 ${rowPadding} ${
