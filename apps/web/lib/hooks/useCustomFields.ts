@@ -1,0 +1,175 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { apiClient } from '@/lib/api-client';
+
+export type CustomFieldType =
+  | 'text'
+  | 'textarea'
+  | 'number'
+  | 'boolean'
+  | 'date'
+  | 'url'
+  | 'select';
+
+export type CustomFieldState = 'visible' | 'hidden' | 'removed';
+
+export interface CustomFieldDefinition {
+  id: string;
+  production_id: string;
+  key: string;
+  column_key: string;
+  label: string;
+  description: string;
+  field_type: CustomFieldType;
+  group_name: string;
+  options: string[];
+  required: boolean;
+  default_value: unknown;
+  sort_index: number;
+  state: CustomFieldState;
+  permanently_deleted: boolean;
+  position: number;
+  width_px: number | null;
+  wrap_text: boolean;
+  revision: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CustomFieldValueMatrix {
+  values: Record<string, Record<string, unknown>>;
+}
+
+export function useCustomFields(productionId: string) {
+  return useQuery({
+    queryKey: ['custom-fields', productionId],
+    queryFn: () =>
+      apiClient<CustomFieldDefinition[]>(
+        `/api/v1/productions/${productionId}/custom-fields`
+      ),
+    enabled: Boolean(productionId)
+  });
+}
+
+export function useCustomFieldValues(productionId: string) {
+  return useQuery({
+    queryKey: ['custom-field-values', productionId],
+    queryFn: () =>
+      apiClient<CustomFieldValueMatrix>(
+        `/api/v1/productions/${productionId}/custom-field-values`
+      ),
+    enabled: Boolean(productionId)
+  });
+}
+
+export function useCreateCustomField(productionId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: {
+      label: string;
+      key?: string;
+      fieldType: CustomFieldType;
+      options?: string[];
+    }) =>
+      apiClient<CustomFieldDefinition>(
+        `/api/v1/productions/${productionId}/custom-fields`,
+        {
+          method: 'POST',
+          json: {
+            label: input.label,
+            ...(input.key ? { key: input.key } : {}),
+            field_type: input.fieldType,
+            options: input.options || []
+          }
+        }
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['custom-fields', productionId] });
+    }
+  });
+}
+
+export function useSetCustomFieldState(productionId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      id,
+      revision,
+      state
+    }: {
+      id: string;
+      revision: number;
+      state: CustomFieldState;
+    }) =>
+      apiClient<CustomFieldDefinition>(
+        `/api/v1/productions/${productionId}/custom-fields/${id}/state`,
+        {
+          method: 'PATCH',
+          json: { revision, state }
+        }
+      ),
+    onSuccess: saved => {
+      queryClient.setQueryData<CustomFieldDefinition[]>(
+        ['custom-fields', productionId],
+        current => current?.map(field => (field.id === saved.id ? saved : field)) ?? [saved]
+      );
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['custom-fields', productionId] });
+    }
+  });
+}
+
+export function usePurgeCustomField(productionId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, revision }: { id: string; revision: number }) =>
+      apiClient<{ ok: boolean; purged: boolean }>(
+        `/api/v1/productions/${productionId}/custom-fields/${id}/purge`,
+        {
+          method: 'POST',
+          json: { revision }
+        }
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['custom-fields', productionId] });
+      queryClient.invalidateQueries({ queryKey: ['custom-field-values', productionId] });
+      queryClient.invalidateQueries({ queryKey: ['saved-views', productionId] });
+    }
+  });
+}
+
+export function usePatchCustomFieldValue(productionId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      shotId,
+      fieldId,
+      revision,
+      value
+    }: {
+      shotId: string;
+      fieldId: string;
+      revision: number;
+      value: unknown;
+    }) =>
+      apiClient<{
+        changed: boolean;
+        shot_id: string;
+        field_id: string;
+        value: unknown;
+        revision: number;
+      }>(`/api/v1/shots/${shotId}/custom-fields/${fieldId}`, {
+        method: 'PATCH',
+        json: { revision, value }
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['shots', productionId] });
+      queryClient.invalidateQueries({ queryKey: ['custom-field-values', productionId] });
+    }
+  });
+}
