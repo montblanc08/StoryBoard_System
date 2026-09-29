@@ -116,6 +116,8 @@ export default function ShotListPage() {
                       key={shot.id}
                       onClick={() => {
                         selectShot(shot.id, false, false, filteredShots.map(s => s.id));
+                      }}
+                      onDoubleClick={() => {
                         openInspector(shot.id);
                       }}
                       className={`cursor-pointer transition-colors duration-100 ${

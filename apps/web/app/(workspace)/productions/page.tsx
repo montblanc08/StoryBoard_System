@@ -6,6 +6,7 @@ import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/authStore';
 import type { Production } from '@frameforge/types';
 import { Badge, Button, Card, Field, Icons, Input, Select } from '@frameforge/ui';
+import { TopBar } from '@/components/app-shell/TopBar';
 
 export default function ProductionsPage() {
   const router = useRouter();
@@ -65,47 +66,12 @@ export default function ProductionsPage() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      {/* Top Bar (50px) */}
-      <header className="sticky top-0 z-30 flex h-[50px] items-center justify-between border-b border-border bg-card/90 px-6 backdrop-blur">
-        <div className="flex items-center gap-3">
-          <div className="flex h-7 w-7 items-center justify-center rounded bg-accent text-accent-foreground border border-border">
-            <Icons.Film />
-          </div>
-          <span className="font-bold text-sm tracking-tight text-foreground">{t('appName')}</span>
-        </div>
-
-        <div className="flex items-center gap-4 text-xs">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setLocale(locale === 'zh-CN' ? 'en-US' : 'zh-CN')}
-          >
-            {locale === 'zh-CN' ? 'EN' : '中'}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-          >
-            {theme === 'dark' ? '☀' : '☾'}
-          </Button>
-          <div className="flex items-center gap-2 border-l border-border pl-4 text-muted-foreground">
-            <span className="text-foreground font-medium">{user?.display_name || user?.email}</span>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => { logout(); router.push('/login'); }}
-              className="text-muted-foreground hover:text-destructive"
-            >
-              退出
-            </Button>
-          </div>
-        </div>
-      </header>
+      {/* Unified App Shell TopBar */}
+      <TopBar />
 
       {/* Main Content */}
-      <main className="mx-auto max-w-6xl p-8">
-        <div className="mb-8 flex items-center justify-between">
+      <main className="mx-auto max-w-6xl p-4 sm:p-8">
+        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-lg font-bold text-foreground">{t('productions')}</h2>
             <p className="text-xs text-muted-foreground">创建、打开和管理影视制作项目。</p>
@@ -113,6 +79,7 @@ export default function ProductionsPage() {
           <Button
             size="sm"
             onClick={() => setShowModal(true)}
+            className="self-start sm:self-auto"
           >
             <Icons.Plus />
             {t('newProduction')}
@@ -138,8 +105,17 @@ export default function ProductionsPage() {
             {productions.map(prod => (
               <Card
                 key={prod.id}
+                role="button"
+                tabIndex={0}
+                data-testid={`production-card-${prod.id}`}
                 onClick={() => router.push(`/production/${prod.id}/storyboard`)}
-                className="group flex cursor-pointer items-center gap-4 p-4 transition hover:bg-accent/40"
+                onKeyDown={e => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    router.push(`/production/${prod.id}/storyboard`);
+                  }
+                }}
+                className="group flex cursor-pointer items-center gap-4 p-4 transition hover:bg-accent/40 focus:outline-none focus:ring-1 focus:ring-ring"
               >
                 <div className="min-w-0 flex-1 space-y-1.5">
                   <h3 className="truncate text-sm font-medium text-foreground">{prod.name}</h3>
@@ -150,7 +126,7 @@ export default function ProductionsPage() {
                     <span>{(prod as any).shot_count || 0} 镜头</span>
                   </div>
                 </div>
-                <span className="shrink-0 text-xs text-primary">打开 →</span>
+                <span className="shrink-0 text-xs text-primary font-medium">打开 →</span>
               </Card>
             ))}
           </div>

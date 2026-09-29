@@ -26,7 +26,7 @@ export default function ProductionLayout({
         <div className="flex flex-1 items-center justify-center text-muted-foreground font-mono text-xs">
           <div className="flex items-center gap-3">
             <Icons.Film className="animate-spin h-5 w-5 text-foreground" />
-            <span>正在载入影视管线数据...</span>
+            <span>正在载入数据...</span>
           </div>
         </div>
       </div>
@@ -39,7 +39,7 @@ export default function ProductionLayout({
         <TopBar />
         <div className="flex flex-1 flex-col items-center justify-center text-center p-8">
           <Icons.TriangleAlert className="h-12 w-12 text-destructive mb-3" />
-          <h2 className="text-base font-bold text-foreground mb-2">未找到该影视制作项目</h2>
+          <h2 className="text-base font-bold text-foreground mb-2">未找到该项目</h2>
           <p className="text-xs text-muted-foreground mb-6 max-w-sm">
             该项目可能已被归档或删除，或者当前账号未获得访问权限。
           </p>

@@ -28,38 +28,69 @@ export function ShotInspector({ shot, production, onClose }: ShotInspectorProps)
   const [conflictDetails, setConflictDetails] = useState<{ server_revision?: number; client_revision?: number } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [activeTab, setActiveTab] = useState<'creative' | 'camera' | 'pipeline' | 'timing'>('creative');
+  const currentShotIdRef = React.useRef<string | null>(null);
 
   useEffect(() => {
     if (shot) {
-      setFormData({
-        name: shot.name || '',
-        display_number: shot.display_number,
-        description: shot.description || '',
-        voice_over: shot.voice_over || '',
-        dialogue: shot.dialogue || '',
-        subtitle: shot.subtitle || '',
-        director_notes: shot.director_notes || '',
-        primary_method: shot.primary_method,
-        department: shot.department,
-        owner_id: shot.owner_id || '',
-        status: shot.status,
-        duration_frames: shot.duration_frames,
-        timing_locked: shot.timing_locked,
-        shot_size: shot.shot_size || '全景',
-        lens_mm: shot.lens_mm || 50,
-        camera: shot.camera || 'ARRI Alexa Mini',
-        camera_angle: shot.camera_angle || '平视',
-        camera_height: shot.camera_height || '胸高',
-        action: shot.action || '',
-        composition: shot.composition || '',
-        vfx_required: shot.vfx_required || false
-      });
-      setIsDirty(false);
-      setSaveStatus('idle');
-      setErrorMessage(null);
-      setConflictDetails(null);
+      const isDifferentShot = shot.id !== currentShotIdRef.current;
+      currentShotIdRef.current = shot.id;
+
+      if (isDifferentShot) {
+        setFormData({
+          name: shot.name || '',
+          display_number: shot.display_number,
+          description: shot.description || '',
+          voice_over: shot.voice_over || '',
+          dialogue: shot.dialogue || '',
+          subtitle: shot.subtitle || '',
+          director_notes: shot.director_notes || '',
+          primary_method: shot.primary_method,
+          department: shot.department,
+          owner_id: shot.owner_id || '',
+          status: shot.status,
+          duration_frames: shot.duration_frames,
+          timing_locked: shot.timing_locked,
+          shot_size: shot.shot_size || '全景',
+          lens_mm: shot.lens_mm || 50,
+          camera: shot.camera || 'ARRI Alexa Mini',
+          camera_angle: shot.camera_angle || '平视',
+          camera_height: shot.camera_height || '胸高',
+          action: shot.action || '',
+          composition: shot.composition || '',
+          vfx_required: shot.vfx_required || false
+        });
+        setIsDirty(false);
+        setSaveStatus('idle');
+        setErrorMessage(null);
+        setConflictDetails(null);
+      } else if (!isDirty) {
+        // Same shot refetched/updated, sync latest values if not currently dirty
+        setFormData({
+          name: shot.name || '',
+          display_number: shot.display_number,
+          description: shot.description || '',
+          voice_over: shot.voice_over || '',
+          dialogue: shot.dialogue || '',
+          subtitle: shot.subtitle || '',
+          director_notes: shot.director_notes || '',
+          primary_method: shot.primary_method,
+          department: shot.department,
+          owner_id: shot.owner_id || '',
+          status: shot.status,
+          duration_frames: shot.duration_frames,
+          timing_locked: shot.timing_locked,
+          shot_size: shot.shot_size || '全景',
+          lens_mm: shot.lens_mm || 50,
+          camera: shot.camera || 'ARRI Alexa Mini',
+          camera_angle: shot.camera_angle || '平视',
+          camera_height: shot.camera_height || '胸高',
+          action: shot.action || '',
+          composition: shot.composition || '',
+          vfx_required: shot.vfx_required || false
+        });
+      }
     }
-  }, [shot]);
+  }, [shot, isDirty]);
 
   if (!shot) return null;
 
@@ -85,6 +116,9 @@ export function ShotInspector({ shot, production, onClose }: ShotInspectorProps)
       });
       setSaveStatus('saved');
       setIsDirty(false);
+      setTimeout(() => {
+        setSaveStatus(prev => (prev === 'saved' ? 'idle' : prev));
+      }, 3000);
     } catch (err: unknown) {
       if (err instanceof ApiError && (err.status === 409 || err.code === 'SHOT_REVISION_CONFLICT')) {
         setSaveStatus('conflict');
@@ -103,6 +137,7 @@ export function ShotInspector({ shot, production, onClose }: ShotInspectorProps)
     setSaveStatus('idle');
     setErrorMessage(null);
     setConflictDetails(null);
+    setIsDirty(false);
   };
 
   const handleDelete = async () => {
