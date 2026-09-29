@@ -91,6 +91,7 @@ class ShotPatch(BaseModel):
 class ShotReorderItem(BaseModel):
     id: str
     sort_index: float
+    revision: int
 
 
 class ShotReorderRequest(BaseModel):
