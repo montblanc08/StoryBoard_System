@@ -27,6 +27,14 @@ class ReviewService:
         "approve": ("approved", "同意意见"),
         "request_changes": ("changes_requested", "驳回意见"),
     }
+    ALLOWED_ACTIONS_BY_STATUS = {
+        "draft": {"submit"},
+        "in_progress": {"submit"},
+        "changes_requested": {"submit"},
+        "review": {"withdraw", "approve", "request_changes"},
+        "approved": set(),
+        "locked": set(),
+    }
 
     @staticmethod
     def _has_permission(user: User, permission: str) -> bool:
@@ -271,6 +279,16 @@ class ReviewService:
             )
             if not version_result.scalar_one_or_none():
                 raise DomainError("版本不存在或不属于当前镜头", code="INVALID_REVIEW_VERSION")
+
+        allowed_actions = ReviewService.ALLOWED_ACTIONS_BY_STATUS.get(
+            shot.status,
+            {"submit"} if shot.status not in {"approved", "locked"} else set(),
+        )
+        if req.action not in allowed_actions:
+            raise DomainError(
+                f"当前状态 {shot.status} 不允许执行该审片操作",
+                code="INVALID_REVIEW_TRANSITION",
+            )
 
         next_status, action_label = ReviewService.DECISION_STATES[req.action]
         previous_status = shot.status
