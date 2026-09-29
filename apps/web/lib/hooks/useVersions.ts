@@ -16,6 +16,18 @@ export interface ShotVersion {
   updated_at: string;
 }
 
+export interface ShotVersionDetail extends ShotVersion {
+  snapshot: Record<string, unknown>;
+}
+
+export function useShotVersionDetail(versionId: string | null) {
+  return useQuery({
+    queryKey: ['shot-version', versionId],
+    queryFn: () => apiClient<ShotVersionDetail>(`/api/v1/versions/${versionId}`),
+    enabled: Boolean(versionId)
+  });
+}
+
 export function useShotVersions(shotId: string) {
   return useQuery({
     queryKey: ['shot-versions', shotId],
