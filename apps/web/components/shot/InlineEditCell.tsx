@@ -30,6 +30,7 @@ export function InlineEditCell({
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [hasConflict, setHasConflict] = useState(false);
+  const [conflictRevision, setConflictRevision] = useState<number | null>(null);
   
   const inputRef = useRef<HTMLInputElement>(null);
   const updateShot = useUpdateShot(productionId);
@@ -43,16 +44,25 @@ export function InlineEditCell({
     }
   }, [isEditing, type]);
 
+  useEffect(() => {
+    if (hasConflict && conflictRevision !== null && shot.revision !== conflictRevision) {
+      setHasConflict(false);
+      setConflictRevision(null);
+      setSaveError(null);
+    }
+  }, [hasConflict, conflictRevision, shot.revision]);
+
   const handleDoubleClick = (e: React.MouseEvent) => {
     e.stopPropagation(); // Prevent opening the inspector
     setEditValue(value !== null && value !== undefined ? String(value) : '');
     setSaveError(null);
     setHasConflict(false);
+    setConflictRevision(null);
     setIsEditing(true);
   };
 
-  const saveChange = async (retryConflict = false) => {
-    if (!isEditing || isSaving || (hasConflict && !retryConflict)) return;
+  const saveChange = async () => {
+    if (!isEditing || isSaving || hasConflict) return;
     
     let finalValue: string | number | null = editValue;
     if (type === 'number') {
@@ -73,11 +83,13 @@ export function InlineEditCell({
       });
       setSaveError(null);
       setHasConflict(false);
+      setConflictRevision(null);
       setIsEditing(false);
     } catch (err: unknown) {
       if (err instanceof ApiError && (err.status === 409 || err.code === 'SHOT_REVISION_CONFLICT')) {
         setHasConflict(true);
-        setSaveError('镜头已在别处修改。当前输入已保留，请核对后重试或放弃。');
+        setConflictRevision(shot.revision);
+        setSaveError('镜头已在别处修改。当前输入已保留；列表刷新到最新版本后可再次保存，或放弃输入。');
       } else {
         setSaveError(err instanceof Error ? err.message : '保存失败，请重试');
       }
@@ -114,10 +126,12 @@ export function InlineEditCell({
           <div role="alert" className="absolute left-0 top-full z-30 mt-1 min-w-64 rounded-md border border-warning/40 bg-popover p-2 text-xs text-foreground shadow-lg">
             <p>{saveError}</p>
             <div className="mt-2 flex gap-2">
-              <Button size="sm" variant="outline" onMouseDown={e => e.preventDefault()} onClick={() => void saveChange(hasConflict)}>
-                {hasConflict ? '以当前版本重试' : '重试保存'}
-              </Button>
-              <Button size="sm" variant="ghost" onMouseDown={e => e.preventDefault()} onClick={() => { setSaveError(null); setHasConflict(false); setIsEditing(false); }}>
+              {!hasConflict && (
+                <Button size="sm" variant="outline" onMouseDown={e => e.preventDefault()} onClick={() => void saveChange()}>
+                  重试保存
+                </Button>
+              )}
+              <Button size="sm" variant="ghost" onMouseDown={e => e.preventDefault()} onClick={() => { setSaveError(null); setHasConflict(false); setConflictRevision(null); setIsEditing(false); }}>
                 放弃输入
               </Button>
             </div>
