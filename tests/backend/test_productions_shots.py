@@ -119,11 +119,11 @@ async def test_production_and_shot_pipeline():
         assert restore_res.status_code == 200
         restored = restore_res.json()
         assert restored["id"] == sid
-        assert restored["revision"] == 3
+        assert restored["revision"] == 4
 
         list_after_restore = await client.get(f"/api/v1/productions/{pid}/shots", headers=headers)
         assert len(list_after_restore.json()) == 1
-        assert list_after_restore.json()[0]["revision"] == 3
+        assert list_after_restore.json()[0]["revision"] == 4
 
         # 10. Purge is only reachable after the shot is back in Trash.
         del_again = await client.delete(f"/api/v1/shots/{sid}", headers=headers)
