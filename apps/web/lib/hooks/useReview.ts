@@ -7,6 +7,7 @@ export interface ReviewComment {
   shot_id: string | null;
   user_id: string | null;
   author_name: string;
+  role: string;
   body: string;
   timecode: string;
   quote_field: string;
