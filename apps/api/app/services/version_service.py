@@ -388,8 +388,8 @@ class VersionService:
             raise NotFoundError("版本不存在")
 
         version_snapshot = version.snapshot if isinstance(version.snapshot, dict) else {}
-        other_snapshot: dict
         against_current = other_version_id is None
+        current_revision: int | None = None
 
         if other_version_id:
             other_result = await db.execute(
@@ -400,29 +400,35 @@ class VersionService:
             )
             other = other_result.scalar_one_or_none()
             if not other:
-                raise DomainError("对比版本不存在或不属于当前镜头", code="INVALID_COMPARE_VERSION")
+                raise DomainError(
+                    "对比版本不存在或不属于当前镜头",
+                    code="INVALID_COMPARE_VERSION",
+                )
             other_snapshot = other.snapshot if isinstance(other.snapshot, dict) else {}
         else:
             shot = await VersionService._active_shot(db, version.shot_id)
             other_snapshot = VersionService._snapshot(shot)
+            current_revision = shot.revision
 
-        differences = []
-        for field in sorted(ShotService.PATCH_FIELDS):
-            left = version_snapshot.get(field)
-            right = other_snapshot.get(field)
-            if left != right:
-                differences.append({
-                    "field": field,
-                    "version_value": left,
-                    "other_value": right,
-                })
+        fields: list[dict] = []
+        for key, label in VersionService.COMPARE_FIELDS:
+            before = version_snapshot.get(key)
+            after = other_snapshot.get(key)
+            fields.append({
+                "key": key,
+                "label": label,
+                "before": before,
+                "after": after,
+                "changed": before != after,
+            })
 
         return {
-            "version_id": version.id,
+            "version": version,
             "other_version_id": other_version_id,
             "against_current": against_current,
-            "shot_id": version.shot_id,
-            "differences": differences,
+            "current_revision": current_revision,
+            "changed_count": sum(1 for field in fields if field["changed"]),
+            "fields": fields,
         }
 
     @staticmethod
