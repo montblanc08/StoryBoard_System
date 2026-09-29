@@ -1,6 +1,6 @@
 'use client';
 
-import { Button, Checkbox, Icons, Input, Popover, Select } from '@frameforge/ui';
+import { Button, Icons, Input, Select } from '@frameforge/ui';
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
@@ -12,25 +12,58 @@ import { StatusBadge } from '@/components/shot/StatusBadge';
 import { ShotInspector } from '@/components/shot/ShotInspector';
 import { ShotTrashModal } from '@/components/shot/ShotTrashModal';
 import { InlineEditCell } from '@/components/shot/InlineEditCell';
-import { shotMovementLabel } from '@/lib/shot-display';
+import {
+  DEFAULT_SHOT_TABLE_COLUMN_ORDER,
+  SHOT_TABLE_COLUMN_LABELS,
+  ShotColumnManager,
+  type ShotTableColumnKey
+} from '@/components/shot/ShotColumnManager';
 import { BulkActionToolbar } from '@/components/storyboard/BulkActionToolbar';
+import { shotMovementLabel } from '@/lib/shot-display';
 
-const OPTIONAL_COLUMNS = [
-  { key: 'shotSize', label: '景别' },
-  { key: 'lens', label: '焦段' },
-  { key: 'movement', label: '机位运镜' },
-  { key: 'description', label: '画面内容与构图' },
-  { key: 'voiceOver', label: '对应旁白' },
-  { key: 'duration', label: '时长 / 帧数' },
-  { key: 'department', label: '部门' },
-  { key: 'owner', label: '负责人' },
-  { key: 'status', label: '状态' }
-] as const;
+const SHOT_COLUMN_WIDTHS: Record<ShotTableColumnKey, number> = {
+  shot_size: 80,
+  lens_mm: 80,
+  camera_movement: 112,
+  description: 240,
+  voice_over: 240,
+  duration_frames: 128,
+  department: 100,
+  owner_id: 120,
+  status: 120
+};
 
-type OptionalColumnKey = (typeof OPTIONAL_COLUMNS)[number]['key'];
-const DEFAULT_COLUMN_VISIBILITY = Object.fromEntries(
-  OPTIONAL_COLUMNS.map(column => [column.key, true])
-) as Record<OptionalColumnKey, boolean>;
+const LEGACY_COLUMN_KEYS: Record<ShotTableColumnKey, string> = {
+  shot_size: 'shotSize',
+  lens_mm: 'lens',
+  camera_movement: 'movement',
+  description: 'description',
+  voice_over: 'voiceOver',
+  duration_frames: 'duration',
+  department: 'department',
+  owner_id: 'owner',
+  status: 'status'
+};
+
+function normalizeColumnOrder(value: unknown): ShotTableColumnKey[] {
+  if (!Array.isArray(value)) return [...DEFAULT_SHOT_TABLE_COLUMN_ORDER];
+  const allowed = new Set<ShotTableColumnKey>(DEFAULT_SHOT_TABLE_COLUMN_ORDER);
+  const next = value.filter((item): item is ShotTableColumnKey =>
+    typeof item === 'string' && allowed.has(item as ShotTableColumnKey)
+  );
+  for (const column of DEFAULT_SHOT_TABLE_COLUMN_ORDER) {
+    if (!next.includes(column)) next.push(column);
+  }
+  return next;
+}
+
+function normalizeHiddenColumns(value: unknown): ShotTableColumnKey[] {
+  if (!Array.isArray(value)) return [];
+  const allowed = new Set<ShotTableColumnKey>(DEFAULT_SHOT_TABLE_COLUMN_ORDER);
+  return value.filter((item): item is ShotTableColumnKey =>
+    typeof item === 'string' && allowed.has(item as ShotTableColumnKey)
+  );
+}
 
 export default function ShotListPage() {
   const params = useParams();
@@ -44,7 +77,11 @@ export default function ShotListPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [sortKey, setSortKey] = useState<'default' | 'display_number' | 'duration_frames' | 'status'>('default');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
-  const [columnVisibility, setColumnVisibility] = useState<Record<OptionalColumnKey, boolean>>({ ...DEFAULT_COLUMN_VISIBILITY });
+  const [columnOrder, setColumnOrder] = useState<ShotTableColumnKey[]>([
+    ...DEFAULT_SHOT_TABLE_COLUMN_ORDER
+  ]);
+  const [hiddenColumns, setHiddenColumns] = useState<ShotTableColumnKey[]>([]);
+
   const {
     filters,
     setFilter,
@@ -61,29 +98,74 @@ export default function ShotListPage() {
 
   useEffect(() => {
     if (!id || typeof window === 'undefined') return;
+
+    const storageKey = `frameforge:shot-table:${id}:column-layout-v2`;
+    const legacyStorageKey = `frameforge:shot-table:${id}:columns`;
+
     try {
-      const raw = window.localStorage.getItem(`frameforge:shot-table:${id}:columns`);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as Partial<Record<OptionalColumnKey, boolean>>;
-      const next = { ...DEFAULT_COLUMN_VISIBILITY };
-      for (const column of OPTIONAL_COLUMNS) {
-        if (typeof parsed[column.key] === 'boolean') next[column.key] = parsed[column.key] as boolean;
+      const raw = window.localStorage.getItem(storageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw) as { order?: unknown; hidden?: unknown };
+        setColumnOrder(normalizeColumnOrder(parsed.order));
+        setHiddenColumns(normalizeHiddenColumns(parsed.hidden));
+        return;
       }
-      setColumnVisibility(next);
+
+      const legacyRaw = window.localStorage.getItem(legacyStorageKey);
+      if (legacyRaw) {
+        const legacy = JSON.parse(legacyRaw) as Record<string, unknown>;
+        const hidden = DEFAULT_SHOT_TABLE_COLUMN_ORDER.filter(
+          column => legacy[LEGACY_COLUMN_KEYS[column]] === false
+        );
+        setHiddenColumns(hidden);
+      }
     } catch {
-      setColumnVisibility({ ...DEFAULT_COLUMN_VISIBILITY });
+      setColumnOrder([...DEFAULT_SHOT_TABLE_COLUMN_ORDER]);
+      setHiddenColumns([]);
     }
   }, [id]);
 
-  useEffect(() => {
+  const persistColumnLayout = (
+    nextOrder: ShotTableColumnKey[],
+    nextHidden: ShotTableColumnKey[]
+  ) => {
     if (!id || typeof window === 'undefined') return;
     window.localStorage.setItem(
-      `frameforge:shot-table:${id}:columns`,
-      JSON.stringify(columnVisibility)
+      `frameforge:shot-table:${id}:column-layout-v2`,
+      JSON.stringify({ order: nextOrder, hidden: nextHidden })
     );
-  }, [id, columnVisibility]);
+  };
 
-  const inspectedShot = shots.find(s => s.id === inspectedShotId) || null;
+  const handleColumnVisibleChange = (column: ShotTableColumnKey, visible: boolean) => {
+    setHiddenColumns(current => {
+      const next = visible
+        ? current.filter(item => item !== column)
+        : Array.from(new Set([...current, column]));
+      persistColumnLayout(columnOrder, next);
+      return next;
+    });
+  };
+
+  const handleColumnMove = (column: ShotTableColumnKey, direction: -1 | 1) => {
+    setColumnOrder(current => {
+      const index = current.indexOf(column);
+      const target = index + direction;
+      if (index < 0 || target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      persistColumnLayout(next, hiddenColumns);
+      return next;
+    });
+  };
+
+  const resetColumnLayout = () => {
+    const nextOrder = [...DEFAULT_SHOT_TABLE_COLUMN_ORDER];
+    setColumnOrder(nextOrder);
+    setHiddenColumns([]);
+    persistColumnLayout(nextOrder, []);
+  };
+
+  const inspectedShot = shots.find(shot => shot.id === inspectedShotId) || null;
 
   if (!production) return null;
 
@@ -103,10 +185,10 @@ export default function ShotListPage() {
   );
 
   const visibleShots = useMemo(() => {
-    const q = filters.searchQuery.trim().toLowerCase();
+    const query = filters.searchQuery.trim().toLowerCase();
     const filtered = shots.filter(item => {
       if (
-        q &&
+        query &&
         ![
           item.display_number,
           item.name,
@@ -116,7 +198,7 @@ export default function ShotListPage() {
           item.department,
           item.status,
           item.primary_method
-        ].some(value => String(value || '').toLowerCase().includes(q))
+        ].some(value => String(value || '').toLowerCase().includes(query))
       ) return false;
       if (filters.primaryMethod !== 'all' && item.primary_method !== filters.primaryMethod) return false;
       if (filters.department !== 'all' && item.department !== filters.department) return false;
@@ -129,6 +211,7 @@ export default function ShotListPage() {
     return [...filtered].sort((a, b) => {
       let left: string | number = '';
       let right: string | number = '';
+
       if (sortKey === 'display_number') {
         left = a.display_number || '';
         right = b.display_number || '';
@@ -139,24 +222,32 @@ export default function ShotListPage() {
         left = a.status || '';
         right = b.status || '';
       }
+
       const comparison =
         typeof left === 'number' && typeof right === 'number'
           ? left - right
-          : String(left).localeCompare(String(right), undefined, { numeric: true, sensitivity: 'base' });
+          : String(left).localeCompare(String(right), undefined, {
+              numeric: true,
+              sensitivity: 'base'
+            });
+
       return sortDirection === 'asc' ? comparison : -comparison;
     });
   }, [shots, filters, sortKey, sortDirection]);
 
   const visibleShotIds = visibleShots.map(item => item.id);
+  const visibleColumns = columnOrder.filter(column => !hiddenColumns.includes(column));
+  const tableMinWidth =
+    192 + visibleColumns.reduce((sum, column) => sum + SHOT_COLUMN_WIDTHS[column], 0);
+
   const activeFilterCount = [
     filters.primaryMethod !== 'all',
     filters.department !== 'all',
     filters.status !== 'all'
   ].filter(Boolean).length;
 
-
-  const toggleLock = async (shot: Shot, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const toggleLock = async (shot: Shot, event: React.MouseEvent) => {
+    event.stopPropagation();
     await updateShot.mutateAsync({
       id: shot.id,
       revision: shot.revision,
@@ -166,7 +257,6 @@ export default function ShotListPage() {
 
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
-      {/* Read-first table controls: selection, filtering and sorting stay independent from Inspector. */}
       <div className="z-10 shrink-0 border-b border-border bg-card/90 px-3 py-2 sm:px-6 sm:py-2.5">
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative min-w-0 flex-1 basis-full sm:basis-64 sm:max-w-xs">
@@ -229,55 +319,20 @@ export default function ShotListPage() {
               详情
             </Button>
 
-            <Popover
-              label="列管理"
-              trigger={
-                <Button variant="ghost" size="sm" className="h-8 text-xs">
-                  <Icons.Columns3 className="h-3.5 w-3.5" />
-                  列管理
-                </Button>
-              }
-            >
-              <div className="w-64 space-y-3">
-                <div>
-                  <p className="text-xs font-semibold text-foreground">显示列</p>
-                  <p className="mt-1 text-[11px] leading-4 text-muted-foreground">
-                    镜号和制作方式保持固定；其他列可按当前浏览器工作区显示或隐藏。
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  {OPTIONAL_COLUMNS.map(column => (
-                    <label
-                      key={column.key}
-                      className="flex min-h-9 cursor-pointer items-center gap-2 rounded-md px-2 text-xs hover:bg-accent"
-                    >
-                      <Checkbox
-                        checked={columnVisibility[column.key]}
-                        onCheckedChange={checked =>
-                          setColumnVisibility(current => ({
-                            ...current,
-                            [column.key]: checked === true
-                          }))
-                        }
-                      />
-                      <span className="min-w-0 flex-1 truncate">{column.label}</span>
-                    </label>
-                  ))}
-                </div>
-                <div className="border-t border-border pt-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setColumnVisibility({ ...DEFAULT_COLUMN_VISIBILITY })}
-                    className="w-full justify-start text-xs"
-                  >
-                    恢复默认列
-                  </Button>
-                </div>
-              </div>
-            </Popover>
+            <ShotColumnManager
+              columnOrder={columnOrder}
+              hiddenColumns={hiddenColumns}
+              onVisibleChange={handleColumnVisibleChange}
+              onMove={handleColumnMove}
+              onReset={resetColumnLayout}
+            />
 
-            <Button variant="ghost" size="sm" onClick={() => setIsTrashOpen(true)} className="h-8 text-xs hover:text-foreground">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsTrashOpen(true)}
+              className="h-8 text-xs hover:text-foreground"
+            >
               <Icons.Trash2 className="h-3.5 w-3.5" />
               废纸篓
             </Button>
@@ -292,21 +347,30 @@ export default function ShotListPage() {
               label="制作方式筛选"
               value={filters.primaryMethod}
               onChange={value => setFilter('primaryMethod', value)}
-              options={[{ value: 'all', label: '全部制作方式' }, ...methodOptions.map(value => ({ value, label: value }))]}
+              options={[
+                { value: 'all', label: '全部制作方式' },
+                ...methodOptions.map(value => ({ value, label: value }))
+              ]}
               className="h-9 text-xs"
             />
             <Select
               label="部门筛选"
               value={filters.department}
               onChange={value => setFilter('department', value)}
-              options={[{ value: 'all', label: '全部部门' }, ...departmentOptions.map(value => ({ value, label: value }))]}
+              options={[
+                { value: 'all', label: '全部部门' },
+                ...departmentOptions.map(value => ({ value, label: value }))
+              ]}
               className="h-9 text-xs"
             />
             <Select
               label="状态筛选"
               value={filters.status}
               onChange={value => setFilter('status', value)}
-              options={[{ value: 'all', label: '全部状态' }, ...statusOptions.map(value => ({ value, label: value }))]}
+              options={[
+                { value: 'all', label: '全部状态' },
+                ...statusOptions.map(value => ({ value, label: value }))
+              ]}
               className="h-9 text-xs"
             />
             <Select
@@ -349,127 +413,222 @@ export default function ShotListPage() {
         </div>
       )}
 
-      {isTrashOpen && <ShotTrashModal productionId={production.id} onClose={() => setIsTrashOpen(false)} />}
+      {isTrashOpen && (
+        <ShotTrashModal
+          productionId={production.id}
+          onClose={() => setIsTrashOpen(false)}
+        />
+      )}
 
-      {/* Table & Inspector Container */}
       <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-        <div className="min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain" role="region" aria-label="镜头制作表" tabIndex={0}>
+        <div
+          className="min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain"
+          role="region"
+          aria-label="镜头制作表"
+          tabIndex={0}
+        >
           {isLoading ? (
             <div className="flex h-64 items-center justify-center font-mono text-xs text-muted-foreground">
               正在加载镜头制作表...
             </div>
           ) : (
-            <table className="w-full min-w-[1200px] table-fixed border-collapse text-left font-sans text-xs">
-              <thead className="sticky top-0 z-10 bg-card border-b border-border text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+            <table
+              className="w-full table-fixed border-collapse text-left font-sans text-xs"
+              style={{ minWidth: `${Math.max(tableMinWidth, 360)}px` }}
+            >
+              <thead className="sticky top-0 z-10 border-b border-border bg-card text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
                 <tr>
-                  <th scope="col" className="sticky left-0 z-30 w-20 border-r border-border bg-card px-3 py-2.5">镜号</th>
-                  <th scope="col" className="sticky left-20 z-30 w-28 border-r border-border bg-card px-3 py-2.5">制作方式</th>
-                  {columnVisibility.shotSize && <th className="py-2.5 px-3 w-20">景别</th>}
-                  {columnVisibility.lens && <th className="py-2.5 px-3 w-20">焦段</th>}
-                  {columnVisibility.movement && <th className="py-2.5 px-3 w-28">机位运镜</th>}
-                  {columnVisibility.description && <th className="py-2.5 px-3 min-w-[200px]">画面内容与构图</th>}
-                  {columnVisibility.voiceOver && <th className="py-2.5 px-3 min-w-[200px]">对应旁白</th>}
-                  {columnVisibility.duration && <th className="py-2.5 px-3 w-24 text-right">时长/帧数</th>}
-                  {columnVisibility.department && <th className="py-2.5 px-3 w-20">部门</th>}
-                  {columnVisibility.owner && <th className="py-2.5 px-3 w-24">负责人</th>}
-                  {columnVisibility.status && <th className="py-2.5 px-3 w-24 text-center">状态</th>}
+                  <th
+                    scope="col"
+                    className="sticky left-0 z-30 w-20 border-r border-border bg-card px-3 py-2.5"
+                  >
+                    镜号
+                  </th>
+                  <th
+                    scope="col"
+                    className="sticky left-20 z-30 w-28 border-r border-border bg-card px-3 py-2.5"
+                  >
+                    制作方式
+                  </th>
+                  {visibleColumns.map(column => (
+                    <th
+                      key={column}
+                      scope="col"
+                      className={`px-3 py-2.5 ${
+                        column === 'duration_frames'
+                          ? 'text-right'
+                          : column === 'status'
+                            ? 'text-center'
+                            : ''
+                      }`}
+                      style={{ width: SHOT_COLUMN_WIDTHS[column] }}
+                    >
+                      {SHOT_TABLE_COLUMN_LABELS[column]}
+                    </th>
+                  ))}
                 </tr>
               </thead>
+
               <tbody className="divide-y divide-border">
                 {visibleShots.map(shot => {
                   const isSelected = selectedShotIds.includes(shot.id);
+                  const isInspected = inspectedShotId === shot.id;
                   const durationSec = ((shot.duration_frames || 0) / fps).toFixed(1);
 
                   return (
                     <tr
                       key={shot.id}
                       onClick={event => {
-                        selectShot(shot.id, event.shiftKey, event.metaKey || event.ctrlKey, visibleShotIds);
+                        selectShot(
+                          shot.id,
+                          event.shiftKey,
+                          event.metaKey || event.ctrlKey,
+                          visibleShotIds
+                        );
                       }}
-                      onDoubleClick={() => {
-                        openInspector(shot.id);
-                      }}
+                      onDoubleClick={() => openInspector(shot.id)}
                       onKeyDown={event => {
                         if (event.key === 'Enter') {
                           event.preventDefault();
                           openInspector(shot.id);
                         } else if (event.key === ' ') {
                           event.preventDefault();
-                          selectShot(shot.id, event.shiftKey, event.metaKey || event.ctrlKey, visibleShotIds);
+                          selectShot(
+                            shot.id,
+                            event.shiftKey,
+                            event.metaKey || event.ctrlKey,
+                            visibleShotIds
+                          );
                         }
                       }}
                       tabIndex={0}
                       aria-selected={isSelected}
+                      aria-current={isInspected ? 'true' : undefined}
                       className={`group cursor-pointer transition-colors duration-100 ${
-                        isSelected
-                          ? 'bg-accent hover:bg-accent/80'
-                          : 'hover:bg-accent'
-                      }`}
+                        isSelected ? 'bg-accent hover:bg-accent/80' : 'hover:bg-accent'
+                      } ${isInspected ? 'ring-1 ring-inset ring-ring/50' : ''}`}
                     >
-                      <td className={`sticky left-0 z-10 w-20 border-r border-border px-3 py-2 font-mono font-bold text-foreground ${isSelected ? 'bg-accent' : 'bg-card group-hover:bg-accent'}`}>
+                      <td
+                        className={`sticky left-0 z-10 w-20 border-r border-border px-3 py-2 font-mono font-bold text-foreground ${
+                          isSelected ? 'bg-accent' : 'bg-card group-hover:bg-accent'
+                        }`}
+                      >
                         {shot.display_number}
                       </td>
-                      <td className={`sticky left-20 z-10 w-28 border-r border-border px-3 py-2 ${isSelected ? 'bg-accent' : 'bg-card group-hover:bg-accent'}`}>
+                      <td
+                        className={`sticky left-20 z-10 w-28 border-r border-border px-3 py-2 ${
+                          isSelected ? 'bg-accent' : 'bg-card group-hover:bg-accent'
+                        }`}
+                      >
                         <MethodBadge method={shot.primary_method} size="sm" />
                       </td>
-                      {columnVisibility.shotSize && (
-                        <td className="py-2 px-3 text-foreground font-mono">
-                          {shot.shot_size || '全景'}
-                        </td>
-                      )}
-                      {columnVisibility.lens && (
-                        <td className="py-2 px-3 text-muted-foreground font-mono">
-                          {shot.lens_mm ? `${shot.lens_mm}mm` : '—'}
-                        </td>
-                      )}
-                      {columnVisibility.movement && (
-                        <td className="py-2 px-3 text-foreground truncate max-w-[120px]">
-                          {shotMovementLabel(shot)}
-                        </td>
-                      )}
-                      {columnVisibility.description && (
-                        <td className="py-2 px-3 text-foreground">
-                          <InlineEditCell productionId={production.id} shot={shot} field="description" value={shot.description || ''} placeholder="双击输入画面描述" />
-                        </td>
-                      )}
-                      {columnVisibility.voiceOver && (
-                        <td className="py-2 px-3 text-foreground">
-                          <InlineEditCell productionId={production.id} shot={shot} field="voice_over" value={shot.voice_over || ''} placeholder="双击输入旁白" />
-                        </td>
-                      )}
-                      {columnVisibility.duration && (
-                        <td className="py-2 px-3 text-right font-mono">
-                          <div className="flex items-center justify-end gap-1.5">
-                          <span className="font-bold text-foreground">{shot.duration_frames}f</span>
-                          <span className="text-[10px] text-muted-foreground">({durationSec}s)</span>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={e => toggleLock(shot, e)}
-                            aria-label={shot.timing_locked ? '已锁定' : '未锁定'}
-                            title={shot.timing_locked ? '已锁定' : '未锁定'}
-                            className={`h-6 w-6 ${shot.timing_locked ? 'text-foreground' : 'text-muted-foreground'}`}
-                          >
-                            {shot.timing_locked ? <Icons.Lock className="h-3 w-3" /> : <Icons.LockOpen className="h-3 w-3" />}
-                          </Button>
-                          </div>
-                        </td>
-                      )}
-                      {columnVisibility.department && (
-                        <td className="py-2 px-3 text-muted-foreground font-mono">
-                          {shot.department || 'Camera'}
-                        </td>
-                      )}
-                      {columnVisibility.owner && (
-                        <td className="py-2 px-3 text-foreground">
-                          {shot.owner_id || '—'}
-                        </td>
-                      )}
-                      {columnVisibility.status && (
-                        <td className="py-2 px-3 text-center">
-                          <StatusBadge status={shot.status} />
-                        </td>
-                      )}
+
+                      {visibleColumns.map(column => {
+                        if (column === 'shot_size') {
+                          return (
+                            <td key={column} className="px-3 py-2 font-mono text-foreground">
+                              {shot.shot_size || '全景'}
+                            </td>
+                          );
+                        }
+
+                        if (column === 'lens_mm') {
+                          return (
+                            <td key={column} className="px-3 py-2 font-mono text-muted-foreground">
+                              {shot.lens_mm ? `${shot.lens_mm}mm` : '—'}
+                            </td>
+                          );
+                        }
+
+                        if (column === 'camera_movement') {
+                          return (
+                            <td key={column} className="max-w-[120px] truncate px-3 py-2 text-foreground">
+                              {shotMovementLabel(shot)}
+                            </td>
+                          );
+                        }
+
+                        if (column === 'description') {
+                          return (
+                            <td key={column} className="px-3 py-2 text-foreground">
+                              <InlineEditCell
+                                productionId={production.id}
+                                shot={shot}
+                                field="description"
+                                value={shot.description || ''}
+                                placeholder="双击输入画面描述"
+                              />
+                            </td>
+                          );
+                        }
+
+                        if (column === 'voice_over') {
+                          return (
+                            <td key={column} className="px-3 py-2 text-foreground">
+                              <InlineEditCell
+                                productionId={production.id}
+                                shot={shot}
+                                field="voice_over"
+                                value={shot.voice_over || ''}
+                                placeholder="双击输入旁白"
+                              />
+                            </td>
+                          );
+                        }
+
+                        if (column === 'duration_frames') {
+                          return (
+                            <td key={column} className="px-3 py-2 text-right font-mono">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <span className="font-bold text-foreground">
+                                  {shot.duration_frames}f
+                                </span>
+                                <span className="text-[10px] text-muted-foreground">
+                                  ({durationSec}s)
+                                </span>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={event => toggleLock(shot, event)}
+                                  aria-label={shot.timing_locked ? '已锁定' : '未锁定'}
+                                  title={shot.timing_locked ? '已锁定' : '未锁定'}
+                                  className={`h-6 w-6 ${
+                                    shot.timing_locked ? 'text-foreground' : 'text-muted-foreground'
+                                  }`}
+                                >
+                                  {shot.timing_locked ? (
+                                    <Icons.Lock className="h-3 w-3" />
+                                  ) : (
+                                    <Icons.LockOpen className="h-3 w-3" />
+                                  )}
+                                </Button>
+                              </div>
+                            </td>
+                          );
+                        }
+
+                        if (column === 'department') {
+                          return (
+                            <td key={column} className="px-3 py-2 font-mono text-muted-foreground">
+                              {shot.department || 'Camera'}
+                            </td>
+                          );
+                        }
+
+                        if (column === 'owner_id') {
+                          return (
+                            <td key={column} className="px-3 py-2 text-foreground">
+                              {shot.owner_id || '—'}
+                            </td>
+                          );
+                        }
+
+                        return (
+                          <td key={column} className="px-3 py-2 text-center">
+                            <StatusBadge status={shot.status} />
+                          </td>
+                        );
+                      })}
                     </tr>
                   );
                 })}
@@ -478,10 +637,13 @@ export default function ShotListPage() {
           )}
         </div>
 
-        {/* Inspector opens on double-click; it overlays the table on narrow screens. */}
         {isInspectorOpen && inspectedShot && (
           <>
-            <div className="fixed inset-0 z-40 bg-background/70 md:hidden" onClick={closeInspector} aria-hidden="true" />
+            <div
+              className="fixed inset-0 z-40 bg-background/70 md:hidden"
+              onClick={closeInspector}
+              aria-hidden="true"
+            />
             <div className="fixed inset-x-2 top-[58px] bottom-[calc(env(safe-area-inset-bottom)+8px)] z-50 min-w-0 overflow-hidden rounded-lg border border-border bg-card shadow-2xl [&>aside]:h-full [&>aside]:w-full md:static md:inset-auto md:z-auto md:w-[380px] md:shrink-0 md:rounded-none md:border-0 md:shadow-none md:[&>aside]:w-[380px]">
               <ShotInspector
                 shot={inspectedShot}
