@@ -57,7 +57,7 @@ REQUIRED_PRODUCT_CAPABILITIES = (
     "Comments",
     "Versions",
     "Share",
-    "Project Trash",
+    "Shot Trash",
     "Strict No-Op Revision",
     "Shot Command Parity",
     "409 Conflict Rehearsal",
