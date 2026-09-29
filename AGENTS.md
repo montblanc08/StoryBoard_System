@@ -1311,6 +1311,20 @@ A push is not a migration completion criterion by itself.
 
 Do not claim repository success if local HEAD and remote state are known to differ.
 
+# 33. Functional Golden Baseline Rule
+
+FRAMEFORGE_PRODUCT_BASELINE = 5e86a0bb11a20ecd631d9c2af66260a73d7c92e7
+
+Treat this commit as the Product Behavior Golden Reference, not as the architecture target and not as a branch to reset to.
+
+For every VNext capability:
+compare current `apps/web` + `apps/api` against the behavior present at FRAMEFORGE_PRODUCT_BASELINE.
+
+Do not silently omit a capability that exists at the baseline.
+Later explicit user decisions and documented removals override the baseline.
+
+CURRENT master remains the implementation target.
+
 If remote authentication blocks the push, preserve the local commit and report the exact blocker.
 
 ---
