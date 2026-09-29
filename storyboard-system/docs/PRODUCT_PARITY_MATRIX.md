@@ -38,7 +38,7 @@ Status vocabulary:
 | Multi-select | Present | Present | INTEGRATED_NOT_CUT_OVER | Shift-range and Ctrl/Cmd toggle selection now use the canonical workspace selection owner; bulk-action UI parity remains incomplete. |
 | Filtering & Sorting | Present | Present | INTEGRATED_NOT_CUT_OVER | Canonical V-Web now consumes workspace search plus method/department/status filters and client sorting; advanced baseline filter semantics and persisted saved views remain. |
 | Grouping | Present | Present | BLOCKED | Not yet migrated. |
-| Bulk Actions | Present | Present | BLOCKED | Canonical UI is still missing. V-API bulk writes now use revision-aware atomic `ShotService` semantics and suppress no-op revisions; Panel/custom-field/audit parity remains incomplete. |
+| Bulk Actions | Present | Present | INTEGRATED_NOT_CUT_OVER | Shot Table mounts the canonical bulk toolbar; method/status/department edits use revision-aware atomic `ShotService` writes and bulk trash uses one project-scoped atomic request. Panel/custom-field/audit parity and fresh rendered visual QA remain incomplete. |
 | Context Menu | Present | Present | BLOCKED | Not yet migrated. |
 | Shot Reorder | Present | Present | BLOCKED | API exists but canonical UI/command parity is incomplete. |
 | Undo / Redo | Present | Present | BLOCKED | Not yet migrated. |
@@ -48,7 +48,7 @@ Status vocabulary:
 | Comments | Present | Present | BLOCKED | Not yet migrated. |
 | Versions | Present | Present | BLOCKED | Not yet migrated. |
 | Share | Present | Present | BLOCKED | VNext share contract is not baseline-parity. |
-| Shot Trash | Present | Present | INTEGRATED_NOT_CUT_OVER | Soft delete/list/restore/purge route through `ShotService` and lifecycle API coverage exists; actor/audit history and any real retention policy remain incomplete. |
+| Shot Trash | Present | Present | INTEGRATED_NOT_CUT_OVER | Soft delete/list/restore/purge plus project-scoped bulk trash route through `ShotService`; canonical UI cache refresh and irreversible confirmation are wired. Actor/audit history and any real retention policy remain incomplete. |
 
 ## 3. Server State & Collaboration
 | Capability | Baseline | VNext target | Status | Gap / evidence |
