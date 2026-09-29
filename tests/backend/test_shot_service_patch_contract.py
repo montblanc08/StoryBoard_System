@@ -316,5 +316,23 @@ class ShotServiceMutationContractTest(unittest.TestCase):
         self.assertEqual([shot.revision for shot in shots], [4, 6])
         self.assertEqual(db.flush_count, 1)
 
+    def test_reorder_rejects_partial_target_set_before_mutation(self):
+        shots = [_Shot("shot-1", revision=3), _Shot("shot-2", revision=5)]
+        shots[0].sort_index = 1000.0
+        shots[1].sort_index = 2000.0
+        db = _Session(shots)
+        request = SimpleNamespace(
+            production_id="production-1",
+            base_order=["shot-1", "shot-2"],
+            items=[SimpleNamespace(id="shot-1", sort_index=1000.0, revision=3)],
+        )
+
+        with self.assertRaises(_ConflictError):
+            asyncio.run(_service_class().reorder_shots(db, request, "editor-1"))
+
+        self.assertEqual([shot.sort_index for shot in shots], [1000.0, 2000.0])
+        self.assertEqual([shot.revision for shot in shots], [3, 5])
+        self.assertEqual(db.flush_count, 0)
+
 if __name__ == "__main__":
     unittest.main()
