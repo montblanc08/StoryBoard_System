@@ -22,7 +22,7 @@ Status vocabulary:
 | Workspace IA: Narration | Present | Present | BLOCKED | Missing from canonical V-Web workspace. |
 | Workspace IA: Moodboard | Present | Present | BLOCKED | Missing from canonical V-Web workspace. |
 | Workspace IA: Lighting | Present | Present | BLOCKED | Missing from canonical V-Web workspace. |
-| Workspace IA: Review | Present | Present | INTEGRATED_NOT_CUT_OVER | Canonical V-Web Review now consumes real V-API comments and revision-aware review decisions. Version creation/compare/restore and rendered-browser parity remain incomplete. |
+| Workspace IA: Review | Present | Present | INTEGRATED_NOT_CUT_OVER | Canonical V-Web Review consumes persistent comments, revision-aware review decisions, immutable Shot versions, accept/restore plus named branch/merge actions. Compare UI, richer snapshot scope and rendered-browser parity remain incomplete. |
 
 ## 2. Shot Workspace Advanced Capabilities
 | Capability | Baseline | VNext target | Status | Gap / evidence |
@@ -40,13 +40,13 @@ Status vocabulary:
 | Grouping | Present | Present | BLOCKED | Not yet migrated. |
 | Bulk Actions | Present | Present | INTEGRATED_NOT_CUT_OVER | Shot Table mounts the canonical bulk toolbar; method/status/department edits use revision-aware atomic `ShotService` writes and bulk trash uses one project-scoped atomic request. Panel/custom-field/audit parity and fresh rendered visual QA remain incomplete. |
 | Context Menu | Present | Present | INTEGRATED_NOT_CUT_OVER | Canonical Shot Table now uses shared shadcn/Radix DropdownMenu for row/column actions, keyboard ContextMenu/Shift+F10 entry and focus return. Baseline action coverage and narrow-width rendered QA remain. |
-| Shot Reorder | Present | Present | IMPLEMENTED_NOT_INTEGRATED | Canonical command now requires one production, the complete active-shot set, exact client `base_order`, and per-shot revisions before any mutation; V-Web hook sends that contract. Canonical drag/reorder UI plus baseline collaboration lease, snapshot/audit and browser parity are still missing. |
+| Shot Reorder | Present | Present | INTEGRATED_NOT_CUT_OVER | Canonical table now consumes the full-set revision-aware reorder command through a drag handle plus keyboard ↑/↓ movement. Reorder is intentionally disabled while search/filter/non-default sorting is active so the client cannot submit a partial order. Baseline collaboration lease and rendered desktop/mobile drag parity remain. |
 | Undo / Redo | Present | Present | BLOCKED | Not yet migrated. |
 | Save Status / Dirty Draft | Present | Present | INTEGRATED_NOT_CUT_OVER | Inspector now tracks changed fields and preserves drafts; browser/visual regression still required. |
 | Production Steps | Present | Present | BLOCKED | Not yet migrated. |
 | Custom Fields | Present | Present | BLOCKED | Not yet migrated. |
 | Comments | Present | Present | INTEGRATED_NOT_CUT_OVER | V-API now persists create/edit/resolve/reopen/delete semantics with actor audit, quote metadata, role and parent linkage; V-Web Review consumes real comments instead of local fake state. Browser/permission parity remains. |
-| Versions | Present | Present | BLOCKED | Not yet migrated. |
+| Versions | Present | Present | INTEGRATED_NOT_CUT_OVER | V-API now provides immutable per-shot versions with serialized version numbering, accept, revision-checked restore, named branches and explicit merge-with-backup semantics; Review consumes create/select/accept/restore/branch/merge. Compare UI and Panel/asset/custom-field snapshot parity remain. |
 | Share | Present | Present | BLOCKED | VNext share contract is not baseline-parity. |
 | Shot Trash | Present | Present | INTEGRATED_NOT_CUT_OVER | Soft delete/list/restore/purge plus project-scoped bulk trash route through `ShotService`; trash/restore now advance revision and all lifecycle mutations emit audit rows. Retention policy and immutable version-history parity remain incomplete. |
 
@@ -54,7 +54,7 @@ Status vocabulary:
 | Capability | Baseline | VNext target | Status | Gap / evidence |
 | :--- | :--- | :--- | :--- | :--- |
 | Strict No-Op Revision | Present | Present | INTEGRATED_NOT_CUT_OVER | `ShotService.patch_shot` suppresses revision changes for no-op writes and has a focused contract test. |
-| Shot Command Parity | Present | Present | INTEGRATED_NOT_CUT_OVER | Create/PATCH, trash/restore/purge, bulk writes and reorder flow through `ShotService`; real mutations now advance authoritative revision where applicable and emit `AuditLog` rows with actor/action metadata. Immutable ShotVersion/history plus full Panel/asset/custom-field semantics still need convergence. |
+| Shot Command Parity | Present | Present | INTEGRATED_NOT_CUT_OVER | Create/PATCH, trash/restore/purge, bulk writes and reorder flow through `ShotService`; real mutations advance authoritative revision where applicable and emit actor-scoped `AuditLog` rows. Version restore/merge route back through the same command boundary. Panel/asset/custom-field snapshot parity remains. |
 | 409 Conflict | Present | Strict | INTEGRATED_NOT_CUT_OVER | API conflict path and draft-preserving UI exist; full end-to-end/browser conflict resolution is not yet cutover-ready. |
 | Ephemeral Presence | Active | Authenticated Redis-backed | BLOCKED | Canonical UI consumer must remain disconnected until WS auth + Redis multi-worker semantics are complete. |
 | Real-time Sync | Active | Authenticated realtime | BLOCKED | No authoritative cutover yet. |
