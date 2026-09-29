@@ -7,12 +7,15 @@ import { useParams } from 'next/navigation';
 import type { Shot } from '@frameforge/types';
 import { useProduction, useReorderShots, useShots, useUpdateShot } from '@/lib/hooks/useProduction';
 import { useWorkspaceStore } from '@/stores/useWorkspaceStore';
+import { useCustomFields, useCustomFieldValues } from '@/lib/hooks/useCustomFields';
 import { MethodBadge } from '@/components/shot/MethodBadge';
 import { StatusBadge } from '@/components/shot/StatusBadge';
 import { ShotInspector } from '@/components/shot/ShotInspector';
 import { ShotTrashModal } from '@/components/shot/ShotTrashModal';
 import { InlineEditCell } from '@/components/shot/InlineEditCell';
+import { CustomFieldCell } from '@/components/shot/CustomFieldCell';
 import { ShotColumnManager } from '@/components/shot/ShotColumnManager';
+import { ShotCustomFieldManager } from '@/components/shot/ShotCustomFieldManager';
 import { ShotSavedViews } from '@/components/shot/ShotSavedViews';
 import {
   ShotTableContextMenu,
@@ -82,6 +85,8 @@ export default function ShotListPage() {
 
   const { data: production } = useProduction(id);
   const { data: shots = [], isLoading } = useShots(id);
+  const { data: customFields = [] } = useCustomFields(id);
+  const { data: customFieldValueMatrix } = useCustomFieldValues(id);
   const updateShot = useUpdateShot(id);
   const reorderShots = useReorderShots(id);
 
@@ -385,9 +390,8 @@ export default function ShotListPage() {
   const visibleShots = useMemo(() => {
     const query = filters.searchQuery.trim().toLowerCase();
     const filtered = shots.filter(item => {
-      if (
-        query &&
-        ![
+      if (query) {
+        const builtInMatch = [
           item.display_number,
           item.name,
           item.description,
@@ -396,8 +400,12 @@ export default function ShotListPage() {
           item.department,
           item.status,
           item.primary_method
-        ].some(value => String(value || '').toLowerCase().includes(query))
-      ) return false;
+        ].some(value => String(value || '').toLowerCase().includes(query));
+        const customMatch = Object.values(
+          customFieldValueMatrix?.values[item.id] || {}
+        ).some(value => String(value ?? '').toLowerCase().includes(query));
+        if (!builtInMatch && !customMatch) return false;
+      }
 
       if (filters.primaryMethod !== 'all' && item.primary_method !== filters.primaryMethod) return false;
       if (filters.department !== 'all' && item.department !== filters.department) return false;
@@ -421,7 +429,7 @@ export default function ShotListPage() {
 
       return sortDirection === 'asc' ? comparison : -comparison;
     });
-  }, [shots, filters, sortKey, sortDirection]);
+  }, [shots, filters, sortKey, sortDirection, customFieldValueMatrix]);
 
   if (!production) return null;
 
@@ -431,9 +439,17 @@ export default function ShotListPage() {
   const visibleColumns = tablePresentation.columnOrder.filter(
     column => !tablePresentation.hiddenColumns.includes(column)
   );
+  const visibleCustomFields = customFields
+    .filter(field => field.state === 'visible' && !field.permanently_deleted)
+    .sort((a, b) => (a.position - b.position) || (a.sort_index - b.sort_index));
   const tableMinWidth =
-    192 + visibleColumns.reduce(
+    192 +
+    visibleColumns.reduce(
       (sum, column) => sum + tablePresentation.columnWidths[column],
+      0
+    ) +
+    visibleCustomFields.reduce(
+      (sum, field) => sum + (field.width_px || 180),
       0
     );
   const rowPadding = ROW_PADDING[tablePresentation.rowHeight];
@@ -589,6 +605,8 @@ export default function ShotListPage() {
               currentConfig={currentSavedViewConfig}
               onApply={applySavedTableView}
             />
+
+            <ShotCustomFieldManager productionId={production.id} />
 
             <ShotColumnManager
               columnOrder={tablePresentation.columnOrder}
@@ -826,6 +844,20 @@ export default function ShotListPage() {
                         className="absolute inset-y-0 right-0 z-20 w-2 cursor-col-resize touch-none border-0 bg-transparent p-0 outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       />
                     </th>
+                  {visibleCustomFields.map(field => (
+                    <th
+                      key={field.id}
+                      scope="col"
+                      className="px-3 py-2.5"
+                      style={{ width: field.width_px || 180 }}
+                      title={field.description || field.label}
+                    >
+                      <span className="block truncate">{field.label}</span>
+                      <span className="mt-0.5 block truncate text-[9px] font-normal normal-case tracking-normal text-muted-foreground">
+                        自定义 · {field.field_type}
+                      </span>
+                    </th>
+                  ))}
                   ))}
                 </tr>
               </thead>
@@ -1078,6 +1110,20 @@ export default function ShotListPage() {
                           </td>
                         );
                       })}
+                      {visibleCustomFields.map(field => (
+                        <td
+                          key={field.id}
+                          className={`px-3 ${rowPadding} text-foreground`}
+                          style={{ width: field.width_px || 180 }}
+                        >
+                          <CustomFieldCell
+                            productionId={production.id}
+                            shot={shot}
+                            field={field}
+                            value={customFieldValueMatrix?.values[shot.id]?.[field.id]}
+                          />
+                        </td>
+                      ))}
                     </tr>
                   );
                 })}
