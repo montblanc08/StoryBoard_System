@@ -349,6 +349,56 @@ class VersionService:
         }
 
     @staticmethod
+    async def compare_version(
+        db: AsyncSession,
+        version_id: str,
+        other_version_id: str | None = None,
+    ) -> dict:
+        """Compare one immutable version against current Shot or another version."""
+        result = await db.execute(select(ShotVersion).where(ShotVersion.id == version_id))
+        version = result.scalar_one_or_none()
+        if not version:
+            raise NotFoundError("版本不存在")
+
+        version_snapshot = version.snapshot if isinstance(version.snapshot, dict) else {}
+        other_snapshot: dict
+        against_current = other_version_id is None
+
+        if other_version_id:
+            other_result = await db.execute(
+                select(ShotVersion).where(
+                    ShotVersion.id == other_version_id,
+                    ShotVersion.shot_id == version.shot_id,
+                )
+            )
+            other = other_result.scalar_one_or_none()
+            if not other:
+                raise DomainError("对比版本不存在或不属于当前镜头", code="INVALID_COMPARE_VERSION")
+            other_snapshot = other.snapshot if isinstance(other.snapshot, dict) else {}
+        else:
+            shot = await VersionService._active_shot(db, version.shot_id)
+            other_snapshot = VersionService._snapshot(shot)
+
+        differences = []
+        for field in sorted(ShotService.PATCH_FIELDS):
+            left = version_snapshot.get(field)
+            right = other_snapshot.get(field)
+            if left != right:
+                differences.append({
+                    "field": field,
+                    "version_value": left,
+                    "other_value": right,
+                })
+
+        return {
+            "version_id": version.id,
+            "other_version_id": other_version_id,
+            "against_current": against_current,
+            "shot_id": version.shot_id,
+            "differences": differences,
+        }
+
+    @staticmethod
     async def merge_version(
         db: AsyncSession,
         version_id: str,
