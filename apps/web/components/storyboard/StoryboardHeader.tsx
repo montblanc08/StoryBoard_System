@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { Button, Input, Icons, Select, Checkbox } from '@frameforge/ui';
 import type { Production, Sequence, Shot } from '@frameforge/types';
 import { framesToTimecode, framesToSeconds } from '@frameforge/timecode';
 import { useWorkspaceStore } from '@/stores/useWorkspaceStore';
@@ -44,184 +45,162 @@ export function StoryboardHeader({
     filters.status !== 'all';
 
   return (
-    <div className="flex flex-col border-b border-studio-700 bg-studio-900/90 backdrop-blur z-10 sticky top-[50px]">
+    <div className="flex flex-col border-b border-border bg-card/90 backdrop-blur z-10 sticky top-[50px]">
       {/* Top row: Filter & Search Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-2.5">
         {/* Search & Filters */}
         <div className="flex flex-wrap items-center gap-2 text-xs">
           {/* Search Box */}
           <div className="relative flex items-center">
-            <svg className="g-icon absolute left-2.5 h-3.5 w-3.5 text-slate-400"><use href="#icon-search" /></svg>
-            <input
+            <Icons.Search className="absolute left-2.5 h-3.5 w-3.5 text-muted-foreground" />
+            <Input
               type="text"
               value={filters.searchQuery}
               onChange={e => setFilter('searchQuery', e.target.value)}
               placeholder="搜索镜号、描述、旁白、负责人..."
-              className="w-56 rounded border border-studio-700 bg-studio-950 pl-8 pr-3 py-1.5 text-white outline-none focus:border-amber transition"
+              className="w-56 rounded border border-border bg-background pl-8 pr-3 py-1.5 text-foreground outline-none focus:border-ring transition"
             />
           </div>
 
           {/* Sequence Filter */}
-          <select
+          <Select
+            label="篇章"
             value={filters.sequenceId}
-            onChange={e => setFilter('sequenceId', e.target.value)}
-            className="rounded border border-studio-700 bg-studio-950 px-2.5 py-1.5 text-slate-200 outline-none focus:border-amber"
-          >
-            <option value="all">所有篇章 / 幕 (All Sequences)</option>
-            {sequences.map(seq => (
-              <option key={seq.id} value={seq.id}>
-                {seq.display_number} · {seq.name}
-              </option>
-            ))}
-          </select>
+            onChange={value => setFilter('sequenceId', value)}
+            options={[ { value: "all", label: "所有篇章 / 幕 (All Sequences)" }, ...sequences.map(seq => ({ value: seq.id, label: seq.display_number + ' · ' + seq.name })) ]}
+            className="rounded border border-border bg-background px-2.5 py-1.5 text-foreground outline-none focus:border-ring"
+          />
 
           {/* Method Filter */}
-          <select
+          <Select
+            label="制作方式"
             value={filters.primaryMethod}
-            onChange={e => setFilter('primaryMethod', e.target.value)}
-            className="rounded border border-studio-700 bg-studio-950 px-2.5 py-1.5 text-slate-200 outline-none focus:border-amber font-mono"
-          >
-            <option value="all">制作方式 (All Methods)</option>
-            <option value="live">实拍 (LIVE)</option>
-            <option value="stock">购买素材 (STOCK)</option>
-            <option value="client">客户素材 (CLIENT)</option>
-            <option value="archive">历史资料 (ARCHIVE)</option>
-            <option value="ae">AE合成 (AE)</option>
-            <option value="mg">动效 (MG)</option>
-            <option value="three_d">3D三维 (3D)</option>
-            <option value="vfx">视效 (VFX)</option>
-            <option value="type">字卡 (TYPE)</option>
-          </select>
+            onChange={value => setFilter('primaryMethod', value)}
+            options={[ { value: "all", label: "制作方式 (All Methods)" }, { value: "live", label: "实拍 (LIVE)" }, { value: "stock", label: "购买素材 (STOCK)" }, { value: "client", label: "客户素材 (CLIENT)" }, { value: "archive", label: "历史资料 (ARCHIVE)" }, { value: "ae", label: "AE合成 (AE)" }, { value: "mg", label: "动效 (MG)" }, { value: "three_d", label: "3D三维 (3D)" }, { value: "vfx", label: "视效 (VFX)" }, { value: "type", label: "字卡 (TYPE)" } ]}
+            className="rounded border border-border bg-background px-2.5 py-1.5 text-foreground outline-none focus:border-ring font-mono"
+          />
 
           {/* Status Filter */}
-          <select
+          <Select
+            label="制作状态"
             value={filters.status}
-            onChange={e => setFilter('status', e.target.value)}
-            className="rounded border border-studio-700 bg-studio-950 px-2.5 py-1.5 text-slate-200 outline-none focus:border-amber"
-          >
-            <option value="all">制作状态 (All Statuses)</option>
-            <option value="draft">规划中 (Draft)</option>
-            <option value="in_progress">制作中 (In Progress)</option>
-            <option value="review">待审片 (Review)</option>
-            <option value="changes_requested">需修改 (Changes)</option>
-            <option value="approved">已审批 (Approved)</option>
-            <option value="locked">已锁定 (Locked)</option>
-          </select>
+            onChange={value => setFilter('status', value)}
+            options={[ { value: "all", label: "制作状态 (All Statuses)" }, { value: "draft", label: "规划中 (Draft)" }, { value: "in_progress", label: "制作中 (In Progress)" }, { value: "review", label: "待审片 (Review)" }, { value: "changes_requested", label: "需修改 (Changes)" }, { value: "approved", label: "已审批 (Approved)" }, { value: "locked", label: "已锁定 (Locked)" } ]}
+            className="rounded border border-border bg-background px-2.5 py-1.5 text-foreground outline-none focus:border-ring"
+          />
 
           {hasActiveFilters && (
-            <button
+            <Button variant="ghost" size="sm"
               onClick={resetFilters}
-              className="flex items-center gap-1 text-[11px] text-amber hover:underline px-1"
+              className="flex items-center gap-1 text-[11px] text-foreground hover:underline px-1"
             >
-              <svg className="g-icon h-3 w-3"><use href="#icon-close" /></svg>
+              <Icons.X className="h-3 w-3" />
               重置筛选
-            </button>
+            </Button>
           )}
         </div>
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2.5">
           {/* Import Table Button */}
-          <button
+          <Button variant="outline" size="sm"
             onClick={() => useWorkspaceStore.getState().setImportModalOpen(true)}
-            className="flex items-center gap-1.5 rounded border border-studio-700 bg-studio-950 px-3 py-1.5 text-xs font-medium text-slate-300 hover:border-amber hover:text-amber transition"
+            className="flex items-center gap-1.5 rounded border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:border-ring hover:text-foreground transition"
           >
-            <svg className="g-icon h-4 w-4"><use href="#icon-table_rows" /></svg>
+            <Icons.Table2 className="h-4 w-4" />
             导入分镜表
-          </button>
+          </Button>
 
           {/* VO Auto-Timing Button */}
-          <button
+          <Button variant="secondary" size="sm"
             onClick={() => setVOTimingModalOpen(true)}
-            className="flex items-center gap-1.5 rounded border border-amber/50 bg-amber/10 px-3 py-1.5 text-xs font-bold text-amber hover:bg-amber/20 hover:border-amber transition shadow-sm"
+            className="flex items-center gap-1.5 rounded border border-ring/50 bg-accent px-3 py-1.5 text-xs font-bold text-accent-foreground hover:bg-accent/80 hover:border-ring transition shadow-sm"
           >
-            <svg className="g-icon h-4 w-4"><use href="#icon-schedule" /></svg>
-            智能旁白计时
-          </button>
+            <Icons.Clock3 className="h-4 w-4" />
+            自动计时
+          </Button>
 
           {/* New Shot Button */}
-          <button
+          <Button variant="default" size="sm"
             onClick={() => setNewShotModalOpen(true)}
-            className="flex items-center gap-1.5 rounded bg-amber px-3.5 py-1.5 text-xs font-bold text-studio-950 hover:bg-amber-hover transition shadow-sm"
+            className="flex items-center gap-1.5 rounded px-3.5 py-1.5 text-xs font-bold transition shadow-sm"
           >
-            <svg className="g-icon h-4 w-4"><use href="#icon-add" /></svg>
+            <Icons.Plus className="h-4 w-4" />
             新建镜头
-          </button>
+          </Button>
         </div>
       </div>
 
       {/* Bottom row: View Mode, Grouping & Stats Bar */}
-      <div className="flex items-center justify-between border-t border-studio-800/80 bg-studio-950/40 px-6 py-2 text-xs">
+      <div className="flex items-center justify-between border-t border-border/80 bg-background/40 px-6 py-2 text-xs">
         {/* Left: View Modes & Grouping */}
         <div className="flex items-center gap-4">
           {/* View Mode Toggle */}
-          <div className="flex items-center rounded border border-studio-700 bg-studio-900 p-0.5">
-            <button
+          <div className="flex items-center rounded border border-border bg-card p-0.5">
+            <Button variant="ghost" size="sm"
               onClick={() => setViewMode('grid')}
               className={`flex items-center gap-1 rounded px-2.5 py-1 font-medium transition ${
                 viewMode === 'grid'
-                  ? 'bg-amber text-studio-950 font-bold shadow-sm'
-                  : 'text-slate-400 hover:text-white'
+                  ? 'bg-accent text-accent-foreground font-bold shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
               }`}
             >
-              <svg className="g-icon h-3.5 w-3.5"><use href="#icon-grid_view" /></svg>
+              <Icons.LayoutGrid className="h-3.5 w-3.5" />
               分镜卡片板
-            </button>
+            </Button>
 
-            <button
+            <Button variant="ghost" size="sm"
               onClick={() => setViewMode('wall')}
               className={`flex items-center gap-1 rounded px-2.5 py-1 font-medium transition ${
                 viewMode === 'wall'
-                  ? 'bg-amber text-studio-950 font-bold shadow-sm'
-                  : 'text-slate-400 hover:text-white'
+                  ? 'bg-accent text-accent-foreground font-bold shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
               }`}
             >
-              <svg className="g-icon h-3.5 w-3.5"><use href="#icon-view_module" /></svg>
+              <Icons.Columns3 className="h-3.5 w-3.5" />
               视觉墙 (Wall)
-            </button>
+            </Button>
           </div>
 
           {/* Group by Sequence Switch */}
           {viewMode === 'grid' && (
-            <label className="flex items-center gap-1.5 text-slate-400 cursor-pointer select-none text-xs">
-              <input
-                type="checkbox"
+            <label className="flex items-center gap-1.5 text-muted-foreground cursor-pointer select-none text-xs">
+              <Checkbox
                 checked={groupBySequence}
-                onChange={e => setGroupBySequence(e.target.checked)}
-                className="h-3.5 w-3.5 rounded accent-amber cursor-pointer"
+                onCheckedChange={checked => setGroupBySequence(checked === true)}
               />
               按篇章幕分组
             </label>
           )}
 
           {/* Zoom Size */}
-          <div className="flex items-center gap-1 border-l border-studio-800 pl-4 text-slate-500 font-mono text-[11px]">
+          <div className="flex items-center gap-1 border-l border-border pl-4 text-muted-foreground font-mono text-[11px]">
             <span>缩放:</span>
             {(['sm', 'md', 'lg'] as const).map(sz => (
-              <button
+              <Button variant="ghost" size="sm"
                 key={sz}
                 onClick={() => setCardSize(sz)}
                 className={`rounded px-1.5 py-0.5 uppercase ${
-                  cardSize === sz ? 'bg-studio-700 text-amber font-bold' : 'hover:text-slate-300'
+                  cardSize === sz ? 'bg-muted text-foreground font-bold' : 'hover:text-foreground'
                 }`}
               >
                 {sz}
-              </button>
+              </Button>
             ))}
           </div>
         </div>
 
         {/* Right: Stats */}
         <div className="flex items-center gap-4 text-xs font-mono">
-          <div className="text-slate-400">
-            镜头数: <span className="font-bold text-white">{filteredShots.length}</span> / {shots.length}
+          <div className="text-muted-foreground">
+            镜头数: <span className="font-bold text-foreground">{filteredShots.length}</span> / {shots.length}
           </div>
 
-          <div className="text-slate-400">
-            总时长: <span className="font-bold text-amber">{totalSeconds}s</span> ({totalFrames}f)
+          <div className="text-muted-foreground">
+            总时长: <span className="font-bold text-foreground">{totalSeconds}s</span> ({totalFrames}f)
           </div>
 
-          <div className="rounded bg-studio-800 px-2 py-0.5 font-bold text-emerald-400 border border-emerald-500/30">
+          <div className="rounded bg-muted px-2 py-0.5 font-bold text-emerald-400 border border-emerald-500/30">
             {totalTimecode}
           </div>
         </div>

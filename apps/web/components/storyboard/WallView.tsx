@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { Card } from '@frameforge/ui';
 import type { Production, Shot } from '@frameforge/types';
 import { framesToSeconds } from '@frameforge/timecode';
 import { useWorkspaceStore } from '@/stores/useWorkspaceStore';
@@ -38,15 +39,15 @@ export function WallView({
         const durationSec = framesToSeconds(shot.duration_frames, fps).toFixed(1);
 
         return (
-          <div
+          <Card
             key={shot.id}
             onClick={e => onSelectShot(shot.id, e)}
             onDoubleClick={() => onInspectShot(shot.id)}
             title={`[${shot.display_number}] ${shot.name || ''}\n${shot.description || ''}\nVO: ${shot.voice_over || '无'}`}
-            className={`group relative flex flex-col rounded-md border bg-studio-900 overflow-hidden cursor-pointer transition-all duration-150 ${
+            className={`group relative flex flex-col rounded-md border bg-card overflow-hidden cursor-pointer transition-all duration-150 ${
               isSelected
-                ? 'border-amber ring-2 ring-amber shadow-lg shadow-amber/20 scale-[1.02] z-10'
-                : 'border-studio-700 hover:border-slate-400 hover:scale-[1.01]'
+                ? 'border-ring ring-2 ring-ring shadow-lg shadow-foreground/20 scale-[1.02] z-10'
+                : 'border-border hover:border-border hover:scale-[1.01]'
             }`}
           >
             {/* Visual Tile */}
@@ -63,16 +64,16 @@ export function WallView({
               </div>
 
               {/* Timing Overlay */}
-              <div className="absolute bottom-1 right-1 z-10 rounded bg-studio-950/80 px-1 py-0.5 font-mono text-[9px] font-bold text-amber border border-amber/30">
+              <div className="absolute bottom-1 right-1 z-10 rounded bg-background/80 px-1 py-0.5 font-mono text-[9px] font-bold text-foreground border border-border">
                 {shot.duration_frames}f ({durationSec}s)
               </div>
             </div>
 
             {/* Micro Caption */}
-            <div className="p-1.5 bg-studio-950/90 border-t border-studio-800 text-[10px] truncate">
-              <span className="text-slate-300 font-medium">{shot.name || `镜头 ${shot.display_number}`}</span>
+            <div className="p-1.5 bg-background/90 border-t border-border text-[10px] truncate">
+              <span className="text-foreground font-medium">{shot.name || `镜头 ${shot.display_number}`}</span>
             </div>
-          </div>
+          </Card>
         );
       })}
     </div>

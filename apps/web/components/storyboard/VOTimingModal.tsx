@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
+import { Button, Input, Icons } from '@frameforge/ui';
 import type { Production, Shot } from '@frameforge/types';
 import {
   calculateVOTiming,
@@ -77,57 +78,58 @@ export function VOTimingModal({ production, shots }: VOTimingModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
-      <div className="flex h-[85vh] w-full max-w-4xl flex-col rounded-xl border border-studio-700 bg-studio-900 shadow-2xl overflow-hidden">
+      <div className="flex h-[85vh] w-full max-w-4xl flex-col rounded-xl border border-border bg-card shadow-2xl overflow-hidden">
         {/* Modal Header */}
-        <div className="flex h-[55px] items-center justify-between border-b border-studio-700 bg-studio-950 px-6">
+        <div className="flex h-[55px] items-center justify-between border-b border-border bg-background px-6">
           <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded bg-amber-dim text-amber border border-amber/30">
-              <svg className="g-icon"><use href="#icon-schedule" /></svg>
+            <div className="flex h-8 w-8 items-center justify-center rounded bg-accent text-accent-foreground border border-border">
+              <Icons.Clock3 className="h-4 w-4" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-white">智能旁白计时算法 (VO Auto-Timing Engine)</h3>
-              <p className="text-[11px] text-slate-400">
+              <h3 className="text-sm font-bold text-foreground">旁白自动计时</h3>
+              <p className="text-[11px] text-muted-foreground">
                 依据旁白字数与标点停顿权重，最大余数法严格分配总帧数，无累计漂移
               </p>
             </div>
           </div>
 
-          <button
+          <Button variant="ghost" size="sm"
             onClick={() => setVOTimingModalOpen(false)}
-            className="rounded p-1 text-slate-400 hover:bg-studio-800 hover:text-white"
+            aria-label="关闭旁白计时"
+            className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
           >
-            <svg className="g-icon h-5 w-5"><use href="#icon-close" /></svg>
-          </button>
+            <Icons.X className="h-5 w-5" />
+          </Button>
         </div>
 
         {/* Modal Config Bar */}
-        <div className="grid grid-cols-3 gap-4 border-b border-studio-800 bg-studio-950/50 p-4 text-xs">
+        <div className="grid grid-cols-3 gap-4 border-b border-border bg-background/50 p-4 text-xs">
           <div>
-            <label className="block text-slate-400 mb-1 font-medium">规划目标总时长</label>
+            <label className="block text-muted-foreground mb-1 font-medium">规划目标总时长</label>
             <div className="flex items-center gap-2">
-              <input
+              <Input
                 type="number"
                 value={Math.round(framesToSeconds(targetFrames, fps))}
                 onChange={e => setTargetFrames(Math.round(Number(e.target.value) * fps))}
-                className="w-24 rounded border border-studio-700 bg-studio-950 px-2.5 py-1.5 text-white font-mono outline-none focus:border-amber"
+                className="w-24 rounded border border-border bg-background px-2.5 py-1.5 text-foreground font-mono outline-none focus:border-ring"
               />
-              <span className="text-slate-400">秒 ({targetFrames} 帧)</span>
+              <span className="text-muted-foreground">秒 ({targetFrames} 帧)</span>
             </div>
           </div>
 
           <div>
-            <label className="block text-slate-400 mb-1 font-medium">标点停顿权重 (逗号 / 句号)</label>
-            <div className="flex items-center gap-2 text-slate-300 font-mono">
+            <label className="block text-muted-foreground mb-1 font-medium">标点停顿权重 (逗号 / 句号)</label>
+            <div className="flex items-center gap-2 text-foreground font-mono">
               <span>逗号 +{weights.comma}f</span>
-              <span className="text-slate-600">|</span>
+              <span className="text-muted-foreground">|</span>
               <span>句号 +{weights.period}f</span>
             </div>
           </div>
 
           <div>
-            <label className="block text-slate-400 mb-1 font-medium">锁定镜头保护</label>
+            <label className="block text-muted-foreground mb-1 font-medium">锁定镜头保护</label>
             <div className="flex items-center gap-2 font-mono">
-              <span className="text-amber font-bold">{lockedCount}</span> 个镜头已锁定时长（不参与调整）
+              <span className="text-foreground font-bold">{lockedCount}</span> 个镜头已锁定时长（不参与调整）
             </div>
           </div>
         </div>
@@ -136,7 +138,7 @@ export function VOTimingModal({ production, shots }: VOTimingModalProps) {
         <div className="flex-1 overflow-y-auto p-4">
           <table className="w-full text-left text-xs border-collapse font-mono">
             <thead>
-              <tr className="border-b border-studio-700 text-slate-400 pb-2">
+              <tr className="border-b border-border text-muted-foreground pb-2">
                 <th className="py-2 px-3">镜号</th>
                 <th className="py-2 px-3">旁白解说词</th>
                 <th className="py-2 px-3 text-right">字数</th>
@@ -145,7 +147,7 @@ export function VOTimingModal({ production, shots }: VOTimingModalProps) {
                 <th className="py-2 px-3 text-right">帧数变化</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-studio-800">
+            <tbody className="divide-y divide-border">
               {computedShots.map(s => {
                 const voClean = (s.voice_over || '').trim();
                 const charCount = voClean.replace(/\s+/g, '').length;
@@ -153,23 +155,23 @@ export function VOTimingModal({ production, shots }: VOTimingModalProps) {
                 const newSec = framesToSeconds(s.proposed_frames, fps).toFixed(1);
 
                 return (
-                  <tr key={s.id} className="hover:bg-studio-800/50 transition">
-                    <td className="py-2 px-3 font-bold text-slate-200">
+                  <tr key={s.id} className="hover:bg-muted/50 transition">
+                    <td className="py-2 px-3 font-bold text-foreground">
                       {s.display_number}
                       {s.timing_locked && (
-                        <span className="ml-1 text-[10px] text-amber">[LOCKED]</span>
+                        <span className="ml-1 text-[10px] text-foreground">[LOCKED]</span>
                       )}
                     </td>
-                    <td className="py-2 px-3 font-sans text-slate-300 max-w-xs truncate">
-                      {s.voice_over || <span className="text-slate-600 italic">无旁白</span>}
+                    <td className="py-2 px-3 font-sans text-foreground max-w-xs truncate">
+                      {s.voice_over || <span className="text-muted-foreground italic">无旁白</span>}
                     </td>
-                    <td className="py-2 px-3 text-right text-slate-400">
+                    <td className="py-2 px-3 text-right text-muted-foreground">
                       {charCount}
                     </td>
-                    <td className="py-2 px-3 text-right text-slate-400">
+                    <td className="py-2 px-3 text-right text-muted-foreground">
                       {s.duration_frames}f ({oldSec}s)
                     </td>
-                    <td className="py-2 px-3 text-right font-bold text-amber">
+                    <td className="py-2 px-3 text-right font-bold text-foreground">
                       {s.proposed_frames}f ({newSec}s)
                     </td>
                     <td className="py-2 px-3 text-right font-bold">
@@ -178,7 +180,7 @@ export function VOTimingModal({ production, shots }: VOTimingModalProps) {
                       ) : s.delta_frames < 0 ? (
                         <span className="text-rose-400">{s.delta_frames}f</span>
                       ) : (
-                        <span className="text-slate-600">0f</span>
+                        <span className="text-muted-foreground">0f</span>
                       )}
                     </td>
                   </tr>
@@ -189,26 +191,26 @@ export function VOTimingModal({ production, shots }: VOTimingModalProps) {
         </div>
 
         {/* Modal Footer */}
-        <div className="flex items-center justify-between border-t border-studio-700 bg-studio-950 px-6 py-3 text-xs">
-          <div className="font-mono text-slate-400">
-            总计算分配帧数: <span className="font-bold text-white">{totalProposedFrames}f</span> ({framesToSeconds(totalProposedFrames, fps).toFixed(1)}s)
+        <div className="flex items-center justify-between border-t border-border bg-background px-6 py-3 text-xs">
+          <div className="font-mono text-muted-foreground">
+            总计算分配帧数: <span className="font-bold text-foreground">{totalProposedFrames}f</span> ({framesToSeconds(totalProposedFrames, fps).toFixed(1)}s)
           </div>
 
           <div className="flex items-center gap-3">
-            <button
+            <Button variant="outline" size="sm"
               onClick={() => setVOTimingModalOpen(false)}
-              className="rounded border border-studio-700 px-4 py-2 text-slate-300 hover:bg-studio-800"
+              className="rounded border border-border px-4 py-2 text-foreground hover:bg-muted"
             >
               取消
-            </button>
-            <button
+            </Button>
+            <Button variant="default" size="sm"
               onClick={handleApply}
               disabled={isApplying}
-              className="flex items-center gap-1.5 rounded bg-amber px-5 py-2 font-bold text-studio-950 hover:bg-amber-hover disabled:opacity-50 transition"
+              className="flex items-center gap-1.5 rounded px-5 py-2 font-bold disabled:opacity-50 transition"
             >
-              <svg className="g-icon h-4 w-4"><use href="#icon-check" /></svg>
+              <Icons.Check className="h-4 w-4" />
               {isApplying ? '正在批量写入…' : '应用计算结果到所有镜头'}
-            </button>
+            </Button>
           </div>
         </div>
       </div>

@@ -1,5 +1,7 @@
 'use client';
 
+import { Icons } from '@frameforge/ui';
+
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/stores/authStore';
@@ -17,9 +19,9 @@ export default function HomePage() {
   }, [token, router]);
 
   return (
-    <div className="flex h-screen w-screen items-center justify-center bg-studio-950 text-studio-600">
+    <div className="flex h-screen w-screen items-center justify-center bg-background text-muted-foreground">
       <div className="flex items-center gap-3">
-        <svg className="g-icon animate-spin"><use href="#icon-movie" /></svg>
+        <Icons.Film className="animate-spin" />
         <span className="font-mono text-xs uppercase tracking-wider">Loading FrameForge OS...</span>
       </div>
     </div>

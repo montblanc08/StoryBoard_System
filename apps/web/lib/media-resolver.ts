@@ -3,68 +3,25 @@
  * Maps shots to real storyboard stills or generated aesthetic visual plates
  */
 
-// Preset palette for methods when image is loading / placeholder
-export const METHOD_GRADIENTS: Record<string, { bg: string; border: string; text: string; glow: string }> = {
-  live: {
-    bg: 'from-emerald-950/60 via-slate-900 to-slate-950',
-    border: 'border-emerald-500/30',
-    text: 'text-emerald-400',
-    glow: 'rgba(16, 185, 129, 0.15)'
-  },
-  stock: {
-    bg: 'from-amber-950/60 via-slate-900 to-slate-950',
-    border: 'border-amber-500/30',
-    text: 'text-amber-400',
-    glow: 'rgba(245, 158, 11, 0.15)'
-  },
-  client: {
-    bg: 'from-blue-950/60 via-slate-900 to-slate-950',
-    border: 'border-blue-500/30',
-    text: 'text-blue-400',
-    glow: 'rgba(59, 130, 246, 0.15)'
-  },
-  ae: {
-    bg: 'from-indigo-950/60 via-slate-900 to-slate-950',
-    border: 'border-indigo-500/30',
-    text: 'text-indigo-400',
-    glow: 'rgba(99, 102, 241, 0.15)'
-  },
-  mg: {
-    bg: 'from-violet-950/60 via-slate-900 to-slate-950',
-    border: 'border-violet-500/30',
-    text: 'text-violet-400',
-    glow: 'rgba(139, 92, 246, 0.15)'
-  },
-  three_d: {
-    bg: 'from-cyan-950/60 via-slate-900 to-slate-950',
-    border: 'border-cyan-500/30',
-    text: 'text-cyan-400',
-    glow: 'rgba(6, 182, 212, 0.15)'
-  },
-  vfx: {
-    bg: 'from-rose-950/60 via-slate-900 to-slate-950',
-    border: 'border-rose-500/30',
-    text: 'text-rose-400',
-    glow: 'rgba(244, 63, 94, 0.15)'
-  },
-  archive: {
-    bg: 'from-yellow-950/60 via-slate-900 to-slate-950',
-    border: 'border-yellow-500/30',
-    text: 'text-yellow-400',
-    glow: 'rgba(234, 179, 8, 0.15)'
-  },
-  still: {
-    bg: 'from-teal-950/60 via-slate-900 to-slate-950',
-    border: 'border-teal-500/30',
-    text: 'text-teal-400',
-    glow: 'rgba(20, 184, 166, 0.15)'
-  },
-  type: {
-    bg: 'from-fuchsia-950/60 via-slate-900 to-slate-950',
-    border: 'border-fuchsia-500/30',
-    text: 'text-fuchsia-400',
-    glow: 'rgba(217, 70, 239, 0.15)'
-  }
+// Placeholders share a quiet surface; the production method is communicated by its label.
+const NEUTRAL_METHOD_STYLE = {
+  bg: 'from-muted via-card to-background',
+  border: 'border-border',
+  text: 'text-muted-foreground',
+  glow: 'transparent'
+};
+
+export const METHOD_GRADIENTS: Record<string, typeof NEUTRAL_METHOD_STYLE> = {
+  live: NEUTRAL_METHOD_STYLE,
+  stock: NEUTRAL_METHOD_STYLE,
+  client: NEUTRAL_METHOD_STYLE,
+  ae: NEUTRAL_METHOD_STYLE,
+  mg: NEUTRAL_METHOD_STYLE,
+  three_d: NEUTRAL_METHOD_STYLE,
+  vfx: NEUTRAL_METHOD_STYLE,
+  archive: NEUTRAL_METHOD_STYLE,
+  still: NEUTRAL_METHOD_STYLE,
+  type: NEUTRAL_METHOD_STYLE
 };
 
 export function getMethodStyle(method: string) {
@@ -108,7 +65,7 @@ export function getStatusBadge(status: string) {
     case 'approved':
       return { label: '已审批', bg: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' };
     case 'review':
-      return { label: '待审片', bg: 'bg-amber-500/10 text-amber-400 border-amber-500/30' };
+      return { label: '待审片', bg: 'bg-muted text-muted-foreground border-border' };
     case 'changes_requested':
       return { label: '需修改', bg: 'bg-rose-500/10 text-rose-400 border-rose-500/30' };
     case 'in_progress':

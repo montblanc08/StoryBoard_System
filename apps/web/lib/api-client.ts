@@ -39,3 +39,30 @@ export async function apiClient<T>(path: string, options: RequestOptions = {}): 
 
   return data as T;
 }
+
+export async function apiDownload(path: string, fallbackFilename: string): Promise<{ blob: Blob; filename: string }> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('frameforge_token') : null;
+  const response = await fetch(`${API_BASE}${path}`, {
+    headers: {
+      Accept: 'text/plain',
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    }
+  });
+
+  if (!response.ok) {
+    const contentType = response.headers.get('content-type') || '';
+    const body = contentType.includes('json') ? await response.json() : await response.text();
+    const detail = typeof body === 'object' && body !== null ? body.detail || body.error : body;
+    const message = typeof detail === 'string' ? detail : detail?.message;
+    throw new Error(message || `导出失败（${response.status}）`);
+  }
+
+  const disposition = response.headers.get('content-disposition') || '';
+  const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  let filename = fallbackFilename;
+  if (encodedName) {
+    try { filename = decodeURIComponent(encodedName); } catch { /* keep safe fallback */ }
+  }
+  filename = filename.replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').replace(/^\.+|\.+$/g, '') || fallbackFilename;
+  return { blob: await response.blob(), filename };
+}

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { Button, Icons } from '@frameforge/ui';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Production } from '@frameforge/types';
 import { apiClient } from '@/lib/api-client';
@@ -79,7 +80,7 @@ export function ImportModal({ production, isOpen, onClose }: ImportModalProps) {
       onClose();
       setStep(1);
     } catch (err: any) {
-      alert(err.message || '导入入库失败');
+      alert(err.message || '导入失败');
     } finally {
       setIsLoading(false);
     }
@@ -87,36 +88,36 @@ export function ImportModal({ production, isOpen, onClose }: ImportModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
-      <div className="flex h-[80vh] w-full max-w-3xl flex-col rounded-xl border border-studio-700 bg-studio-900 shadow-2xl overflow-hidden text-xs">
+      <div className="flex h-[80vh] w-full max-w-3xl flex-col rounded-xl border border-border bg-card shadow-2xl overflow-hidden text-xs">
         {/* Header */}
-        <div className="flex h-[50px] items-center justify-between border-b border-studio-700 bg-studio-950 px-6">
+        <div className="flex h-[50px] items-center justify-between border-b border-border bg-background px-6">
           <div className="flex items-center gap-2">
-            <svg className="g-icon text-amber"><use href="#icon-table_rows" /></svg>
-            <h3 className="text-sm font-bold text-white">智能导入分镜制作表 (Smart Table Importer)</h3>
+            <Icons.Table2 className="h-4 w-4 text-foreground" />
+            <h3 className="text-sm font-bold text-foreground">导入分镜表</h3>
           </div>
 
-          <button onClick={onClose} className="text-slate-400 hover:text-white">
-            <svg className="g-icon"><use href="#icon-close" /></svg>
-          </button>
+          <Button variant="ghost" size="sm" onClick={onClose} aria-label="关闭导入" className="text-muted-foreground hover:text-foreground">
+            <Icons.X className="h-4 w-4" />
+          </Button>
         </div>
 
         {/* Step Indicator */}
-        <div className="flex border-b border-studio-800 bg-studio-950/50 px-6 py-2.5 text-slate-400 font-mono text-[11px]">
-          <span className={`mr-4 ${step === 1 ? 'text-amber font-bold' : ''}`}>1. 上传表格文件</span>
-          <span className={`mr-4 ${step === 2 ? 'text-amber font-bold' : ''}`}>2. 表头智能识别与核对</span>
-          <span className={`${step === 3 ? 'text-amber font-bold' : ''}`}>3. 数据预览与确认入库</span>
+        <div className="flex border-b border-border bg-background/50 px-6 py-2.5 text-muted-foreground font-mono text-[11px]">
+          <span className={`mr-4 ${step === 1 ? 'text-foreground font-bold' : ''}`}>1. 上传表格文件</span>
+          <span className={`mr-4 ${step === 2 ? 'text-foreground font-bold' : ''}`}>2. 表头识别与核对</span>
+          <span className={`${step === 3 ? 'text-foreground font-bold' : ''}`}>3. 数据预览与确认导入</span>
         </div>
 
         {/* Content Area */}
         <div className="flex-1 overflow-y-auto p-6">
           {step === 1 && (
-            <div className="flex flex-col items-center justify-center h-full border-2 border-dashed border-studio-700 rounded-xl p-12 text-center hover:border-amber transition">
-              <svg className="g-icon h-12 w-12 text-amber mb-4"><use href="#icon-file_download" /></svg>
-              <h4 className="text-sm font-bold text-white mb-1">选择或拖放分镜制作表</h4>
-              <p className="text-slate-400 mb-6 max-w-sm leading-relaxed">
+            <div className="flex flex-col items-center justify-center h-full border-2 border-dashed border-border rounded-xl p-12 text-center hover:border-ring transition">
+              <Icons.FileDown className="h-12 w-12 text-foreground mb-4" />
+              <h4 className="text-sm font-bold text-foreground mb-1">选择或拖放分镜制作表</h4>
+              <p className="text-muted-foreground mb-6 max-w-sm leading-relaxed">
                 支持标准 Excel (.xlsx, .xls) 及 CSV 文件。自动识别多工作表及合并单元格。
               </p>
-              <label className="cursor-pointer rounded bg-amber px-5 py-2.5 font-bold text-studio-950 hover:bg-amber-hover transition">
+              <Button asChild variant="default" size="sm"><label className="cursor-pointer">
                 <span>浏览本地文件</span>
                 <input
                   type="file"
@@ -124,22 +125,22 @@ export function ImportModal({ production, isOpen, onClose }: ImportModalProps) {
                   onChange={handleFileChange}
                   className="hidden"
                 />
-              </label>
-              {isLoading && <span className="mt-4 font-mono text-amber">正在智能解析表格结构...</span>}
+              </label></Button>
+              {isLoading && <span className="mt-4 font-mono text-foreground">正在解析表格结构...</span>}
             </div>
           )}
 
           {step === 2 && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <span className="font-medium text-slate-300">
-                  文件: <span className="font-mono text-amber">{fileName}</span> (共识别 {totalRows} 行数据)
+                <span className="font-medium text-foreground">
+                  文件: <span className="font-mono text-foreground">{fileName}</span> (共识别 {totalRows} 行数据)
                 </span>
                 <span className="font-mono text-[11px] text-emerald-400">已匹配 {Object.keys(mapping).length} 个标准字段</span>
               </div>
 
-              <div className="rounded-lg border border-studio-800 bg-studio-950 p-4 space-y-3">
-                <div className="grid grid-cols-3 gap-2 font-mono text-[11px] text-slate-500 border-b border-studio-800 pb-2">
+              <div className="rounded-lg border border-border bg-background p-4 space-y-3">
+                <div className="grid grid-cols-3 gap-2 font-mono text-[11px] text-muted-foreground border-b border-border pb-2">
                   <span>系统标准字段</span>
                   <span>识别表格表头</span>
                   <span className="text-right">匹配置信度</span>
@@ -147,8 +148,8 @@ export function ImportModal({ production, isOpen, onClose }: ImportModalProps) {
 
                 {Object.entries(mapping).map(([field, info]) => (
                   <div key={field} className="grid grid-cols-3 gap-2 font-mono text-xs items-center">
-                    <span className="font-bold text-slate-200">{field}</span>
-                    <span className="text-amber truncate">[{info.col + 1}列] {info.raw_header}</span>
+                    <span className="font-bold text-foreground">{field}</span>
+                    <span className="text-foreground truncate">[{info.col + 1}列] {info.raw_header}</span>
                     <span className="text-right text-emerald-400 font-bold">
                       {Math.round(info.confidence * 100)}%
                     </span>
@@ -160,10 +161,10 @@ export function ImportModal({ production, isOpen, onClose }: ImportModalProps) {
 
           {step === 3 && (
             <div className="space-y-4">
-              <h4 className="font-bold text-slate-200">数据样本预览 (前 {samplePreview.length} 镜)</h4>
-              <div className="overflow-x-auto border border-studio-800 rounded-lg">
+              <h4 className="font-bold text-foreground">数据样本预览 (前 {samplePreview.length} 镜)</h4>
+              <div className="overflow-x-auto border border-border rounded-lg">
                 <table className="w-full text-left text-[11px] font-mono">
-                  <thead className="bg-studio-950 border-b border-studio-800 text-slate-400">
+                  <thead className="bg-background border-b border-border text-muted-foreground">
                     <tr>
                       <th className="p-2">镜号</th>
                       <th className="p-2">制作方式</th>
@@ -172,14 +173,14 @@ export function ImportModal({ production, isOpen, onClose }: ImportModalProps) {
                       <th className="p-2">时长</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-studio-800">
+                  <tbody className="divide-y divide-border">
                     {samplePreview.map((row, idx) => (
-                      <tr key={idx} className="hover:bg-studio-800/40">
-                        <td className="p-2 font-bold text-amber">{row.number || idx + 1}</td>
-                        <td className="p-2 text-slate-300">{row.primary_method || 'LIVE'}</td>
-                        <td className="p-2 text-slate-200 font-sans truncate max-w-xs">{row.description || '—'}</td>
-                        <td className="p-2 text-amber-200/90 font-sans truncate max-w-xs">{row.voiceover || '—'}</td>
-                        <td className="p-2 text-slate-400">{row.duration || '3.0s'}</td>
+                      <tr key={idx} className="hover:bg-muted/40">
+                        <td className="p-2 font-bold text-foreground">{row.number || idx + 1}</td>
+                        <td className="p-2 text-foreground">{row.primary_method || 'LIVE'}</td>
+                        <td className="p-2 text-foreground font-sans truncate max-w-xs">{row.description || '—'}</td>
+                        <td className="p-2 text-foreground font-sans truncate max-w-xs">{row.voiceover || '—'}</td>
+                        <td className="p-2 text-muted-foreground">{row.duration || '3.0s'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -190,41 +191,41 @@ export function ImportModal({ production, isOpen, onClose }: ImportModalProps) {
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between border-t border-studio-700 bg-studio-950 px-6 py-3">
+        <div className="flex items-center justify-between border-t border-border bg-background px-6 py-3">
           {step > 1 ? (
-            <button
+            <Button variant="outline" size="sm"
               onClick={() => setStep(step === 3 ? 2 : 1)}
-              className="rounded border border-studio-700 px-4 py-2 font-medium text-slate-300 hover:bg-studio-800"
+              className="rounded border border-border px-4 py-2 font-medium text-foreground hover:bg-muted"
             >
               上一步
-            </button>
+            </Button>
           ) : <div />}
 
           <div className="flex items-center gap-3">
-            <button
+            <Button variant="outline" size="sm"
               onClick={onClose}
-              className="rounded border border-studio-700 px-4 py-2 font-medium text-slate-400 hover:bg-studio-800"
+              className="rounded border border-border px-4 py-2 font-medium text-muted-foreground hover:bg-muted"
             >
               取消
-            </button>
+            </Button>
 
             {step === 2 && (
-              <button
+              <Button variant="default" size="sm"
                 onClick={() => setStep(3)}
-                className="rounded bg-amber px-5 py-2 font-bold text-studio-950 hover:bg-amber-hover"
+                className="rounded px-5 py-2 font-bold"
               >
                 下一步：预览样本
-              </button>
+              </Button>
             )}
 
             {step === 3 && (
-              <button
+              <Button variant="default" size="sm"
                 onClick={handleCommit}
                 disabled={isLoading}
-                className="rounded bg-amber px-6 py-2 font-bold text-studio-950 hover:bg-amber-hover disabled:opacity-50"
+                className="rounded px-6 py-2 font-bold disabled:opacity-50"
               >
-                {isLoading ? '正在入库…' : `确认导入 ${totalRows} 个镜头`}
-              </button>
+                {isLoading ? '正在导入…' : `确认导入 ${totalRows} 个镜头`}
+              </Button>
             )}
           </div>
         </div>

@@ -1,4 +1,5 @@
 import React from 'react';
+import { Badge } from '@frameforge/ui';
 import { getMethodLabel, getMethodStyle } from '@/lib/media-resolver';
 import { useAuthStore } from '@/stores/authStore';
 
@@ -19,11 +20,11 @@ export function MethodBadge({ method, size = 'sm', className = '' }: MethodBadge
       : 'text-xs px-2.5 py-1 font-mono font-medium';
 
   return (
-    <span
-      className={`inline-flex items-center gap-1 rounded border uppercase tracking-wider font-semibold shadow-sm transition ${style.border} ${style.text} bg-studio-950/80 backdrop-blur-sm ${sizeClasses} ${className}`}
+    <Badge variant="outline"
+      className={`inline-flex items-center gap-1 rounded border uppercase tracking-wider font-semibold shadow-sm transition ${style.border} ${style.text} bg-background/80 backdrop-blur-sm ${sizeClasses} ${className}`}
     >
       <span className="h-1.5 w-1.5 rounded-full bg-current opacity-80" />
       {label}
-    </span>
+    </Badge>
   );
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { Button, Icons } from '@frameforge/ui';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuthStore } from '@/stores/authStore';
@@ -17,98 +18,82 @@ export function NavRail({ productionId }: NavRailProps) {
   const navItems = [
     {
       href: `/production/${productionId}/storyboard`,
-      icon: 'icon-view_kanban',
-      label: t('storyboard'),
-      sub: 'Cards & Wall'
+      icon: Icons.Clapperboard,
+      label: t('storyboard')
     },
     {
       href: `/production/${productionId}/shots`,
-      icon: 'icon-table_rows',
-      label: t('shotList'),
-      sub: 'Pipeline Table'
+      icon: Icons.Table2,
+      label: t('shotList')
     },
     {
       href: `/production/${productionId}/timeline`,
-      icon: 'icon-view_timeline',
-      label: t('timeline'),
-      sub: 'Animatic Multi-track'
+      icon: Icons.ListVideo,
+      label: t('timeline')
     },
     {
       href: `/production/${productionId}/assets`,
-      icon: 'icon-perm_media',
-      label: t('assets'),
-      sub: 'Proxy Hub'
+      icon: Icons.Images,
+      label: t('assets')
     },
     {
       href: `/production/${productionId}/review`,
-      icon: 'icon-rate_review',
-      label: t('review'),
-      sub: 'Frame Annotations'
+      icon: Icons.MessageSquare,
+      label: t('review')
     },
     {
       href: `/production/${productionId}/deliverables`,
-      icon: 'icon-file_download',
-      label: t('deliverables'),
-      sub: 'EDL / OTIO / PDF / XLSX'
+      icon: Icons.FileDown,
+      label: t('deliverables')
     },
     {
       href: `/production/${productionId}/settings`,
-      icon: 'icon-settings',
-      label: t('settings'),
-      sub: 'Pipeline Config'
+      icon: Icons.Settings,
+      label: t('settings')
     }
   ];
 
   return (
     <nav
-      className={`relative flex flex-col border-r border-studio-700 bg-studio-950 transition-all duration-200 select-none z-20 ${
-        collapsed ? 'w-16' : 'w-56'
+      className={`relative z-20 flex h-14 w-full shrink-0 flex-row border-b border-border bg-background transition-all duration-200 select-none md:h-auto md:flex-col md:border-b-0 md:border-r ${
+        collapsed ? 'md:w-16' : 'md:w-56'
       }`}
     >
       {/* Navigation List */}
-      <div className="flex-1 py-4 space-y-1 px-2 overflow-y-auto">
+      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-2 py-1 md:block md:space-y-1 md:overflow-x-hidden md:overflow-y-auto md:py-4">
         {navItems.map(item => {
           const isActive = pathname.startsWith(item.href);
+          const Icon = item.icon;
 
           return (
             <Link
               key={item.href}
               href={item.href}
-              className={`group flex items-center gap-3 rounded-lg px-3 py-2.5 transition text-xs ${
+              className={`group flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2.5 text-xs transition md:gap-3 ${
                 isActive
-                  ? 'bg-amber text-studio-950 font-bold shadow-md shadow-amber/10'
-                  : 'text-slate-400 hover:bg-studio-900 hover:text-slate-200'
+                  ? 'bg-accent text-accent-foreground font-bold shadow-md shadow-foreground/10'
+                  : 'text-muted-foreground hover:bg-card hover:text-foreground'
               }`}
               title={collapsed ? item.label : undefined}
             >
-              <svg className={`g-icon h-4 w-4 ${isActive ? 'text-studio-950' : 'text-slate-400 group-hover:text-amber'}`}>
-                <use href={`#${item.icon}`} />
-              </svg>
+              <Icon className={`h-4 w-4 ${isActive ? 'text-accent-foreground' : 'text-muted-foreground group-hover:text-foreground'}`} />
 
-              {!collapsed && (
-                <div className="flex flex-col truncate">
-                  <span className="leading-tight">{item.label}</span>
-                  <span className={`text-[10px] font-mono leading-tight ${isActive ? 'text-studio-800' : 'text-slate-500'}`}>
-                    {item.sub}
-                  </span>
-                </div>
-              )}
+              <span className={`truncate leading-tight ${collapsed ? 'md:hidden' : ''}`}>{item.label}</span>
             </Link>
           );
         })}
       </div>
 
       {/* Collapse/Expand Toggle Footer */}
-      <div className="border-t border-studio-800 p-2">
-        <button
+      <div className="hidden border-t border-border p-2 md:block">
+        <Button variant="ghost" size="sm"
           onClick={() => setCollapsed(!collapsed)}
-          className="flex w-full items-center justify-center gap-2 rounded-lg p-2 text-slate-500 hover:bg-studio-900 hover:text-slate-300 transition text-xs"
+          aria-label={collapsed ? '展开侧边栏' : '收起侧边栏'}
+          className="flex w-full items-center justify-center gap-2 rounded-lg p-2 text-muted-foreground hover:bg-card hover:text-foreground transition text-xs"
         >
-          <svg className="g-icon h-4 w-4">
-            <use href={collapsed ? '#icon-chevron_right' : '#icon-chevron_left'} />
-          </svg>
+          {collapsed ? <Icons.ChevronRight className="h-4 w-4" /> : <Icons.ChevronLeft className="h-4 w-4" />}
           {!collapsed && <span>收起侧边栏</span>}
-        </button>
+        </Button>
       </div>
     </nav>
   );

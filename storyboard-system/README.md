@@ -45,7 +45,7 @@
 
 运行 `python -m unittest discover -s tests -v`。生产部署由 systemd 管理，并使用 Caddy 校验后热加载。
 
-## 前端构建（Material 3，自托管）
+## 前端构建（自托管）
 
 工作台使用官方 `@material/web` **2.4.1**。组件注册表经 esbuild **0.25.12** 打包为
 `static/vendor/material-web.js`，运行时不使用 CDN、远程脚本、远程字体或遥测服务。
@@ -57,7 +57,7 @@ npm run build
 python -m unittest discover -s tests -v
 ```
 
- `static/index.html` 同时载入本地构建产物和 `static/m3.css`；Python 标准库服务可直接提供
+ `static/index.html` 载入本地构建产物和 `static/styles.css`；Python 标准库服务可直接提供
  `static` 目录，无需 Node 进程。不要提交 `node_modules`、`.npm-cache`、`.qa-data` 或
  `qa-artifacts`。主题偏好只保存在浏览器 `localStorage`（键名 `frameforge-theme`）。
 

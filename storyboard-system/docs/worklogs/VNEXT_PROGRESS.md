@@ -19,6 +19,12 @@ CONVERGENCE & CUTOVER — 2026-09-29，`7b3a24c` 基线。本文件下方旧里�
 - [API_ROUTE_PARITY_MATRIX.md](../API_ROUTE_PARITY_MATRIX.md) 已逐路由核查 Legacy、目标 API 与未作为服务入口的 Legacy FastAPI 树，指出缺失和语义差异；这是一份代码审计，不是 API cutover。
 - 根 UI 与 V-Web production build 均通过。浏览器实测 Select 在 320/375/1440 的菜单点击命中与选值；320×568 时菜单向上避让，Escape 关闭并返回焦点，键盘选择有效；三宽度无横向溢出。仍待迁 Checkbox、Popover/Menu/Modal、Icons/Motion 与旧工作区双消费者接入。
 
+### 2026-09-29 第三批收敛切片（SRT 真实消费）
+
+- V-Web 交付页不再用定时器假报导出成功；SRT 通过带 Bearer 的 `/api/v1/productions/{id}/export/srt` 下载 Blob，按下载头或安全备用名保存，失败在页面提示。V-API 尚未接通的 Excel/PDF/EDL/OTIO 行保留说明并标为“迁移中”，按钮禁用。
+- V-Web production build 与非增量 TypeScript 检查通过。隔离 Playwright 在 320/375/1440 宽度下模拟 V-API，核对 SRT 下载内容、UTF-8 文件名、Bearer 请求与其余四项禁用；403 响应显示错误。没有使用生产数据。
+- 视觉审查发现 V-Web 整体 shell 的 320px 固定侧栏遮挡交付页，移动端当前**未通过视觉验收**；桌面 1440px 页可用。此问题属于 M4 shell 门槛，不能因为无 document 横向溢出就宣称窄屏通过。
+
 ## Historical Verified Findings（旧切片，不代表当前 cutover）
 - [VERIFIED] Working tree baseline SHA: `4986ac0d4af3a4829ba07cd24f95b1c5b1df6aa7`.
 - [VERIFIED] Pre-change patch saved to `docs/audits/prechange-working-tree.patch`.
@@ -83,7 +89,7 @@ CONVERGENCE & CUTOVER — 2026-09-29，`7b3a24c` 基线。本文件下方旧里�
 
 # VNEXT ARCHITECTURE MIGRATION - 5 PILLARS EXECUTION WORKLOG (2026-09-29)
 
-## Current Status: P0/P1 IMPLEMENTATION & VERIFICATION COMPLETE (CUTOVER_READY)
+## Current Status: IMPLEMENTED_NOT_INTEGRATED (implementation exists; real runtime cutover pending)
 
 ### 1. PostgreSQL & Repository Layer
 - **Contract Protocols**: Created `storyboard-system/repositories/contracts.py` defining `ProjectRepository`, `ShotRepository`, `FieldRepository`, and `UnitOfWork` protocols.
@@ -121,3 +127,72 @@ CONVERGENCE & CUTOVER — 2026-09-29，`7b3a24c` 基线。本文件下方旧里�
 - `storyboard-system/tests`: 116 passed / 3 skipped in 15.3s.
 - `tests/backend` (Pytest): 14 passed / 14 total in 3.3s.
 - `tools/architecture_boundary_gate.py`: PASS.
+
+---
+
+# PROGRESS AUDIT — 2026-09-29 15:45 (Session 2)
+
+## Audit Baseline
+- **HEAD**: `3294d9d` on `master`; prior commits: `0826adf` (UI foundations convergence), `7b3a24c` (5-pillar implementation).
+- **Working tree**: 45 files changed (1080 insertions, 2785 deletions) — primarily V-Web UI convergence and `@frameforge/ui` canonical package establishment.
+
+## Verification Results (all GREEN)
+- `tests/backend` (Pytest): **17/17 passed** in 6.0s (including new SRT export and share snapshot tests).
+- `storyboard-system/tests`: **116/116 passed** (3 skipped) in 15.3s.
+- `npm run check` (storyboard-system): TypeScript + Tailwind v4 + esbuild **PASS**.
+- `npx tsc --noEmit` (packages/ui): **PASS**.
+- `npx tsc --noEmit` (apps/web): **PASS**.
+- `tools/architecture_boundary_gate.py`: **PASS**.
+
+## Key Changes in Dirty Tree (since commit `3294d9d`)
+
+### M2: `@frameforge/ui` Canonical Package Convergence
+- Retired `packages/ui/src/primitives.css` (deprecated amber/gold fallbacks).
+- Added shadcn-style components: `badge.tsx`, `button.tsx`, `card.tsx`, `checkbox.tsx`, `input.tsx`, `native-select.tsx`, `textarea.tsx`.
+- Created `packages/ui/src/theme.css` with dark/light semantic tokens (neutral palette, Satoshi + Sarasa Gothic SC CJK).
+- Added `packages/ui/components.json` for shadcn tooling compatibility.
+- Added `lucide-react`, `radix-ui`, `class-variance-authority` dependencies.
+- Restructured `packages/ui/src/index.ts` to export all shared components and i18n dictionary.
+
+### M4: V-Web Full-Page UI Convergence (amber→neutral)
+- Removed deprecated amber palette from all 22 V-Web route/component files.
+- Login page now consumes `@frameforge/ui` `Button`, `Input`, `Field`, `Select`.
+- Productions page consumes `Badge`, `Card`, `Button`, `Field`, `Input`, `Select` from canonical package.
+- Storyboard components (ShotCard, StoryboardGrid, ImportModal, NewShotModal, etc.) converged to neutral semantic tokens.
+- NavRail and TopBar converged to semantic CSS variables.
+- ShotInspector significantly restructured with neutral tokens.
+- `apps/web/tailwind.config.ts` redefined with semantic CSS variable palette.
+- `apps/web/app/globals.css` restructured to consume `@frameforge/ui/theme.css` semantics.
+- Deleted `apps/web/components/app-shell/IconSprite.tsx` (replaced by lucide-react).
+- Added `apps/web/public/fonts/` with Satoshi and Sarasa Gothic SC WOFF2 subsets.
+- Created `apps/web/lib/api-client.ts` with `apiClient()` and `apiDownload()` (real SRT download verified in test).
+
+### Documentation Convergence
+- Created `storyboard-system/docs/audits/DEPRECATED_AMBER_UI.md` documenting the amber removal inventory.
+- Updated `storyboard-system/docs/CANONICAL_OWNER_MATRIX.md` with accurate per-capability states.
+- Updated `storyboard-system/docs/API_ROUTE_PARITY_MATRIX.md` with full L/V/F route parity audit.
+- Updated `storyboard-system/docs/ACTIVE_WORKSTREAMS.md` with convergence milestones M0–M7.
+- Deleted `storyboard-system/static/m3.css` (unused Material 3 amber stylesheet).
+- Corrected `storyboard-system/README.md` stale m3.css reference.
+
+### Legacy Cleanup
+- Removed 3 stale `var(--amber)` references in `storyboard-system/static/styles.css` → `var(--primary)`.
+
+## Accurate Migration State per Canonical Owner Matrix
+
+| Milestone | Status | Evidence |
+| --- | --- | --- |
+| M0 Documentation truth | VERIFIED | Docs reconciled with code facts |
+| M1 Canonical owner matrix | VERIFIED | 23-row matrix audited |
+| M2 `@frameforge/ui` | INTEGRATED_NOT_CUT_OVER | Login + productions consume root package; legacy UI package still active |
+| M3 API/persistence | IMPLEMENTED_NOT_INTEGRATED | SRT export sub-item INTEGRATED; rest awaiting route parity |
+| M4 V-Web views | IMPLEMENTED_NOT_INTEGRATED | Pages exist and build; not yet the production entry point |
+| M5 AI | BLOCKED | Mock-only; no persistent job store or V-Web consumer |
+| M6 Presence | IMPLEMENTED_NOT_INTEGRATED | Process-local only; Redis multi-worker pending |
+| M7 PostgreSQL | BLOCKED | Alembic exists; no real PG integration test |
+
+## No Regression
+- Zero amber/yellow references remain in V-Web or root UI source.
+- All existing tests pass without modification.
+- Architecture boundary gate passes.
+- No production deployment or data modification.

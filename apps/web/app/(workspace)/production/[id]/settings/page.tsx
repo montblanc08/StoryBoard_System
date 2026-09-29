@@ -1,5 +1,7 @@
 'use client';
 
+import { Button, Card, Field, Icons, Input, Select } from '@frameforge/ui';
+
 import React, { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useProduction } from '@/lib/hooks/useProduction';
@@ -51,99 +53,97 @@ export default function SettingsPage() {
   return (
     <div className="flex h-full w-full flex-col p-8 overflow-y-auto max-w-4xl mx-auto space-y-8">
       <div>
-        <h2 className="text-lg font-bold text-white">项目与管线设置 (Pipeline Settings)</h2>
-        <p className="text-xs text-slate-400">
+        <h2 className="text-lg font-bold text-foreground">项目与管线设置 (Pipeline Settings)</h2>
+        <p className="text-xs text-muted-foreground">
           配置影视制作管线的标准帧率、画幅比例、色彩工作流及团队权限
         </p>
       </div>
 
       <form onSubmit={handleSave} className="space-y-6 text-xs">
-        <div className="rounded-xl border border-studio-700 bg-studio-900 p-6 space-y-4">
-          <h3 className="text-sm font-bold text-slate-200">基本信息</h3>
+        <Card className="p-6 space-y-4">
+          <h3 className="text-sm font-bold text-foreground">基本信息</h3>
 
           <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-slate-400 mb-1">项目全称</label>
-              <input
+            <Field label="项目全称">
+              <Input
                 type="text"
                 value={name || production.name}
                 onChange={e => setName(e.target.value)}
-                className="w-full rounded border border-studio-700 bg-studio-950 px-3 py-2 text-white outline-none focus:border-amber"
               />
-            </div>
+            </Field>
 
-            <div>
-              <label className="block text-slate-400 mb-1">项目代码 (Code)</label>
-              <input
+            <Field label="项目代码 (Code)">
+              <Input
                 type="text"
                 value={code || production.code}
                 onChange={e => setCode(e.target.value)}
-                className="w-full rounded border border-studio-700 bg-studio-950 px-3 py-2 text-white font-mono outline-none focus:border-amber uppercase"
+                className="font-mono uppercase"
+              />
+            </Field>
+          </div>
+        </Card>
+
+        <Card className="p-6 space-y-4">
+          <h3 className="text-sm font-bold text-foreground">画面规格与时码标准</h3>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="grid min-w-0 gap-2 text-sm font-medium text-foreground">
+              <span>标准帧率 (FPS)</span>
+              <Select
+                label="标准帧率 (FPS)"
+                value={String(fps)}
+                onChange={value => setFps(Number(value))}
+                options={[
+                  { value: '24', label: '24 FPS (电影标准)' },
+                  { value: '25', label: '25 FPS (欧洲/国内广播)' },
+                  { value: '30', label: '30 FPS (网络视频)' },
+                  { value: '50', label: '50 FPS (高帧率电视)' },
+                  { value: '60', label: '60 FPS (高帧率商业片)' }
+                ]}
+              />
+            </div>
+
+            <div className="grid min-w-0 gap-2 text-sm font-medium text-foreground">
+              <span>画幅比例 (Aspect Ratio)</span>
+              <Select
+                label="画幅比例 (Aspect Ratio)"
+                value={aspectRatio}
+                onChange={setAspectRatio}
+                options={[
+                  { value: '16:9', label: '16:9 (1920×1080 / 4K UHD)' },
+                  { value: '2.39:1', label: '2.39:1 (宽银幕 Anamorphic)' },
+                  { value: '9:16', label: '9:16 (竖屏社交媒体)' },
+                  { value: '4:3', label: '4:3 (经典复古)' }
+                ]}
               />
             </div>
           </div>
-        </div>
-
-        <div className="rounded-xl border border-studio-700 bg-studio-900 p-6 space-y-4">
-          <h3 className="text-sm font-bold text-slate-200">画面规格与时码标准</h3>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-slate-400 mb-1">标准帧率 (FPS)</label>
-              <select
-                value={fps}
-                onChange={e => setFps(Number(e.target.value))}
-                className="w-full rounded border border-studio-700 bg-studio-950 px-3 py-2 text-white outline-none focus:border-amber"
-              >
-                <option value={24}>24 FPS (电影标准)</option>
-                <option value={25}>25 FPS (欧洲/国内广播)</option>
-                <option value={30}>30 FPS (网络视频)</option>
-                <option value={50}>50 FPS (高帧率电视)</option>
-                <option value={60}>60 FPS (高帧率商业片)</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-slate-400 mb-1">画幅比例 (Aspect Ratio)</label>
-              <select
-                value={aspectRatio}
-                onChange={e => setAspectRatio(e.target.value)}
-                className="w-full rounded border border-studio-700 bg-studio-950 px-3 py-2 text-white outline-none focus:border-amber"
-              >
-                <option value="16:9">16:9 (1920×1080 / 4K UHD)</option>
-                <option value="2.39:1">2.39:1 (宽银幕 Anamorphic)</option>
-                <option value="9:16">9:16 (竖屏社交媒体)</option>
-                <option value="4:3">4:3 (经典复古)</option>
-              </select>
-            </div>
-          </div>
-        </div>
+        </Card>
 
         <div className="flex items-center justify-end gap-3 pt-4">
-          <button
+          <Button
             type="submit"
             disabled={isSaving}
-            className="flex items-center gap-2 rounded bg-amber px-6 py-2.5 text-xs font-bold text-studio-950 hover:bg-amber-hover transition disabled:opacity-50"
           >
-            <svg className="g-icon h-4 w-4"><use href="#icon-check" /></svg>
+            <Icons.Check className="h-4 w-4" />
             {isSaving ? '保存中…' : '保存设置'}
-          </button>
+          </Button>
         </div>
       </form>
 
       {/* Danger Zone */}
-      <div className="rounded-xl border border-rose-500/30 bg-rose-500/5 p-6 space-y-4 text-xs">
-        <h3 className="text-sm font-bold text-rose-400">危险操作区 (Danger Zone)</h3>
-        <p className="text-slate-400">
+      <Card className="border-destructive/30 bg-destructive/5 p-6 space-y-4 text-xs">
+        <h3 className="text-sm font-bold text-destructive">危险操作区 (Danger Zone)</h3>
+        <p className="text-muted-foreground">
           归档或删除项目后，所有镜头及关联资产将执行软删除标记。
         </p>
-        <button
+        <Button
+          variant="destructive"
           onClick={handleDelete}
-          className="rounded border border-rose-500/40 bg-rose-500/10 px-4 py-2 font-bold text-rose-400 hover:bg-rose-500/20 transition"
         >
           归档并删除本制作项目
-        </button>
-      </div>
+        </Button>
+      </Card>
     </div>
   );
 }

@@ -2063,7 +2063,7 @@ body.is-reordering :is(.shot-card:hover, .wall-item:hover, .timeline-clip:hover)
 [hidden] { display: none !important; }
 body > svg:not(.g-icon) { display: none !important; }
 .shot-table tbody tr[draggable="true"] { cursor: grab; }
-.shot-table tbody tr.is-dragging { opacity: .45; outline: 1px dashed var(--amber); }
+.shot-table tbody tr.is-dragging { opacity: .45; outline: 1px dashed var(--primary); }
 .inspector-modified { margin-top: 10px; color: var(--text-muted); font-size: 11px; line-height: 1.45; }
 .inspector-steps { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; }
 .inspector-step { display: flex; flex-direction: column; gap: 2px; padding: 7px 8px; background: var(--bg-surface-2); border-radius: var(--radius-sm); font-size: 10px; }
@@ -2101,7 +2101,7 @@ body:has(> #shareView:not(.hidden)) {
 .deliverable-links { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 16px; background: var(--bg-surface-1); border: 1px solid var(--border-subtle); border-radius: 8px; font-size: 12px; }
 .deliverable-links strong { width: 100%; color: var(--text-primary); }
 .deliverable-links a { color: var(--text-secondary); text-decoration: none; }
-.deliverable-links a:hover { color: var(--amber); text-decoration: underline; }
+.deliverable-links a:hover { color: var(--primary); text-decoration: underline; }
 .share-pagination { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 24px 0 8px; color: var(--text-muted); font-size: 11px; }
 .share-pagination .btn:disabled { opacity: .4; cursor: not-allowed; }
 .pro-config-dialog { max-width: 900px; }
@@ -2114,7 +2114,7 @@ body:has(> #shareView:not(.hidden)) {
 .config-list-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px; border-radius: 6px; background: var(--bg-surface-2); }
 .config-list-row span { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .config-view-apply { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; border: 0; background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; }
-.config-view-apply:hover { color: var(--amber); }
+.config-view-apply:hover { color: var(--primary); }
 .config-list-row small, .config-empty { color: var(--text-muted); font-size: 10px; }
 .config-row-actions { display: flex; align-items: center; gap: 2px; }
 .modal-hint { margin: -4px 0 10px; color: var(--text-muted); font-size: 10px; line-height: 1.45; }

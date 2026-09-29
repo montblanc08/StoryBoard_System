@@ -1,5 +1,7 @@
 'use client';
 
+import { Icons } from '@frameforge/ui';
+
 import React, { useMemo, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import type { Sequence, Shot } from '@frameforge/types';
@@ -139,8 +141,8 @@ export default function StoryboardPage() {
         {/* Scrollable Storyboard Grid / Wall */}
         <div className="flex-1 overflow-y-auto">
           {isLoading ? (
-            <div className="flex h-64 items-center justify-center font-mono text-xs text-slate-500">
-              <svg className="g-icon animate-spin h-5 w-5 mr-2 text-amber"><use href="#icon-movie" /></svg>
+            <div className="flex h-64 items-center justify-center font-mono text-xs text-muted-foreground">
+              <Icons.Film className="animate-spin h-5 w-5 mr-2 text-foreground" />
               正在载入分镜画面...
             </div>
           ) : viewMode === 'wall' ? (

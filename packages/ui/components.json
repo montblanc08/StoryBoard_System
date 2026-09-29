@@ -1,0 +1,19 @@
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "new-york",
+  "rsc": true,
+  "tsx": true,
+  "tailwind": {
+    "config": "../../apps/web/tailwind.config.ts",
+    "css": "src/theme.css",
+    "baseColor": "neutral",
+    "cssVariables": true
+  },
+  "iconLibrary": "lucide",
+  "aliases": {
+    "components": "@frameforge/ui/components",
+    "ui": "@frameforge/ui/components",
+    "utils": "@frameforge/ui/lib/utils",
+    "lib": "@frameforge/ui/lib"
+  }
+}

@@ -1,5 +1,7 @@
 'use client';
 
+import { Button, Card, Input } from '@frameforge/ui';
+
 import React, { useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useProduction, useShots, useUpdateShot } from '@/lib/hooks/useProduction';
@@ -63,28 +65,28 @@ export default function ReviewPage() {
   return (
     <div className="flex h-full w-full overflow-hidden">
       {/* Left: Shot Queue List */}
-      <aside className="w-72 border-r border-studio-700 bg-studio-950 flex flex-col">
-        <div className="p-4 border-b border-studio-700 bg-studio-900/60">
-          <h3 className="text-xs font-bold text-white uppercase tracking-wider">审片镜头队列 ({shots.length})</h3>
+      <aside className="w-72 border-r border-border bg-background flex flex-col">
+        <div className="p-4 border-b border-border bg-card/60">
+          <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">审片镜头队列 ({shots.length})</h3>
         </div>
 
-        <div className="flex-1 overflow-y-auto divide-y divide-studio-800">
+        <div className="flex-1 overflow-y-auto divide-y divide-border">
           {shots.map((shot, idx) => (
             <div
               key={shot.id}
               onClick={() => setActiveShotIndex(idx)}
               className={`p-3 cursor-pointer transition flex items-center justify-between text-xs ${
                 idx === activeShotIndex
-                  ? 'bg-amber-dim text-white border-l-4 border-amber'
-                  : 'hover:bg-studio-900 text-slate-300'
+                  ? 'bg-accent text-accent-foreground border-l-4 border-ring'
+                  : 'hover:bg-accent text-foreground'
               }`}
             >
               <div className="space-y-0.5 truncate">
                 <div className="flex items-center gap-2 font-mono font-bold">
-                  <span className="text-amber">{shot.display_number}</span>
+                  <span className="text-foreground">{shot.display_number}</span>
                   <span className="truncate">{shot.name || `镜头 ${shot.display_number}`}</span>
                 </div>
-                <div className="text-[10px] text-slate-500">{shot.duration_frames}f · {shot.primary_method}</div>
+                <div className="text-[10px] text-muted-foreground">{shot.duration_frames}f · {shot.primary_method}</div>
               </div>
 
               <StatusBadge status={shot.status} />
@@ -94,11 +96,11 @@ export default function ReviewPage() {
       </aside>
 
       {/* Center: Frame Review Monitor & Discussion */}
-      <div className="flex-1 flex flex-col overflow-y-auto bg-studio-950 p-8 space-y-6">
+      <div className="flex-1 flex flex-col overflow-y-auto bg-background p-8 space-y-6">
         {/* Monitor Frame */}
-        <div className="relative w-full max-w-3xl mx-auto aspect-video rounded-xl border border-studio-700 bg-studio-900 shadow-2xl p-6 flex flex-col justify-between overflow-hidden">
+        <div className="relative w-full max-w-3xl mx-auto aspect-video rounded-xl border border-border bg-card shadow-2xl p-6 flex flex-col justify-between overflow-hidden">
           <div className="flex items-center justify-between z-10">
-            <span className="font-mono text-sm font-bold text-amber">
+            <span className="font-mono text-sm font-bold text-foreground">
               SHOT {currentShot.display_number}
             </span>
             <div className="flex items-center gap-2">
@@ -108,70 +110,70 @@ export default function ReviewPage() {
           </div>
 
           <div className="text-center space-y-3 z-10">
-            <h2 className="text-lg font-bold text-white">{currentShot.name}</h2>
-            <p className="text-xs text-slate-300 max-w-lg mx-auto leading-relaxed">{currentShot.description}</p>
+            <h2 className="text-lg font-bold text-foreground">{currentShot.name}</h2>
+            <p className="text-xs text-foreground max-w-lg mx-auto leading-relaxed">{currentShot.description}</p>
             {currentShot.voice_over && (
-              <div className="bg-studio-950/80 border border-amber/30 p-3 rounded text-xs text-amber-200/90 max-w-lg mx-auto">
-                <span className="font-bold text-amber mr-2">旁白:</span>
+              <div className="bg-background/80 border border-border p-3 rounded text-xs text-foreground max-w-lg mx-auto">
+                <span className="font-bold text-foreground mr-2">旁白:</span>
                 {currentShot.voice_over}
               </div>
             )}
           </div>
 
-          <div className="flex items-center justify-between text-xs font-mono text-slate-400 z-10">
+          <div className="flex items-center justify-between text-xs font-mono text-muted-foreground z-10">
             <span>{currentShot.shot_size} · {currentShot.lens_mm}mm · {shotMovementLabel(currentShot)}</span>
-            <span className="font-bold text-amber">{currentShot.duration_frames} 帧</span>
+            <span className="font-bold text-foreground">{currentShot.duration_frames} 帧</span>
           </div>
         </div>
 
         {/* Approval Actions Bar */}
         <div className="flex items-center justify-center gap-4 max-w-3xl mx-auto w-full">
-          <button
+          <Button
+            variant="destructive"
             onClick={handleRequestChanges}
-            className="flex-1 rounded-lg border border-rose-500/30 bg-rose-500/10 py-3 text-xs font-bold text-rose-400 hover:bg-rose-500/20 transition text-center"
+            className="flex-1"
           >
             提出修改意见 (Request Changes)
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={handleApprove}
-            className="flex-1 rounded-lg bg-emerald-500/20 border border-emerald-500/40 py-3 text-xs font-bold text-emerald-400 hover:bg-emerald-500/30 transition text-center"
+            className="flex-1"
           >
             通过审批 (Approve Shot)
-          </button>
+          </Button>
         </div>
 
         {/* Comments & Notes */}
-        <div className="max-w-3xl mx-auto w-full rounded-xl border border-studio-700 bg-studio-900 p-6 space-y-4 text-xs">
-          <h3 className="font-bold text-white text-sm">审片批注与意见 ({shotComments.length})</h3>
+        <Card className="max-w-3xl mx-auto w-full p-6 space-y-4 text-xs">
+          <h3 className="font-bold text-foreground text-sm">审片批注与意见 ({shotComments.length})</h3>
 
           <div className="space-y-3">
             {shotComments.map(c => (
-              <div key={c.id} className="rounded border border-studio-800 bg-studio-950 p-3 space-y-1">
-                <div className="flex items-center justify-between text-slate-400 font-mono text-[11px]">
-                  <span className="font-bold text-slate-200">{c.user}</span>
+              <div key={c.id} className="rounded border border-border bg-background p-3 space-y-1">
+                <div className="flex items-center justify-between text-muted-foreground font-mono text-[11px]">
+                  <span className="font-bold text-foreground">{c.user}</span>
                   <span>{c.time}</span>
                 </div>
-                <p className="text-slate-300">{c.text}</p>
+                <p className="text-foreground">{c.text}</p>
               </div>
             ))}
           </div>
 
           <form onSubmit={handleAddComment} className="flex gap-2 pt-2">
-            <input
+            <Input
               type="text"
               value={commentText}
               onChange={e => setCommentText(e.target.value)}
               placeholder="添加该镜头的导演审片批注..."
-              className="flex-1 rounded border border-studio-700 bg-studio-950 px-3 py-2 text-white outline-none focus:border-amber"
+              className="flex-1"
             />
-            <button
+            <Button
               type="submit"
-              className="rounded bg-amber px-4 py-2 font-bold text-studio-950 hover:bg-amber-hover transition"
             >
               发送批注
-            </button>
+            </Button>
           </form>
-        </div>
+        </Card>
       </div>
     </div>
   );

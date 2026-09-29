@@ -1,0 +1,68 @@
+/* Shared shadcn semantic theme, mapped to the established FrameForge V4.7 palette. */
+@font-face { font-family: 'Satoshi'; src: url('/fonts/satoshi-regular.woff2') format('woff2'); font-style: normal; font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Satoshi'; src: url('/fonts/satoshi-medium.woff2') format('woff2'); font-style: normal; font-weight: 500 600; font-display: swap; }
+@font-face { font-family: 'Satoshi'; src: url('/fonts/satoshi-bold.woff2') format('woff2'); font-style: normal; font-weight: 700 900; font-display: swap; }
+@font-face { font-family: 'Sarasa Gothic SC'; src: url('/fonts/sarasa-gothic-sc-symbols.woff2') format('woff2'); font-style: normal; font-weight: 400; font-display: swap; unicode-range: U+2000-33FF, U+FE30-FEFF, U+FF00-FFEF; }
+@font-face { font-family: 'Sarasa Gothic SC'; src: url('/fonts/sarasa-gothic-sc-ext-a.woff2') format('woff2'); font-style: normal; font-weight: 400; font-display: swap; unicode-range: U+3400-4DBF; }
+@font-face { font-family: 'Sarasa Gothic SC'; src: url('/fonts/sarasa-gothic-sc-cjk-1.woff2') format('woff2'); font-style: normal; font-weight: 400; font-display: swap; unicode-range: U+4E00-62FF; }
+@font-face { font-family: 'Sarasa Gothic SC'; src: url('/fonts/sarasa-gothic-sc-cjk-2.woff2') format('woff2'); font-style: normal; font-weight: 400; font-display: swap; unicode-range: U+6300-77FF; }
+@font-face { font-family: 'Sarasa Gothic SC'; src: url('/fonts/sarasa-gothic-sc-cjk-3.woff2') format('woff2'); font-style: normal; font-weight: 400; font-display: swap; unicode-range: U+7800-8CFF; }
+@font-face { font-family: 'Sarasa Gothic SC'; src: url('/fonts/sarasa-gothic-sc-cjk-4.woff2') format('woff2'); font-style: normal; font-weight: 400; font-display: swap; unicode-range: U+8D00-9FFF, U+F900-FAFF; }
+
+:root,
+:root.dark {
+  color-scheme: dark;
+  --background: 15 16 17;
+  --foreground: 241 241 239;
+  --card: 23 24 25;
+  --card-foreground: 241 241 239;
+  --popover: 42 43 46;
+  --popover-foreground: 241 241 239;
+  --primary: 40 117 230;
+  --primary-foreground: 255 255 255;
+  --secondary: 28 29 31;
+  --secondary-foreground: 241 241 239;
+  --muted: 35 36 38;
+  --muted-foreground: 127 126 121;
+  --accent: 35 36 38;
+  --accent-foreground: 241 241 239;
+  --destructive: 214 95 101;
+  --destructive-foreground: 255 255 255;
+  --border: 48 49 50;
+  --input: 61 62 64;
+  --ring: 91 141 239;
+  --radius: 0.5rem;
+  --font-ui: 'Satoshi', 'Sarasa Gothic SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-mono: 'Sarasa Term SC', 'SFMono-Regular', Consolas, Menlo, monospace;
+}
+
+:root.light {
+  color-scheme: light;
+  --background: 255 255 255;
+  --foreground: 21 22 23;
+  --card: 251 251 250;
+  --card-foreground: 21 22 23;
+  --popover: 255 255 255;
+  --popover-foreground: 21 22 23;
+  --primary: 40 117 230;
+  --primary-foreground: 255 255 255;
+  --secondary: 241 241 239;
+  --secondary-foreground: 21 22 23;
+  --muted: 233 233 231;
+  --muted-foreground: 120 123 128;
+  --accent: 241 241 239;
+  --accent-foreground: 21 22 23;
+  --destructive: 214 95 101;
+  --destructive-foreground: 255 255 255;
+  --border: 216 216 215;
+  --input: 199 199 198;
+  --ring: 91 141 239;
+}
+
+body {
+  background: rgb(var(--background));
+  color: rgb(var(--foreground));
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}

@@ -10,29 +10,27 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ["var(--font-sarasa-sans)", "system-ui", "sans-serif"],
-        mono: ["var(--font-sarasa-mono)", "monospace"]
+        sans: ["var(--font-ui)", "system-ui", "sans-serif"],
+        mono: ["var(--font-mono)", "monospace"]
+      },
+      borderRadius: {
+        lg: "var(--radius)",
+        md: "calc(var(--radius) - 2px)",
+        sm: "calc(var(--radius) - 4px)"
       },
       colors: {
-        studio: {
-          950: "#06080b",
-          900: "#0b0e14",
-          850: "#10141d",
-          800: "#161b26",
-          700: "#222a3a",
-          600: "#323d52"
-        },
-        amber: {
-          DEFAULT: "#ffbf47",
-          hover: "#ffd27d",
-          dim: "#30240d"
-        },
-        film: {
-          green: "#52d7a4",
-          blue: "#38bdf8",
-          purple: "#c084fc",
-          red: "#f87171"
-        }
+        background: "rgb(var(--background) / <alpha-value>)",
+        foreground: "rgb(var(--foreground) / <alpha-value>)",
+        card: { DEFAULT: "rgb(var(--card) / <alpha-value>)", foreground: "rgb(var(--card-foreground) / <alpha-value>)" },
+        popover: { DEFAULT: "rgb(var(--popover) / <alpha-value>)", foreground: "rgb(var(--popover-foreground) / <alpha-value>)" },
+        primary: { DEFAULT: "rgb(var(--primary) / <alpha-value>)", foreground: "rgb(var(--primary-foreground) / <alpha-value>)" },
+        secondary: { DEFAULT: "rgb(var(--secondary) / <alpha-value>)", foreground: "rgb(var(--secondary-foreground) / <alpha-value>)" },
+        muted: { DEFAULT: "rgb(var(--muted) / <alpha-value>)", foreground: "rgb(var(--muted-foreground) / <alpha-value>)" },
+        accent: { DEFAULT: "rgb(var(--accent) / <alpha-value>)", foreground: "rgb(var(--accent-foreground) / <alpha-value>)" },
+        destructive: { DEFAULT: "rgb(var(--destructive) / <alpha-value>)", foreground: "rgb(var(--destructive-foreground) / <alpha-value>)" },
+        border: "rgb(var(--border) / <alpha-value>)",
+        input: "rgb(var(--input) / <alpha-value>)",
+        ring: "rgb(var(--ring) / <alpha-value>)"
       }
     }
   },

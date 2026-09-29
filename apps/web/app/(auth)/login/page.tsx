@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/authStore';
-import { Button, Field, Input, Select } from '@frameforge/ui';
+import { Button, Field, Icons, Input, Select } from '@frameforge/ui';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -47,66 +47,70 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen w-full items-center justify-center bg-studio-950 p-6">
+    <div className="flex min-h-screen w-full items-center justify-center bg-background p-6">
       {/* Top right utility controls */}
-      <div className="absolute top-3 right-3 flex items-center gap-2 text-xs font-mono text-studio-600 sm:top-6 sm:right-6 sm:gap-3">
-        <button
+      <div className="absolute top-3 right-3 flex items-center gap-2 text-xs font-mono text-muted-foreground sm:top-6 sm:right-6 sm:gap-3">
+        <Button
+          variant="outline"
+          size="sm"
           onClick={() => setLocale(locale === 'zh-CN' ? 'en-US' : 'zh-CN')}
           aria-label={locale === 'zh-CN' ? 'Switch to English' : '切换为中文'}
-          className="rounded border border-studio-700 bg-studio-900 px-2.5 py-1 text-slate-300 hover:border-amber hover:text-amber"
+          className="px-2.5"
         >
           <span className="sm:hidden">{locale === 'zh-CN' ? 'EN' : '中'}</span>
           <span className="hidden sm:inline">{locale === 'zh-CN' ? 'EN / English' : '中 / 简体中文'}</span>
-        </button>
-        <button
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
           onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
           aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-          className="rounded border border-studio-700 bg-studio-900 px-2.5 py-1 text-slate-300 hover:border-amber hover:text-amber"
+          className="px-2.5"
         >
           <span className="sm:hidden">{theme === 'dark' ? '☀' : '☾'}</span>
           <span className="hidden sm:inline">{theme === 'dark' ? '☀ Light' : '☾ Dark'}</span>
-        </button>
-        <span className="hidden items-center gap-1.5 text-film-green sm:flex">
-          <span className="h-2 w-2 rounded-full bg-film-green animate-pulse" />
-          ● Internal Node
-        </span>
+        </Button>
       </div>
 
-      <div className="w-full max-w-md rounded-lg border border-studio-700 bg-studio-900 p-8 shadow-2xl">
+      <div className="w-full max-w-md rounded-lg border border-border bg-card p-8 shadow-2xl">
         <div className="mb-6 flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-dim border border-amber/30 text-amber">
-            <svg className="g-icon"><use href="#icon-movie" /></svg>
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent border border-border text-accent-foreground">
+            <Icons.Film />
           </div>
           <div>
-            <h1 className="text-base font-bold tracking-tight text-white">{t('appName')}</h1>
-            <p className="text-xs text-studio-600">{t('appSub')}</p>
+            <h1 className="text-base font-bold tracking-tight text-foreground">{t('appName')}</h1>
+            <p className="text-xs text-muted-foreground">{t('appSub')}</p>
           </div>
         </div>
 
         {/* Mode switcher tabs */}
-        <div className="mb-6 grid grid-cols-2 rounded border border-studio-700 bg-studio-950 p-1 text-xs">
-          <button
+        <div className="mb-6 grid grid-cols-2 rounded border border-border bg-background p-1 text-xs">
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
             onClick={() => setMode('login')}
-            className={`rounded py-1.5 font-medium transition ${
-              mode === 'login' ? 'bg-studio-800 text-amber shadow' : 'text-slate-400 hover:text-white'
+            className={`w-full ${
+              mode === 'login' ? 'bg-accent text-accent-foreground shadow' : 'text-muted-foreground'
             }`}
           >
             {t('loginBtn')}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
             onClick={() => setMode('register')}
-            className={`rounded py-1.5 font-medium transition ${
-              mode === 'register' ? 'bg-studio-800 text-amber shadow' : 'text-slate-400 hover:text-white'
+            className={`w-full ${
+              mode === 'register' ? 'bg-accent text-accent-foreground shadow' : 'text-muted-foreground'
             }`}
           >
             {t('registerBtn')}
-          </button>
+          </Button>
         </div>
 
         {error && (
-          <div className="mb-4 rounded border border-film-red/40 bg-film-red/10 p-3 text-xs text-film-red">
+          <div className="mb-4 rounded border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
             {error}
           </div>
         )}
@@ -119,7 +123,6 @@ export default function LoginPage() {
               required
               value={email}
               onChange={e => setEmail(e.target.value)}
-              className="w-full rounded border border-studio-700 bg-studio-950 px-3 py-2 text-white outline-none focus:border-amber"
               placeholder="user@company.internal"
             />
           </Field>
@@ -133,11 +136,10 @@ export default function LoginPage() {
                   required
                   value={displayName}
                   onChange={e => setDisplayName(e.target.value)}
-                  className="w-full rounded border border-studio-700 bg-studio-950 px-3 py-2 text-white outline-none focus:border-amber"
                   placeholder="例如：王摄影 / 李剪辑"
                 />
               </Field>
-              <div className="ffui-field">
+              <div className="grid min-w-0 gap-2 text-sm font-medium text-foreground">
                 <span>管线职责角色</span>
                 <Select
                   label="管线职责角色"
@@ -154,7 +156,6 @@ export default function LoginPage() {
                     { value: 'editor', label: 'Editor 剪辑/DIT' },
                     { value: 'reviewer', label: 'Reviewer 审片审批' }
                   ]}
-                  className="w-full rounded border border-studio-700 bg-studio-950 px-3 py-2 text-white outline-none focus:border-amber"
                 />
               </div>
             </>
@@ -167,23 +168,19 @@ export default function LoginPage() {
               required
               value={password}
               onChange={e => setPassword(e.target.value)}
-              className="w-full rounded border border-studio-700 bg-studio-950 px-3 py-2 text-white outline-none focus:border-amber"
             />
           </Field>
 
           <Button
             type="submit"
-            variant="primary"
+            variant="default"
             disabled={loading}
-            className="w-full mt-4 flex items-center justify-center gap-2 rounded bg-amber py-2.5 font-bold text-studio-950 transition hover:bg-amber-hover disabled:opacity-50"
+            className="mt-4 w-full"
           >
             {loading ? '处理中...' : mode === 'login' ? t('loginBtn') : t('registerBtn')}
           </Button>
         </form>
 
-        <div className="mt-6 border-t border-studio-800 pt-4 text-center text-[11px] text-studio-600 font-mono">
-          Single Source of Truth · Shot = Entity · Zero Public Residency
-        </div>
       </div>
     </div>
   );

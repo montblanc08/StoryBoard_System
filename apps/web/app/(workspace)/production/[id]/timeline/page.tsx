@@ -1,5 +1,7 @@
 'use client';
 
+import { Button, Icons } from '@frameforge/ui';
+
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import type { Shot } from '@frameforge/types';
@@ -70,38 +72,38 @@ export default function TimelinePage() {
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
       {/* Timeline Controls & Monitor Split */}
-      <div className="flex flex-1 border-b border-studio-700 bg-studio-950 overflow-hidden">
+      <div className="flex flex-1 border-b border-border bg-background overflow-hidden">
         {/* Left: Video Animatic Preview Monitor */}
-        <div className="flex flex-1 flex-col items-center justify-center p-6 border-r border-studio-800 bg-studio-950/80">
-          <div className="relative w-full max-w-xl aspect-video rounded-lg border border-studio-700 bg-studio-900 shadow-2xl overflow-hidden flex flex-col justify-between p-4">
+        <div className="flex flex-1 flex-col items-center justify-center p-6 border-r border-border bg-background/80">
+          <div className="relative w-full max-w-xl aspect-video rounded-lg border border-border bg-card shadow-2xl overflow-hidden flex flex-col justify-between p-4">
             {/* Monitor Top Bar */}
             <div className="flex items-center justify-between text-xs font-mono">
-              <span className="rounded bg-studio-950/80 px-2 py-0.5 text-amber font-bold border border-amber/30">
+              <span className="rounded bg-background/80 px-2 py-0.5 text-foreground font-bold border border-border">
                 {activeShot ? `SHOT ${activeShot.display_number}` : 'NO SHOT'}
               </span>
-              <span className="text-emerald-400 font-bold bg-studio-950/80 px-2 py-0.5 rounded">
+              <span className="text-foreground font-bold bg-background/80 px-2 py-0.5 rounded">
                 {currentTimecode}
               </span>
             </div>
 
             {/* Monitor Visual Content */}
             <div className="text-center space-y-2">
-              <h4 className="text-sm font-bold text-white">
+              <h4 className="text-sm font-bold text-foreground">
                 {activeShot?.name || `镜头 ${activeShot?.display_number || '001'}`}
               </h4>
-              <p className="text-xs text-slate-400 line-clamp-2 max-w-md mx-auto">
+              <p className="text-xs text-muted-foreground line-clamp-2 max-w-md mx-auto">
                 {activeShot?.description || '暂无画面描述'}
               </p>
               {activeShot?.voice_over && (
-                <div className="text-xs text-amber-300/90 font-medium bg-studio-950/70 p-2 rounded max-w-md mx-auto line-clamp-2 border border-amber/20">
-                  <span className="font-bold text-amber mr-1">VO:</span>
+                <div className="text-xs text-foreground font-medium bg-background/70 p-2 rounded max-w-md mx-auto line-clamp-2 border border-border">
+                  <span className="font-bold text-foreground mr-1">VO:</span>
                   {activeShot.voice_over}
                 </div>
               )}
             </div>
 
             {/* Monitor Footer */}
-            <div className="flex items-center justify-between text-[11px] text-slate-500 font-mono">
+            <div className="flex items-center justify-between text-[11px] text-muted-foreground font-mono">
               <span>{activeShot?.shot_size || '全景'} · {activeShot?.lens_mm ? `${activeShot.lens_mm}mm` : ''}</span>
               <span>{activeShot?.primary_method?.toUpperCase()}</span>
             </div>
@@ -119,35 +121,36 @@ export default function TimelinePage() {
       </div>
 
       {/* Timeline Controls Header */}
-      <div className="flex items-center justify-between border-b border-studio-700 bg-studio-900 px-6 py-2 z-10 text-xs">
+      <div className="flex items-center justify-between border-b border-border bg-card px-6 py-2 z-10 text-xs">
         <div className="flex items-center gap-3">
           {/* Play/Pause Button */}
-          <button
+          <Button
+            size="icon"
             onClick={() => setIsPlaying(!isPlaying)}
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-amber text-studio-950 hover:bg-amber-hover transition shadow"
+            aria-label={isPlaying ? '暂停' : '播放'}
+            className="h-8 w-8 rounded-full"
           >
-            <svg className="g-icon h-4 w-4">
-              <use href={isPlaying ? '#icon-pause' : '#icon-play_arrow'} />
-            </svg>
-          </button>
+            {isPlaying ? <Icons.Pause className="h-4 w-4" /> : <Icons.Play className="h-4 w-4" />}
+          </Button>
 
-          <button
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => setCurrentFrame(0)}
-            className="rounded border border-studio-700 px-2 py-1 text-slate-400 hover:text-white"
           >
             回退起点
-          </button>
+          </Button>
 
           {/* Timecode Readout */}
-          <div className="flex items-center gap-2 font-mono text-sm font-bold pl-2 border-l border-studio-800">
-            <span className="text-amber">{currentTimecode}</span>
-            <span className="text-slate-600">/</span>
-            <span className="text-slate-400">{totalTimecode}</span>
+          <div className="flex items-center gap-2 font-mono text-sm font-bold pl-2 border-l border-border">
+            <span className="text-foreground">{currentTimecode}</span>
+            <span className="text-muted-foreground">/</span>
+            <span className="text-muted-foreground">{totalTimecode}</span>
           </div>
         </div>
 
         {/* Zoom scale slider */}
-        <div className="flex items-center gap-2 text-slate-400 font-mono text-[11px]">
+        <div className="flex items-center gap-2 text-muted-foreground font-mono text-[11px]">
           <span>缩放:</span>
           <input
             type="range"
@@ -156,30 +159,30 @@ export default function TimelinePage() {
             step="0.1"
             value={zoomScale}
             onChange={e => setZoomScale(Number(e.target.value))}
-            className="w-24 accent-amber cursor-pointer"
+            className="w-24 accent-primary cursor-pointer"
           />
         </div>
       </div>
 
       {/* Multi-Track Timeline Scroll Area */}
-      <div className="h-64 overflow-x-auto overflow-y-hidden bg-studio-950 relative select-none">
+      <div className="h-64 overflow-x-auto overflow-y-hidden bg-background relative select-none">
         {/* Playhead Vertical Line */}
         <div
-          className="absolute top-0 bottom-0 w-0.5 bg-amber z-30 pointer-events-none shadow-md"
+          className="absolute top-0 bottom-0 w-0.5 bg-primary z-30 pointer-events-none shadow-md"
           style={{ left: `${currentFrame * zoomScale}px` }}
         >
-          <div className="absolute -top-1 -left-1.5 h-3 w-3 rounded-full bg-amber shadow" />
+          <div className="absolute -top-1 -left-1.5 h-3 w-3 rounded-full bg-primary shadow" />
         </div>
 
         {/* Timeline Tracks */}
         <div className="flex flex-col p-4 space-y-2 min-w-max">
           {/* Ruler Track */}
-          <div className="h-6 flex items-center border-b border-studio-800 text-[10px] font-mono text-slate-500">
+          <div className="h-6 flex items-center border-b border-border text-[10px] font-mono text-muted-foreground">
             {shotTimelineData.map(s => (
               <div
                 key={s.id}
                 style={{ width: `${s.duration_frames * zoomScale}px` }}
-                className="border-l border-studio-800 pl-1 truncate"
+                className="border-l border-border pl-1 truncate"
               >
                 {framesToTimecode(s.startFrame, fps)}
               </div>
@@ -203,22 +206,22 @@ export default function TimelinePage() {
                   style={{ width: `${s.duration_frames * zoomScale}px` }}
                   className={`h-full rounded border flex flex-col justify-between p-1.5 cursor-pointer transition-all overflow-hidden bg-gradient-to-r ${style.bg} ${
                     isCurrent
-                      ? 'border-amber ring-2 ring-amber/50 shadow-md'
+                      ? 'border-ring shadow-md'
                       : isSelected
-                      ? 'border-amber'
-                      : 'border-studio-700 hover:border-slate-400'
+                      ? 'border-ring'
+                      : 'border-border hover:border-ring'
                   }`}
                 >
                   <div className="flex items-center justify-between text-[10px] font-mono">
-                    <span className="font-bold text-white drop-shadow">
+                    <span className="font-bold text-foreground drop-shadow">
                       {s.display_number}
                     </span>
-                    <span className="text-slate-300">
+                    <span className="text-foreground">
                       {s.duration_frames}f
                     </span>
                   </div>
 
-                  <span className="text-[10px] text-slate-200 truncate font-medium">
+                  <span className="text-[10px] text-foreground truncate font-medium">
                     {s.name || s.description}
                   </span>
                 </div>
@@ -232,10 +235,10 @@ export default function TimelinePage() {
               <div
                 key={s.id}
                 style={{ width: `${s.duration_frames * zoomScale}px` }}
-                className="h-full rounded border border-studio-800 bg-studio-900/80 p-1 text-[10px] text-amber-200/90 truncate flex items-center"
+                className="h-full rounded border border-border bg-card/80 p-1 text-[10px] text-foreground truncate flex items-center"
                 title={s.voice_over}
               >
-                {s.voice_over ? `VO: ${s.voice_over}` : <span className="text-slate-600">—</span>}
+                {s.voice_over ? `VO: ${s.voice_over}` : <span className="text-muted-foreground">—</span>}
               </div>
             ))}
           </div>

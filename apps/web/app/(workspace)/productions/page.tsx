@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/api-client';
 import { useAuthStore } from '@/stores/authStore';
 import type { Production } from '@frameforge/types';
+import { Badge, Button, Card, Field, Icons, Input, Select } from '@frameforge/ui';
 
 export default function ProductionsPage() {
   const router = useRouter();
@@ -63,38 +64,41 @@ export default function ProductionsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-studio-950 text-slate-200">
+    <div className="min-h-screen bg-background text-foreground">
       {/* Top Bar (50px) */}
-      <header className="sticky top-0 z-30 flex h-[50px] items-center justify-between border-b border-studio-700 bg-studio-900/90 px-6 backdrop-blur">
+      <header className="sticky top-0 z-30 flex h-[50px] items-center justify-between border-b border-border bg-card/90 px-6 backdrop-blur">
         <div className="flex items-center gap-3">
-          <div className="flex h-7 w-7 items-center justify-center rounded bg-amber-dim text-amber border border-amber/30">
-            <svg className="g-icon"><use href="#icon-movie" /></svg>
+          <div className="flex h-7 w-7 items-center justify-center rounded bg-accent text-accent-foreground border border-border">
+            <Icons.Film />
           </div>
-          <span className="font-bold text-sm tracking-tight text-white">{t('appName')}</span>
-          <span className="rounded bg-studio-800 px-2 py-0.5 text-[11px] font-mono text-studio-600">V1.0 PRO</span>
+          <span className="font-bold text-sm tracking-tight text-foreground">{t('appName')}</span>
         </div>
 
         <div className="flex items-center gap-4 text-xs">
-          <button
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => setLocale(locale === 'zh-CN' ? 'en-US' : 'zh-CN')}
-            className="rounded border border-studio-700 px-2 py-1 hover:border-amber hover:text-amber"
           >
             {locale === 'zh-CN' ? 'EN' : '中'}
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-            className="rounded border border-studio-700 px-2 py-1 hover:border-amber hover:text-amber"
           >
             {theme === 'dark' ? '☀' : '☾'}
-          </button>
-          <div className="flex items-center gap-2 border-l border-studio-700 pl-4 text-slate-400">
-            <span className="text-slate-200 font-medium">{user?.display_name || user?.email || '制作管理员'}</span>
-            <button
+          </Button>
+          <div className="flex items-center gap-2 border-l border-border pl-4 text-muted-foreground">
+            <span className="text-foreground font-medium">{user?.display_name || user?.email}</span>
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => { logout(); router.push('/login'); }}
-              className="text-studio-600 hover:text-film-red"
+              className="text-muted-foreground hover:text-destructive"
             >
               退出
-            </button>
+            </Button>
           </div>
         </div>
       </header>
@@ -103,58 +107,51 @@ export default function ProductionsPage() {
       <main className="mx-auto max-w-6xl p-8">
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-bold text-white">{t('productions')}</h2>
-            <p className="text-xs text-studio-600">单公司私有部署，镜头数据单一可信源 (Single Source of Truth)</p>
+            <h2 className="text-lg font-bold text-foreground">{t('productions')}</h2>
+            <p className="text-xs text-muted-foreground">创建、打开和管理影视制作项目。</p>
           </div>
-          <button
+          <Button
+            size="sm"
             onClick={() => setShowModal(true)}
-            className="flex items-center gap-2 rounded bg-amber px-4 py-2 text-xs font-bold text-studio-950 hover:bg-amber-hover transition"
           >
-            <svg className="g-icon"><use href="#icon-add" /></svg>
+            <Icons.Plus />
             {t('newProduction')}
-          </button>
+          </Button>
         </div>
 
         {loading ? (
-          <div className="py-20 text-center text-xs font-mono text-studio-600">
+          <div className="py-20 text-center text-xs font-mono text-muted-foreground">
             正在载入项目库...
           </div>
         ) : productions.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-studio-700 p-12 text-center">
-            <p className="text-slate-400 text-sm mb-4">暂无影视制作项目</p>
-            <button
+          <div className="rounded-lg border border-dashed border-border p-12 text-center">
+            <p className="text-muted-foreground text-sm mb-4">暂无影视制作项目</p>
+            <Button
+              size="sm"
               onClick={() => setShowModal(true)}
-              className="rounded bg-amber px-4 py-2 text-xs font-bold text-studio-950"
             >
               {t('newProduction')}
-            </button>
+            </Button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="space-y-2">
             {productions.map(prod => (
-              <div
+              <Card
                 key={prod.id}
                 onClick={() => router.push(`/production/${prod.id}/storyboard`)}
-                className="group relative cursor-pointer rounded-lg border border-studio-700 bg-studio-900 p-5 transition hover:border-amber hover:shadow-xl"
+                className="group flex cursor-pointer items-center gap-4 p-4 transition hover:bg-accent/40"
               >
-                <div className="flex items-start justify-between mb-3">
-                  <span className="rounded bg-studio-800 px-2 py-0.5 text-[10px] font-mono text-amber uppercase tracking-wider">
-                    {prod.template_type}
-                  </span>
-                  <span className="text-[11px] font-mono text-studio-600">
-                    {prod.fps_num} FPS · {prod.aspect_ratio}
-                  </span>
+                <div className="min-w-0 flex-1 space-y-1.5">
+                  <h3 className="truncate text-sm font-medium text-foreground">{prod.name}</h3>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                    <span>{prod.template_type}</span>
+                    <span>{prod.fps_num} FPS</span>
+                    <span>{prod.aspect_ratio}</span>
+                    <span>{(prod as any).shot_count || 0} 镜头</span>
+                  </div>
                 </div>
-
-                <h3 className="text-sm font-bold text-white group-hover:text-amber transition line-clamp-2 mb-2">
-                  {prod.name}
-                </h3>
-
-                <div className="flex items-center justify-between border-t border-studio-800 pt-3 text-xs text-studio-600 font-mono">
-                  <span>{(prod as any).shot_count || 0} 镜头</span>
-                  <span>{prod.status}</span>
-                </div>
-              </div>
+                <span className="shrink-0 text-xs text-primary">打开 →</span>
+              </Card>
             ))}
           </div>
         )}
@@ -163,102 +160,100 @@ export default function ProductionsPage() {
       {/* New Production Modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-lg border border-studio-700 bg-studio-900 p-6 shadow-2xl">
-            <div className="flex items-center justify-between mb-4 pb-3 border-b border-studio-700">
-              <h3 className="text-sm font-bold text-white">{t('newProduction')}</h3>
-              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-white">
-                <svg className="g-icon"><use href="#icon-close" /></svg>
-              </button>
+          <Card className="w-full max-w-lg p-6 shadow-2xl">
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-border">
+              <h3 className="text-sm font-bold text-foreground">{t('newProduction')}</h3>
+              <Button variant="ghost" size="icon" aria-label="关闭" onClick={() => setShowModal(false)} className="text-muted-foreground">
+                <Icons.X />
+              </Button>
             </div>
 
             <form onSubmit={handleCreate} className="space-y-4 text-xs">
-              <div>
-                <label className="block text-slate-400 mb-1">项目全称</label>
-                <input
+              <Field label="项目名称">
+                <Input
                   type="text"
                   required
                   value={name}
                   onChange={e => setName(e.target.value)}
                   placeholder="例如：天津国际农产品交易中心 · 形象宣传片"
-                  className="w-full rounded border border-studio-700 bg-studio-950 px-3 py-2 text-white outline-none focus:border-amber"
                 />
-              </div>
+              </Field>
 
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-slate-400 mb-1">制作模板类型</label>
-                  <select
+                <div className="grid min-w-0 gap-2 text-sm font-medium text-foreground">
+                  <span>制作类型</span>
+                  <Select
+                    label="制作类型"
                     value={templateType}
-                    onChange={e => setTemplateType(e.target.value)}
-                    className="w-full rounded border border-studio-700 bg-studio-950 px-3 py-2 text-white outline-none focus:border-amber"
-                  >
-                    <option value="corporate">企业宣传片 (Corporate)</option>
-                    <option value="tvc">TVC 广告片 (TVC)</option>
-                    <option value="film">电影长片 (Film)</option>
-                    <option value="documentary">纪录片 (Documentary)</option>
-                    <option value="motion_graphics">MG / 动效包装 (MG)</option>
-                    <option value="vfx_3d">3D / 视效制作 (VFX & 3D)</option>
-                    <option value="custom">自定义管线 (Custom)</option>
-                  </select>
+                    onChange={setTemplateType}
+                    options={[
+                      { value: 'corporate', label: '企业宣传片 (Corporate)' },
+                      { value: 'tvc', label: 'TVC 广告片 (TVC)' },
+                      { value: 'film', label: '电影长片 (Film)' },
+                      { value: 'documentary', label: '纪录片 (Documentary)' },
+                      { value: 'motion_graphics', label: 'MG / 动效包装 (MG)' },
+                      { value: 'vfx_3d', label: '3D / 视效制作 (VFX & 3D)' },
+                      { value: 'custom', label: '自定义管线 (Custom)' }
+                    ]}
+                  />
                 </div>
-                <div>
-                  <label className="block text-slate-400 mb-1">标准帧率 (FPS)</label>
-                  <select
-                    value={fps}
-                    onChange={e => setFps(Number(e.target.value))}
-                    className="w-full rounded border border-studio-700 bg-studio-950 px-3 py-2 text-white outline-none focus:border-amber"
-                  >
-                    <option value={24}>24 FPS (电影标准)</option>
-                    <option value={25}>25 FPS (欧洲/国内广播)</option>
-                    <option value={30}>30 FPS (网络视频)</option>
-                    <option value={50}>50 FPS (高帧率电视)</option>
-                    <option value={60}>60 FPS (高帧率商业片)</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-slate-400 mb-1">画幅比例 (Aspect Ratio)</label>
-                  <select
-                    value={aspectRatio}
-                    onChange={e => setAspectRatio(e.target.value)}
-                    className="w-full rounded border border-studio-700 bg-studio-950 px-3 py-2 text-white outline-none focus:border-amber"
-                  >
-                    <option value="16:9">16:9 (1920×1080 / 4K UHD)</option>
-                    <option value="2.39:1">2.39:1 (宽银幕 Anamorphic)</option>
-                    <option value="9:16">9:16 (竖屏社交媒体)</option>
-                    <option value="4:3">4:3 (经典复古)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-slate-400 mb-1">目标规划片长 (秒)</label>
-                  <input
-                    type="number"
-                    value={targetSeconds}
-                    onChange={e => setTargetSeconds(Number(e.target.value))}
-                    className="w-full rounded border border-studio-700 bg-studio-950 px-3 py-2 text-white outline-none focus:border-amber"
+                <div className="grid min-w-0 gap-2 text-sm font-medium text-foreground">
+                  <span>时码帧率 (FPS)</span>
+                  <Select
+                    label="时码帧率 (FPS)"
+                    value={String(fps)}
+                    onChange={value => setFps(Number(value))}
+                    options={[
+                      { value: '24', label: '24 FPS (电影标准)' },
+                      { value: '25', label: '25 FPS (欧洲/国内广播)' },
+                      { value: '30', label: '30 FPS (网络视频)' },
+                      { value: '50', label: '50 FPS (高帧率电视)' },
+                      { value: '60', label: '60 FPS (高帧率商业片)' }
+                    ]}
                   />
                 </div>
               </div>
 
-              <div className="mt-6 flex items-center justify-end gap-3 pt-4 border-t border-studio-700">
-                <button
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid min-w-0 gap-2 text-sm font-medium text-foreground">
+                  <span>画幅比例 (Aspect Ratio)</span>
+                  <Select
+                    label="画幅比例 (Aspect Ratio)"
+                    value={aspectRatio}
+                    onChange={setAspectRatio}
+                    options={[
+                      { value: '16:9', label: '16:9 (1920×1080 / 4K UHD)' },
+                      { value: '2.39:1', label: '2.39:1 (宽银幕 Anamorphic)' },
+                      { value: '9:16', label: '9:16 (竖屏社交媒体)' },
+                      { value: '4:3', label: '4:3 (经典复古)' }
+                    ]}
+                  />
+                </div>
+                <Field label="目标时长 (秒)">
+                  <Input
+                    type="number"
+                    value={targetSeconds}
+                    onChange={e => setTargetSeconds(Number(e.target.value))}
+                  />
+                </Field>
+              </div>
+
+              <div className="mt-6 flex items-center justify-end gap-3 pt-4 border-t border-border">
+                <Button
+                  variant="outline"
                   type="button"
                   onClick={() => setShowModal(false)}
-                  className="rounded border border-studio-700 px-4 py-2 font-medium text-slate-300 hover:bg-studio-800"
                 >
                   取消
-                </button>
-                <button
+                </Button>
+                <Button
                   type="submit"
-                  className="rounded bg-amber px-5 py-2 font-bold text-studio-950 hover:bg-amber-hover"
                 >
-                  创建并进入管线
-                </button>
+                  创建项目
+                </Button>
               </div>
             </form>
-          </div>
+          </Card>
         </div>
       )}
     </div>

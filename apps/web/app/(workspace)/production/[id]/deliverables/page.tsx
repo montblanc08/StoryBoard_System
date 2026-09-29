@@ -1,95 +1,106 @@
 'use client';
 
+import { Button, Card, Icons } from '@frameforge/ui';
+
 import React, { useState } from 'react';
 import { useParams } from 'next/navigation';
-import { useProduction, useShots } from '@/lib/hooks/useProduction';
+import { useProduction } from '@/lib/hooks/useProduction';
+import { apiDownload } from '@/lib/api-client';
 
 export default function DeliverablesPage() {
   const params = useParams();
   const id = typeof params?.id === 'string' ? params.id : '';
 
   const { data: production } = useProduction(id);
-  const { data: shots = [] } = useShots(id);
-
   const [downloading, setDownloading] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   if (!production) return null;
 
   const exportFormats = [
     {
       id: 'xlsx',
-      title: '专业分镜制作清单 (Excel .xlsx)',
-      desc: '包含镜号、制作方式、景别、焦段、运镜、画面描述、旁白、时长及部门负责人完整字段。',
-      badge: 'PRO'
+      title: '分镜表（Excel）',
+      desc: '导出镜头与制作字段。'
     },
     {
       id: 'pdf',
-      title: '导演与客户审片分镜图版 (PDF Booklet)',
-      desc: '标准 16:9 横版排版，每页 6 镜或 8 镜，含高清缩略图与完整制作说明。',
-      badge: 'PRINT READY'
+      title: '分镜图版（PDF）',
+      desc: '导出用于审片的分镜图版。'
     },
     {
       id: 'edl',
-      title: '剪辑工程时码交换表 (CMX 3600 EDL)',
-      desc: '标准剪辑时码，可直接导入 DaVinci Resolve, Premiere Pro 或 Final Cut Pro 进行套底。',
-      badge: 'NLE'
+      title: '时间线交换表（EDL）',
+      desc: '导出镜头时码。'
     },
     {
       id: 'otio',
-      title: '开放时间线工程 (OpenTimelineIO .otio)',
-      desc: '影视工业标准多轨道分镜时码工程，保留完整元数据与轨道切分点。',
-      badge: 'PIPELINE'
+      title: '开放时间线（OTIO）',
+      desc: '导出镜头时间线与元数据。'
     },
     {
       id: 'srt',
-      title: '标准旁白字幕文件 (SubRip .srt)',
-      desc: '根据各镜头帧级精确时码自动对齐生成的旁白与对白台词字幕。',
-      badge: 'AUDIO / VO'
+      title: '旁白字幕（SRT）',
+      desc: '根据镜头时码导出旁白字幕。'
     }
   ];
 
-  const handleExport = (formatId: string) => {
+  const handleExport = async (formatId: string) => {
+    if (formatId !== 'srt' || downloading) return;
+    setError(null);
     setDownloading(formatId);
-    setTimeout(() => {
+    try {
+      const fallbackFilename = `${production.name.replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').trim() || '分镜工程'}.srt`;
+      const { blob, filename } = await apiDownload(`/api/v1/productions/${encodeURIComponent(id)}/export/srt`, fallbackFilename);
+      const url = URL.createObjectURL(blob);
+      try {
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      } finally {
+        setTimeout(() => URL.revokeObjectURL(url), 0);
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '导出失败，请重试');
+    } finally {
       setDownloading(null);
-      alert(`已成功生成并导出 ${formatId.toUpperCase()} 文件！`);
-    }, 1200);
+    }
   };
 
   return (
-    <div className="flex h-full w-full flex-col p-8 overflow-y-auto max-w-5xl mx-auto space-y-8">
+    <div className="mx-auto flex h-full w-full max-w-5xl flex-col space-y-8 overflow-y-auto p-4 sm:p-8">
       <div>
-        <h2 className="text-lg font-bold text-white">交付与工程导出 (Deliverables & Export)</h2>
-        <p className="text-xs text-slate-400">
-          导出符合影视制作工业标准的剪辑工程、时码表、审片画册及数据清单
-        </p>
+        <h2 className="text-lg font-bold text-foreground">交付与导出</h2>
+        <p className="text-xs text-muted-foreground">选择导出格式。</p>
       </div>
+
+      {error && <div role="alert" className="rounded border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">{error}</div>}
 
       <div className="grid grid-cols-1 gap-4">
         {exportFormats.map(fmt => (
-          <div
+          <Card
             key={fmt.id}
-            className="flex items-center justify-between rounded-xl border border-studio-700 bg-studio-900 p-5 hover:border-amber transition"
+            className="flex flex-col items-start justify-between gap-3 p-5 transition hover:border-ring sm:flex-row sm:items-center"
           >
             <div className="space-y-1 max-w-xl">
-              <div className="flex items-center gap-2">
-                <h3 className="text-sm font-bold text-slate-200">{fmt.title}</h3>
-                <span className="rounded bg-studio-800 px-2 py-0.5 font-mono text-[10px] text-amber border border-studio-700">
-                  {fmt.badge}
-                </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-sm font-bold text-foreground">{fmt.title}</h3>
               </div>
-              <p className="text-xs text-slate-400 leading-relaxed">{fmt.desc}</p>
+              <p className="text-xs text-muted-foreground leading-relaxed">{fmt.desc}</p>
             </div>
 
-            <button
+            <Button
               onClick={() => handleExport(fmt.id)}
-              disabled={downloading === fmt.id}
-              className="flex items-center gap-2 rounded bg-amber px-5 py-2 text-xs font-bold text-studio-950 hover:bg-amber-hover transition disabled:opacity-50"
+              disabled={fmt.id !== 'srt' || downloading !== null}
+              className="w-full sm:w-auto"
             >
-              <svg className="g-icon h-4 w-4"><use href="#icon-file_download" /></svg>
-              {downloading === fmt.id ? '正在生成…' : '立即导出'}
-            </button>
-          </div>
+              <Icons.Download className="h-4 w-4" />
+              {fmt.id !== 'srt' ? '迁移中' : downloading === fmt.id ? '正在导出…' : '立即导出'}
+            </Button>
+          </Card>
         ))}
       </div>
     </div>

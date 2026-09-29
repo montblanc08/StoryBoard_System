@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { Icons } from '@frameforge/ui';
 import type { Production, Sequence, Shot } from '@frameforge/types';
 import { framesToSeconds } from '@frameforge/timecode';
 import { useWorkspaceStore } from '@/stores/useWorkspaceStore';
@@ -35,9 +36,9 @@ export function StoryboardGrid({
 
   if (shots.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center p-16 text-center text-xs text-slate-500">
-        <svg className="g-icon h-12 w-12 text-studio-700 mb-3"><use href="#icon-search" /></svg>
-        <p className="text-slate-300 font-medium text-sm mb-1">未找到匹配的分镜镜头</p>
+      <div className="flex flex-col items-center justify-center p-16 text-center text-xs text-muted-foreground">
+        <Icons.Search className="h-12 w-12 text-muted-foreground mb-3" />
+        <p className="text-foreground font-medium text-sm mb-1">未找到匹配的分镜镜头</p>
         <p>请尝试调整搜索关键字或筛选条件</p>
       </div>
     );
@@ -57,18 +58,18 @@ export function StoryboardGrid({
           return (
             <div key={seq.id} className="space-y-3">
               {/* Sequence Header */}
-              <div className="flex items-center justify-between border-b border-studio-800 pb-2">
+              <div className="flex items-center justify-between border-b border-border pb-2">
                 <div className="flex items-center gap-3">
-                  <span className="rounded bg-amber/10 border border-amber/30 px-2 py-0.5 font-mono text-xs font-bold text-amber">
+                  <span className="rounded bg-accent border border-border px-2 py-0.5 font-mono text-xs font-bold text-accent-foreground">
                     {seq.display_number}
                   </span>
-                  <h3 className="text-sm font-bold text-slate-200">{seq.name}</h3>
+                  <h3 className="text-sm font-bold text-foreground">{seq.name}</h3>
                 </div>
 
-                <div className="flex items-center gap-3 text-xs font-mono text-slate-400">
+                <div className="flex items-center gap-3 text-xs font-mono text-muted-foreground">
                   <span>{seqShots.length} 镜头</span>
                   <span>·</span>
-                  <span className="text-amber font-semibold">{seqSec}s ({seqFrames}f)</span>
+                  <span className="text-foreground font-semibold">{seqSec}s ({seqFrames}f)</span>
                 </div>
               </div>
 
@@ -92,8 +93,8 @@ export function StoryboardGrid({
         {/* Unassigned shots if any */}
         {shots.filter(s => !s.sequence_id || !sequences.some(seq => seq.id === s.sequence_id)).length > 0 && (
           <div className="space-y-3">
-            <div className="flex items-center justify-between border-b border-studio-800 pb-2">
-              <h3 className="text-sm font-bold text-slate-400">未归类篇章镜头</h3>
+            <div className="flex items-center justify-between border-b border-border pb-2">
+              <h3 className="text-sm font-bold text-muted-foreground">未归类篇章镜头</h3>
             </div>
             <div className={`grid ${gridColsClass}`}>
               {shots
