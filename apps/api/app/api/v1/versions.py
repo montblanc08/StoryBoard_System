@@ -9,7 +9,10 @@ from app.core.database import get_db
 from app.core.exceptions import ConflictError, DomainError, NotFoundError
 from app.models.user import User
 from app.schemas.version import (
+    ShotBranchCreate,
     ShotVersionCreate,
+    ShotVersionMerge,
+    ShotVersionMergeResult,
     ShotVersionOut,
     ShotVersionRestore,
     ShotVersionRestoreResult,
@@ -93,6 +96,24 @@ async def create_shot_version(
         raise _http(error)
 
 
+@router.post(
+    "/shots/{shot_id}/branches",
+    response_model=ShotVersionOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_shot_branch(
+    shot_id: str,
+    req: ShotBranchCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        version = await VersionService.create_branch(db, shot_id, req, current_user)
+        return _version_dict(version)
+    except DomainError as error:
+        raise _http(error)
+
+
 @router.post("/versions/{version_id}/accept", response_model=ShotVersionOut)
 async def accept_shot_version(
     version_id: str,
@@ -118,5 +139,20 @@ async def restore_shot_version(
 ):
     try:
         return await VersionService.restore_version(db, version_id, req, current_user)
+    except DomainError as error:
+        raise _http(error)
+
+@router.post(
+    "/versions/{version_id}/merge",
+    response_model=ShotVersionMergeResult,
+)
+async def merge_shot_version(
+    version_id: str,
+    req: ShotVersionMerge,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        return await VersionService.merge_version(db, version_id, req, current_user)
     except DomainError as error:
         raise _http(error)
