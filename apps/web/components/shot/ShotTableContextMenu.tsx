@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Button,
   Dialog,
@@ -98,8 +98,13 @@ export function ShotTableContextMenu({
     label: string;
   } | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
 
-  const returnFocus = target?.returnFocus ?? null;
+  useEffect(() => {
+    if (target?.returnFocus) {
+      returnFocusRef.current = target.returnFocus;
+    }
+  }, [target]);
 
   const requestTrash = (shotIds: string[], label: string) => {
     setActionError(null);
@@ -148,7 +153,7 @@ export function ShotTableContextMenu({
           className="min-w-64"
           onCloseAutoFocus={event => {
             event.preventDefault();
-            returnFocus?.focus({ preventScroll: true });
+            returnFocusRef.current?.focus({ preventScroll: true });
           }}
         >
           {target?.kind === 'column' && (
