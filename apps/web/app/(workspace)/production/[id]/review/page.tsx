@@ -264,6 +264,7 @@ export default function ReviewPage() {
                     <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
                       <span className="font-semibold text-foreground">
                         {comment.author_name || '内部用户'}
+                        {comment.role ? <span className="ml-1 font-normal text-muted-foreground">· {comment.role}</span> : null}
                       </span>
                       <span className="font-mono">
                         {new Date(comment.created_at).toLocaleString()}
