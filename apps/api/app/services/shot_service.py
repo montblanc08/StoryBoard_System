@@ -156,6 +156,60 @@ class ShotService:
         return True
 
     @staticmethod
+    async def bulk_trash_shots(
+        db: AsyncSession,
+        production_id: str,
+        shot_ids: list[str],
+        user_id: str,
+    ) -> dict[str, int | bool]:
+        """Idempotently move selected shots from one production into Trash.
+
+        The full selection is scope-validated before mutation so a stale or
+        cross-production selection cannot leave a partially deleted batch.
+        """
+        unique_ids = list(dict.fromkeys(shot_ids))[:10000]
+        if not unique_ids:
+            raise DomainError("未选择镜头", code="VALIDATION_ERROR")
+
+        result = await db.execute(select(Shot).where(Shot.id.in_(unique_ids)))
+        shots = {shot.id: shot for shot in result.scalars().all()}
+
+        missing_ids = [shot_id for shot_id in unique_ids if shot_id not in shots]
+        foreign_ids = [
+            shot_id for shot_id in unique_ids
+            if shot_id in shots and shots[shot_id].production_id != production_id
+        ]
+        if missing_ids or foreign_ids:
+            raise ConflictError(
+                message="部分镜头不属于当前项目或已不存在，请刷新选择后重试。",
+                details={
+                    "missing_shot_ids": missing_ids,
+                    "foreign_shot_ids": foreign_ids,
+                },
+            )
+
+        now = datetime.now(timezone.utc)
+        moved_count = 0
+        already_trashed_count = 0
+        for shot_id in unique_ids:
+            shot = shots[shot_id]
+            if shot.deleted_at is not None:
+                already_trashed_count += 1
+                continue
+            shot.deleted_at = now
+            shot.updated_at = now
+            moved_count += 1
+
+        if moved_count:
+            await db.flush()
+
+        return {
+            "ok": True,
+            "moved_count": moved_count,
+            "already_trashed_count": already_trashed_count,
+        }
+
+    @staticmethod
     async def bulk_update_shots(
         db: AsyncSession,
         req: BulkUpdateShotsRequest,
