@@ -127,7 +127,11 @@ async def compare_shot_version(
     current_user: User = Depends(get_current_user),
 ):
     try:
-        return await VersionService.compare_version(db, version_id, other_version_id)
+        result = await VersionService.compare_version(db, version_id, other_version_id)
+        return {
+            **result,
+            "version": _version_dict(result["version"]),
+        }
     except DomainError as error:
         raise _http(error)
 
