@@ -64,7 +64,21 @@ class ShotVersion(Base):
 
     shot_id: Mapped[str] = mapped_column(ForeignKey("shots.id", ondelete="CASCADE"), index=True)
     version_number: Mapped[int] = mapped_column(Integer, default=1)
+    name: Mapped[str] = mapped_column(String(160), default="")
     snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(64), default="Draft")
+    branch_name: Mapped[str] = mapped_column(String(64), default="main", index=True)
+    parent_version_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("shot_versions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    merge_parent_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("shot_versions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    is_accepted: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
 
