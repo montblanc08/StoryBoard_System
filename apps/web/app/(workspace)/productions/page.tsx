@@ -67,7 +67,7 @@ export default function ProductionsPage() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       {/* Top Bar (50px) */}
-      <header className="sticky top-0 z-30 flex h-[50px] items-center justify-between border-b border-border bg-card/90 px-6 backdrop-blur">
+      <header className="sticky top-0 z-30 flex h-[50px] items-center justify-between border-b border-border bg-card/90 px-3 backdrop-blur sm:px-6">
         <div className="flex items-center gap-3">
           <div className="flex h-7 w-7 items-center justify-center rounded bg-accent text-accent-foreground border border-border">
             <Icons.Film />
@@ -75,11 +75,14 @@ export default function ProductionsPage() {
           <span className="font-bold text-sm tracking-tight text-foreground">{t('appName')}</span>
         </div>
 
-        <div className="flex items-center gap-4 text-xs">
+        <div className="flex items-center gap-1 text-xs sm:gap-4">
           <Button
             variant="outline"
             size="sm"
             onClick={() => setLocale(locale === 'zh-CN' ? 'en-US' : 'zh-CN')}
+            aria-label={locale === 'zh-CN' ? 'Switch to English' : '切换为简体中文'}
+            title={locale === 'zh-CN' ? 'Switch to English' : '切换为简体中文'}
+            className="font-mono"
           >
             {locale === 'zh-CN' ? 'EN' : '中'}
           </Button>
@@ -87,11 +90,13 @@ export default function ProductionsPage() {
             variant="outline"
             size="sm"
             onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            aria-label={theme === 'dark' ? '切换到亮色主题' : '切换到暗色主题'}
+            title={theme === 'dark' ? '切换到亮色主题' : '切换到暗色主题'}
           >
-            {theme === 'dark' ? '☀' : '☾'}
+            {theme === 'dark' ? <Icons.Sun className="h-4 w-4" /> : <Icons.Moon className="h-4 w-4" />}
           </Button>
           <div className="flex items-center gap-2 border-l border-border pl-4 text-muted-foreground">
-            <span className="text-foreground font-medium">{user?.display_name || user?.email}</span>
+            <span className="hidden text-foreground font-medium sm:inline">{user?.display_name || user?.email}</span>
             <Button
               variant="ghost"
               size="sm"
@@ -105,8 +110,8 @@ export default function ProductionsPage() {
       </header>
 
       {/* Main Content */}
-      <main className="mx-auto max-w-6xl p-8">
-        <div className="mb-8 flex items-center justify-between">
+      <main className="mx-auto max-w-6xl p-4 sm:p-8">
+        <div className="mb-6 flex flex-wrap items-end justify-between gap-3 sm:mb-8">
           <div>
             <h2 className="text-lg font-bold text-foreground">{t('productions')}</h2>
             <p className="text-xs text-muted-foreground">创建、打开和管理影视制作项目。</p>
@@ -148,11 +153,14 @@ export default function ProductionsPage() {
                     router.push(`/production/${prod.id}/shots`);
                   }
                 }}
-                className="group flex cursor-pointer items-center gap-4 p-4 transition hover:bg-accent/40"
+                className="group flex min-h-[90px] cursor-pointer items-center gap-3 p-3 transition hover:bg-accent/40 sm:gap-4 sm:p-4"
               >
-                <ProjectCover name={prod.name} />
+                <ProjectCover name={prod.name} className="h-12 w-[72px] sm:h-[56px] sm:w-24" />
                 <div className="min-w-0 flex-1 space-y-1.5">
-                  <h3 className="truncate text-base font-bold tracking-tight text-foreground">{prod.name}</h3>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <h3 className="min-w-0 flex-1 truncate text-sm font-bold tracking-tight text-foreground sm:text-base">{prod.name}</h3>
+                    {prod.code && <Badge variant="outline" className="hidden shrink-0 font-mono text-[10px] sm:inline-flex">{prod.code}</Badge>}
+                  </div>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-mono text-muted-foreground">
                     <span className="uppercase">{prod.template_type}</span>
                     <span>{prod.fps_num} FPS</span>
@@ -160,7 +168,7 @@ export default function ProductionsPage() {
                     <span>{prod.shot_count ?? 0} SHOTS</span>
                   </div>
                 </div>
-                <span className="shrink-0 text-xs font-medium text-primary opacity-0 group-hover:opacity-100 transition-opacity">进入工作区 →</span>
+                <span className="shrink-0 text-xs font-medium text-primary opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">进入 →</span>
               </Card>
             ))}
           </div>
