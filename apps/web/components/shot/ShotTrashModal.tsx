@@ -1,8 +1,10 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Icons } from '@frameforge/ui';
+import {
+  Button, Dialog, DialogContent, DialogDescription, DialogTitle, Icons
+} from '@frameforge/ui';
 import { apiClient } from '@/lib/api-client';
 
 interface TrashShot {
@@ -22,14 +24,6 @@ export function ShotTrashModal({ productionId, onClose }: ShotTrashModalProps) {
   const [actingOn, setActingOn] = useState<string | null>(null);
   const [confirmingPurgeId, setConfirmingPurgeId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !actingOn) onClose();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [actingOn, onClose]);
 
   const { data: trashShots = [], isLoading } = useQuery<TrashShot[]>({
     queryKey: ['production', productionId, 'trash'],
@@ -79,19 +73,31 @@ export function ShotTrashModal({ productionId, onClose }: ShotTrashModalProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm">
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="shot-trash-title"
-        className="flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
+    <Dialog
+      open
+      onOpenChange={open => {
+        if (!open && !actingOn) onClose();
+      }}
+    >
+      <DialogContent
+        hideCloseButton
+        className="flex max-h-[80vh] max-w-2xl flex-col gap-0 overflow-hidden p-0"
+        onEscapeKeyDown={event => {
+          if (actingOn) event.preventDefault();
+        }}
+        onInteractOutside={event => {
+          if (actingOn) event.preventDefault();
+        }}
       >
         <div className="flex items-center justify-between border-b border-border p-4">
           <div className="flex items-center gap-2 text-foreground">
             <Icons.Trash2 className="h-5 w-5" />
-            <h2 id="shot-trash-title" className="font-bold">镜头废纸篓</h2>
+            <DialogTitle className="font-bold">镜头废纸篓</DialogTitle>
+            <DialogDescription className="sr-only">
+              查看、恢复或彻底删除当前项目中已经移入废纸篓的镜头。
+            </DialogDescription>
           </div>
-          <Button variant="ghost" size="icon" onClick={onClose} aria-label="关闭镜头废纸篓">
+          <Button variant="ghost" size="icon" onClick={onClose} aria-label="关闭镜头废纸篓" disabled={Boolean(actingOn)}>
             <Icons.X className="h-4 w-4" />
           </Button>
         </div>
@@ -152,7 +158,7 @@ export function ShotTrashModal({ productionId, onClose }: ShotTrashModalProps) {
             </div>
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
