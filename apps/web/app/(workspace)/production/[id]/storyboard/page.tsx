@@ -36,27 +36,51 @@ export default function StoryboardPage() {
     toggleInspector
   } = useWorkspaceStore();
 
-  // Extract unique sequences or mock 4 standard sequences from Tianjin dataset
+  // Derive sequences from actual shot data, or fall back cleanly to unassigned
   const sequences: Sequence[] = useMemo(() => {
-    return [
-      { id: 'seq-1', production_id: id, display_number: 'SEQ010', name: '篇章一｜强强联手·战略启航', description: '', sort_index: 1000, created_at: '', updated_at: '' },
-      { id: 'seq-2', production_id: id, display_number: 'SEQ020', name: '篇章二｜区位优势·立体交通', description: '', sort_index: 2000, created_at: '', updated_at: '' },
-      { id: 'seq-3', production_id: id, display_number: 'SEQ030', name: '篇章三｜规划引领·产业高地', description: '', sort_index: 3000, created_at: '', updated_at: '' },
-      { id: 'seq-4', production_id: id, display_number: 'SEQ040', name: '篇章四｜数字赋能·智慧运营', description: '', sort_index: 4000, created_at: '', updated_at: '' }
-    ];
-  }, [id]);
+    const seqMap = new Map<string, Sequence>();
+    let hasUnassigned = false;
+    for (const s of shots) {
+      if (s.sequence_id) {
+        if (!seqMap.has(s.sequence_id)) {
+          seqMap.set(s.sequence_id, {
+            id: s.sequence_id,
+            production_id: id,
+            display_number: 'SEQ',
+            name: `场次 ${s.sequence_id.slice(0, 8)}`,
+            description: '',
+            sort_index: 1000,
+            created_at: '',
+            updated_at: ''
+          });
+        }
+      } else {
+        hasUnassigned = true;
+      }
+    }
+    const list = Array.from(seqMap.values());
+    if (list.length === 0 || hasUnassigned) {
+      list.push({
+        id: 'unassigned',
+        production_id: id,
+        display_number: 'SEQ00',
+        name: list.length === 0 ? '全部镜头（未分场）' : '未分场镜头',
+        description: '',
+        sort_index: 999999,
+        created_at: '',
+        updated_at: ''
+      });
+    }
+    return list;
+  }, [id, shots]);
 
-  // Enrich shots with sequence mapping if not set
+  // Use real shots mapping empty sequence_id to unassigned
   const enrichedShots: Shot[] = useMemo(() => {
-    return shots.map((s, idx) => {
-      if (s.sequence_id) return s;
-      const seqIdx = Math.floor(idx / 20) % sequences.length;
-      return {
-        ...s,
-        sequence_id: sequences[seqIdx]?.id || sequences[0]?.id
-      };
-    });
-  }, [shots, sequences]);
+    return shots.map(s => ({
+      ...s,
+      sequence_id: s.sequence_id || 'unassigned'
+    }));
+  }, [shots]);
 
   // Filtered shots
   const filteredShots = useMemo(() => {

@@ -5,8 +5,8 @@ import { Button, Icons, Input } from '@frameforge/ui';
 import React, { useState } from 'react';
 import { useParams } from 'next/navigation';
 import type { Shot } from '@frameforge/types';
-import { framesToTimecode, framesToSeconds } from '@frameforge/timecode';
 import { useProduction, useShots, useUpdateShot } from '@/lib/hooks/useProduction';
+import { useWorkspaceStore } from '@/stores/useWorkspaceStore';
 import { MethodBadge } from '@/components/shot/MethodBadge';
 import { StatusBadge } from '@/components/shot/StatusBadge';
 import { ShotInspector } from '@/components/shot/ShotInspector';
@@ -21,7 +21,16 @@ export default function ShotListPage() {
   const updateShot = useUpdateShot(id);
 
   const [search, setSearch] = useState('');
-  const [selectedShot, setSelectedShot] = useState<Shot | null>(null);
+  const {
+    selectedShotIds,
+    selectShot,
+    inspectedShotId,
+    isInspectorOpen,
+    openInspector,
+    closeInspector
+  } = useWorkspaceStore();
+
+  const inspectedShot = shots.find(s => s.id === inspectedShotId) || null;
 
   if (!production) return null;
 
@@ -99,14 +108,16 @@ export default function ShotListPage() {
               </thead>
               <tbody className="divide-y divide-border">
                 {filteredShots.map(shot => {
-                  const isSelected = selectedShot?.id === shot.id;
-                  const durationSec = framesToSeconds(shot.duration_frames, fps).toFixed(1);
-                  const timecode = framesToTimecode(shot.duration_frames, fps, production.drop_frame);
+                  const isSelected = selectedShotIds.includes(shot.id) || inspectedShotId === shot.id;
+                  const durationSec = ((shot.duration_frames || 0) / fps).toFixed(1);
 
                   return (
                     <tr
                       key={shot.id}
-                      onClick={() => setSelectedShot(shot)}
+                      onClick={() => {
+                        selectShot(shot.id, false, false, filteredShots.map(s => s.id));
+                        openInspector(shot.id);
+                      }}
                       className={`cursor-pointer transition-colors duration-100 ${
                         isSelected
                           ? 'bg-accent hover:bg-accent/80'
@@ -168,11 +179,11 @@ export default function ShotListPage() {
         </div>
 
         {/* Inspector on click */}
-        {selectedShot && (
+        {isInspectorOpen && inspectedShot && (
           <ShotInspector
-            shot={selectedShot}
+            shot={inspectedShot}
             production={production}
-            onClose={() => setSelectedShot(null)}
+            onClose={closeInspector}
           />
         )}
       </div>

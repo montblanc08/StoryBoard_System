@@ -9,6 +9,7 @@ import { framesToTimecode, framesToSeconds } from '@frameforge/timecode';
 import { useProduction, useShots } from '@/lib/hooks/useProduction';
 import { getMethodStyle } from '@/lib/media-resolver';
 import { ShotInspector } from '@/components/shot/ShotInspector';
+import { useWorkspaceStore } from '@/stores/useWorkspaceStore';
 
 export default function TimelinePage() {
   const params = useParams();
@@ -20,7 +21,17 @@ export default function TimelinePage() {
   const [currentFrame, setCurrentFrame] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [zoomScale, setZoomScale] = useState(1.5); // pixels per frame
-  const [selectedShot, setSelectedShot] = useState<Shot | null>(null);
+
+  const {
+    selectedShotIds,
+    selectShot,
+    inspectedShotId,
+    isInspectorOpen,
+    openInspector,
+    closeInspector
+  } = useWorkspaceStore();
+
+  const inspectedShot = shots.find(s => s.id === inspectedShotId) || null;
 
   const playIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -111,11 +122,11 @@ export default function TimelinePage() {
         </div>
 
         {/* Right: Selected Shot Inspector if open */}
-        {selectedShot && (
+        {isInspectorOpen && inspectedShot && (
           <ShotInspector
-            shot={selectedShot}
+            shot={inspectedShot}
             production={production}
-            onClose={() => setSelectedShot(null)}
+            onClose={closeInspector}
           />
         )}
       </div>
@@ -192,7 +203,7 @@ export default function TimelinePage() {
           {/* Video / Shot Track */}
           <div className="h-16 flex items-center gap-0.5">
             {shotTimelineData.map(s => {
-              const isSelected = selectedShot?.id === s.id;
+              const isSelected = selectedShotIds.includes(s.id) || inspectedShotId === s.id;
               const isCurrent = currentFrame >= s.startFrame && currentFrame < s.endFrame;
               const style = getMethodStyle(s.primary_method);
 
@@ -200,7 +211,8 @@ export default function TimelinePage() {
                 <div
                   key={s.id}
                   onClick={() => {
-                    setSelectedShot(s);
+                    selectShot(s.id, false, false, shots.map(shot => shot.id));
+                    openInspector(s.id);
                     setCurrentFrame(s.startFrame);
                   }}
                   style={{ width: `${s.duration_frames * zoomScale}px` }}

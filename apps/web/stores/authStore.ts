@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { User } from '@frameforge/types';
-import type { Locale } from '@frameforge/ui';
-import { I18N_DICTIONARY } from '@frameforge/ui';
+import type { Locale } from '@/lib/i18n';
+import { I18N_DICTIONARY } from '@/lib/i18n';
 
 interface AuthState {
   user: User | null;

@@ -27,9 +27,9 @@
 | Timeline | L-Web | 未挂载的 Legacy TimelineView；V-Web 覆盖待核 | V-Web feature | Timeline view | V-API Shot/timecode | 时长映射、拖动、撤销、保存 | V-Web 可操作时间线并走标准命令 | Legacy 时间线无消费 | BLOCKED |
 | Inspector | L-Web `static/app.js` | V-Web ShotInspector；未挂载的 Legacy WorkspaceStage | V-Web feature | Inspector target 独立 store | V-API Shot | 单击选择/双击详情、删除、切视图 | V-Web target 与 selection 分离且持久写对等 | 旧 Inspector owner 无消费 | IMPLEMENTED_NOT_INTEGRATED |
 | Selection | L-Web `state.selection` | V-Web `useWorkspaceStore` | V-Web workspace store | Selection store | 不持久化；Shot ID 由 V-API | 表/卡/时间线/搜索同步 | 所有视图使用一个选择 owner | 旧 selection 全局状态无消费 | IMPLEMENTED_NOT_INTEGRATED |
-| UI components | Legacy `storyboard-system/packages/ui` + 手写控件 | UI-root 已有 Button/IconButton/Input/TextArea/Field/Select，V-Web 登录页消费其中四种；同名包仍并存 | UI-root | Primitive/overlay controller | 无 | API、视觉、focus、浏览器命中 | 根包 primitive parity，V-Web 和 Legacy 双消费者通过 | Legacy 同名包无 imports 后删除 | INTEGRATED_NOT_CUT_OVER（已消费控件） |
+| UI components | Legacy `storyboard-system/packages/ui` + 手写控件 | UI-root 已有 Button/IconButton/Input/TextArea/Field/Select/NativeSelect/Card/Badge/Checkbox，V-Web 登录/项目大厅/交付页已消费其中多种；同名包仍并存 | UI-root | Primitive/overlay controller | 无 | API、视觉、focus、浏览器命中 | 根包 primitive parity，V-Web 和 Legacy 双消费者通过 | Legacy 同名包无 imports 后删除 | INTEGRATED_NOT_CUT_OVER（已消费控件） |
 | Motion | Legacy `packages/ui/src/motion.tsx` + CSS | UI-root tokens 待迁 | UI-root | Motion token/state | 无 | 状态动效、布局稳定、可访问性 | 两端同一 token、图标反馈无双重 owner | Legacy motion 实现无 imports | IMPLEMENTED_NOT_INTEGRATED |
-| i18n | Legacy 文案；V-Web 局部字典消费 | UI-root `I18N_DICTIONARY` | `packages/contracts`/V-Web i18n 边界待定 | Locale store | 用户偏好持久化待定 | 切换、回退、动态文案、SSR | 词典与语言状态有唯一 owner | Legacy 硬编码文案无必要消费 | IMPLEMENTED_NOT_INTEGRATED |
+| i18n | Legacy 文案；V-Web 字典消费 | `apps/web/lib/i18n.ts` | `apps/web` i18n 层 | Locale store | 用户偏好持久化待定 | 切换、回退、动态文案、SSR | 词典与语言状态由应用层独占，不污染根 UI primitive 包 | Legacy 硬编码文案无必要消费 | INTEGRATED_NOT_CUT_OVER |
 
 ## 本轮优先切片
 

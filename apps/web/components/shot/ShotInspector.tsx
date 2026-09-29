@@ -4,6 +4,8 @@ import React, { useEffect, useState } from 'react';
 import { Button, Input, TextArea, Icons, Select, Checkbox } from '@frameforge/ui';
 import type { Shot, Production } from '@frameforge/types';
 import { framesToTimecode, framesToSeconds } from '@frameforge/timecode';
+import { useQueryClient } from '@tanstack/react-query';
+import { ApiError } from '@/lib/api-client';
 import { useWorkspaceStore } from '@/stores/useWorkspaceStore';
 import { useUpdateShot, useDeleteShot } from '@/lib/hooks/useProduction';
 import { MethodBadge } from './MethodBadge';
@@ -15,11 +17,16 @@ interface ShotInspectorProps {
 }
 
 export function ShotInspector({ shot, production, onClose }: ShotInspectorProps) {
+  const queryClient = useQueryClient();
   const updateShot = useUpdateShot(production.id);
   const deleteShot = useDeleteShot(production.id);
 
   const [formData, setFormData] = useState<Partial<Shot>>({});
-  const [isSaving, setIsSaving] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'conflict' | 'error'>('idle');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [conflictDetails, setConflictDetails] = useState<{ server_revision?: number; client_revision?: number } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [activeTab, setActiveTab] = useState<'creative' | 'camera' | 'pipeline' | 'timing'>('creative');
 
   useEffect(() => {
@@ -47,6 +54,10 @@ export function ShotInspector({ shot, production, onClose }: ShotInspectorProps)
         composition: shot.composition || '',
         vfx_required: shot.vfx_required || false
       });
+      setIsDirty(false);
+      setSaveStatus('idle');
+      setErrorMessage(null);
+      setConflictDetails(null);
     }
   }, [shot]);
 
@@ -58,28 +69,45 @@ export function ShotInspector({ shot, production, onClose }: ShotInspectorProps)
 
   const handleFieldChange = (field: keyof Shot, value: unknown) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+    setIsDirty(true);
+    if (saveStatus !== 'idle') setSaveStatus('idle');
   };
 
   const handleSave = async () => {
     try {
-      setIsSaving(true);
+      setSaveStatus('saving');
+      setErrorMessage(null);
+      setConflictDetails(null);
       await updateShot.mutateAsync({
         id: shot.id,
         revision: shot.revision,
         changes: formData
       });
-    } catch (err: any) {
-      alert(err.message || '保存镜头失败');
-    } finally {
-      setIsSaving(false);
+      setSaveStatus('saved');
+      setIsDirty(false);
+    } catch (err: unknown) {
+      if (err instanceof ApiError && (err.status === 409 || err.code === 'SHOT_REVISION_CONFLICT')) {
+        setSaveStatus('conflict');
+        const details = err.details as { server_revision?: number; client_revision?: number } | undefined;
+        setConflictDetails(details || null);
+        setErrorMessage(err.message || '并发版本冲突：该镜头已被其他协作者修改。');
+      } else {
+        setSaveStatus('error');
+        setErrorMessage(err instanceof Error ? err.message : '保存镜头失败，请重试');
+      }
     }
   };
 
+  const handleRefetch = () => {
+    queryClient.invalidateQueries({ queryKey: ['shots', production.id] });
+    setSaveStatus('idle');
+    setErrorMessage(null);
+    setConflictDetails(null);
+  };
+
   const handleDelete = async () => {
-    if (confirm(`确认删除镜头 ${shot.display_number} 吗？`)) {
-      await deleteShot.mutateAsync(shot.id);
-      onClose();
-    }
+    await deleteShot.mutateAsync(shot.id);
+    onClose();
   };
 
   return (
@@ -93,18 +121,31 @@ export function ShotInspector({ shot, production, onClose }: ShotInspectorProps)
           <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
             REV #{shot.revision}
           </span>
+          {saveStatus === 'saved' && (
+            <span className="text-[10px] font-mono text-green-500 font-medium">✓ 已保存</span>
+          )}
+          {saveStatus === 'saving' && (
+            <span className="text-[10px] font-mono text-muted-foreground">保存中…</span>
+          )}
+          {isDirty && saveStatus === 'idle' && (
+            <span className="text-[10px] font-mono text-primary font-medium">• 未保存</span>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
-          <Button variant="default" size="sm"
+          <Button
+            variant="default"
+            size="sm"
             onClick={handleSave}
-            disabled={isSaving}
+            disabled={saveStatus === 'saving' || (!isDirty && saveStatus !== 'conflict')}
             className="flex items-center gap-1 rounded px-3 py-1 text-xs font-bold disabled:opacity-50 transition"
           >
             <Icons.Check className="h-3.5 w-3.5" />
-            {isSaving ? '保存中…' : '保存'}
+            {saveStatus === 'saving' ? '保存中…' : '保存'}
           </Button>
-          <Button variant="ghost" size="sm"
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={onClose}
             aria-label="关闭镜头详情"
             className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -113,6 +154,40 @@ export function ShotInspector({ shot, production, onClose }: ShotInspectorProps)
           </Button>
         </div>
       </div>
+
+      {/* Revision Conflict Banner (409) */}
+      {saveStatus === 'conflict' && (
+        <div role="alert" className="mx-4 mt-3 rounded border border-warning/40 bg-warning/10 p-3 text-xs text-foreground space-y-2">
+          <div className="flex items-center gap-1.5 font-bold text-warning">
+            <Icons.AlertTriangle className="h-4 w-4 text-warning shrink-0" />
+            <span>并发版本冲突 (HTTP 409)</span>
+          </div>
+          <p className="text-muted-foreground text-[11px] leading-relaxed">
+            {errorMessage}
+            {conflictDetails?.server_revision && (
+              <span className="block font-mono mt-0.5">
+                服务器版本: #{conflictDetails.server_revision} | 当前编辑版本: #{conflictDetails.client_revision || shot.revision}
+              </span>
+            )}
+          </p>
+          <div className="flex items-center gap-2 pt-1">
+            <Button variant="outline" size="sm" onClick={handleRefetch} className="h-7 text-xs">
+              <Icons.RefreshCw className="h-3.5 w-3.5 mr-1" />
+              拉取最新版本数据
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* General Error Banner */}
+      {saveStatus === 'error' && errorMessage && (
+        <div role="alert" className="mx-4 mt-3 rounded border border-destructive/40 bg-destructive/10 p-2.5 text-xs text-destructive flex items-center justify-between">
+          <span className="line-clamp-2">{errorMessage}</span>
+          <Button variant="ghost" size="icon" onClick={() => setErrorMessage(null)} className="h-5 w-5 text-destructive shrink-0">
+            <Icons.X className="h-3 w-3" />
+          </Button>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex border-b border-border bg-background/40 text-xs font-medium text-muted-foreground">
@@ -374,13 +449,36 @@ export function ShotInspector({ shot, production, onClose }: ShotInspectorProps)
 
       {/* Inspector Footer with Danger Zone */}
       <div className="border-t border-border p-4 bg-background/60">
-        <Button variant="destructive" size="sm"
-          onClick={handleDelete}
-          className="flex w-full items-center justify-center gap-2 rounded border py-2 text-xs font-medium transition"
-        >
-          <Icons.Trash2 className="h-4 w-4" />
-          删除镜头 (Trash Shot)
-        </Button>
+        {confirmDelete ? (
+          <div className="flex items-center gap-2">
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={handleDelete}
+              className="flex-1 text-xs"
+            >
+              确认彻底删除
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setConfirmDelete(false)}
+              className="text-xs"
+            >
+              取消
+            </Button>
+          </div>
+        ) : (
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setConfirmDelete(true)}
+            className="flex w-full items-center justify-center gap-2 rounded border py-2 text-xs font-medium transition"
+          >
+            <Icons.Trash2 className="h-4 w-4" />
+            删除镜头 (Trash Shot)
+          </Button>
+        )}
       </div>
     </aside>
   );

@@ -9,6 +9,20 @@ export interface RequestOptions extends RequestInit {
   token?: string | null;
 }
 
+export class ApiError extends Error {
+  status: number;
+  code?: string;
+  details?: unknown;
+
+  constructor(status: number, message: string, code?: string, details?: unknown) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.code = code;
+    this.details = details;
+  }
+}
+
 export async function apiClient<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const url = path.startsWith('http') ? path : `${API_BASE}${path}`;
   const headers: Record<string, string> = {
@@ -33,8 +47,14 @@ export async function apiClient<T>(path: string, options: RequestOptions = {}): 
   const data = type.includes('json') ? await res.json() : await res.text();
 
   if (!res.ok) {
-    const errorMsg = data?.error?.message || data?.error || `Request failed (${res.status})`;
-    throw new Error(errorMsg);
+    const detailObj = typeof data === 'object' && data !== null ? (data.detail || data.error) : null;
+    const message = (typeof detailObj === 'object' && detailObj !== null ? detailObj.message : null)
+      || (typeof detailObj === 'string' ? detailObj : null)
+      || (typeof data === 'string' ? data : null)
+      || `请求失败 (${res.status})`;
+    const code = typeof detailObj === 'object' && detailObj !== null ? detailObj.code : undefined;
+    const details = typeof detailObj === 'object' && detailObj !== null ? detailObj.details : undefined;
+    throw new ApiError(res.status, message, code, details);
   }
 
   return data as T;

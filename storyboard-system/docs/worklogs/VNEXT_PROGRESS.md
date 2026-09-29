@@ -225,3 +225,37 @@ CONVERGENCE & CUTOVER — 2026-09-29，`7b3a24c` 基线。本文件下方旧里�
 - `npm run check` (storyboard-system): **PASS**.
 - `npx tsc --noEmit` (packages/ui): **PASS**.
 - `npx tsc --noEmit` (apps/web): **PASS**.
+
+---
+
+# VERTICAL SLICE HARDENING & OWNER DRIFT ELIMINATION — 2026-09-29 16:15 (Session 4)
+
+## Accomplished Milestones
+1. **AGENTS.md Distillation into Immutable Constitution**:
+   - Slimmed root `AGENTS.md` down to 89 lines focusing strictly on timeless architectural invariants (Canonical Architecture, Single Owner, Safety, Fail-Closed Config, AI/Presence Invariants, Save Semantics, UI Boundaries, Router Boundaries, Legacy Freeze, and Task Tracking Decoupling).
+   - Dynamic tracking completely decoupled into `ACTIVE_WORKSTREAMS.md`, `CANONICAL_OWNER_MATRIX.md`, `API_ROUTE_PARITY_MATRIX.md`, and `UI_PRIMITIVE_PARITY.md`.
+
+2. **Packages/UI & Apps/Web Boundary Decoupling**:
+   - Decoupled `I18N_DICTIONARY` and `Locale` from `@frameforge/ui` primitive package, establishing `apps/web/lib/i18n.ts` as the application-level i18n owner.
+   - Decoupled `@font-face` asset URLs from `packages/ui/src/theme.css` into `apps/web/app/globals.css`, ensuring `@frameforge/ui` is asset-free and consumer-agnostic.
+
+3. **Workspace State Owner Unification (Single Owner Rule)**:
+   - Eliminated isolated `useState<Shot | null>` in `apps/web/app/(workspace)/production/[id]/shots/page.tsx` and `timeline/page.tsx`.
+   - Unified row selection and Inspector dock/open states across Storyboard, Table, and Timeline into the single authoritative `useWorkspaceStore`.
+
+4. **Domain Contract Integrity & Vertical Slice 01 Hardening**:
+   - Cleaned sequence derivation in `StoryboardPage`: eliminated artificial synthetic sequence assignments; unassigned shots cleanly group into "未分场镜头" without fabricating business domain data.
+   - Added `ApiError` class in `apps/web/lib/api-client.ts` preserving HTTP status codes, error codes, and conflict details.
+   - Upgraded `ShotInspector.tsx` with dirty-state tracking (`isDirty`), save lifecycle states (`idle`, `saving`, `saved`, `conflict`, `error`), non-blocking HTTP 409 conflict alert with server refetching, and in-UI two-step delete confirmation.
+
+5. **Ledger Truth Alignment**:
+   - Updated `CANONICAL_OWNER_MATRIX.md` (UI primitive set and i18n layer ownership).
+   - Updated `UI_PRIMITIVE_PARITY.md`.
+
+## Verification Results (all GREEN)
+- `tests/backend` (Pytest): **20/20 passed** in 4.0s (including `test_production_and_shot_pipeline` covering 409 conflict, reorder, soft delete).
+- `storyboard-system/tests`: **116/116 passed** (3 skipped) in 14.6s.
+- `tools/architecture_boundary_gate.py`: **PASS**.
+- `npm run check` (storyboard-system): **PASS**.
+- `npx tsc --noEmit` (packages/ui): **PASS**.
+- `npx tsc --noEmit` (apps/web): **PASS**.
