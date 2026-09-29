@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { Button, Icons, NativeSelect } from '@frameforge/ui';
 import type { Production } from '@frameforge/types';
 import { useWorkspaceStore } from '@/stores/useWorkspaceStore';
-import { useBulkUpdateShots, useDeleteShot } from '@/lib/hooks/useProduction';
+import { useBulkTrashShots, useBulkUpdateShots } from '@/lib/hooks/useProduction';
 
 interface BulkActionToolbarProps {
   production: Production;
@@ -14,7 +14,7 @@ interface BulkActionToolbarProps {
 export function BulkActionToolbar({ production, allShotIds }: BulkActionToolbarProps) {
   const { selectedShotIds, clearSelection, selectAllShots } = useWorkspaceStore();
   const bulkUpdate = useBulkUpdateShots(production.id);
-  const deleteShot = useDeleteShot(production.id);
+  const bulkTrash = useBulkTrashShots(production.id);
 
   const [selectedMethod, setSelectedMethod] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('');
@@ -50,12 +50,9 @@ export function BulkActionToolbar({ production, allShotIds }: BulkActionToolbarP
   };
 
   const handleBulkDelete = async () => {
-    if (confirm(`确认批量删除选中的 ${selectedShotIds.length} 个镜头吗？`)) {
-      for (const id of selectedShotIds) {
-        await deleteShot.mutateAsync(id);
-      }
-      clearSelection();
-    }
+    if (!confirm(`确认将选中的 ${selectedShotIds.length} 个镜头移至废纸篓吗？`)) return;
+    await bulkTrash.mutateAsync(selectedShotIds);
+    clearSelection();
   };
 
   return (
