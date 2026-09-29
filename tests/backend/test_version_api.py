@@ -100,6 +100,27 @@ async def test_version_snapshot_accept_restore_and_noop_restore():
         assert accepted.json()["is_accepted"] is True
         assert accepted.json()["status"] == "Accepted"
 
+        compare_before_restore = await client.get(
+            f"/api/v1/versions/{v1['id']}/compare",
+            headers=headers,
+        )
+        assert compare_before_restore.status_code == 200
+        compare_body = compare_before_restore.json()
+        assert compare_body["current_revision"] == 2
+        assert compare_body["changed_count"] >= 3
+        compare_fields = {field["key"]: field for field in compare_body["fields"]}
+        assert compare_fields["name"] == {
+            "key": "name",
+            "label": "镜头标题",
+            "before": "Original",
+            "after": "Changed",
+            "changed": True,
+        }
+        assert compare_fields["description"]["before"] == "First state"
+        assert compare_fields["description"]["after"] == "Second state"
+        assert compare_fields["lens_mm"]["before"] == 35
+        assert compare_fields["lens_mm"]["after"] == 85
+
         stale_restore = await client.post(
             f"/api/v1/versions/{v1['id']}/restore",
             headers=headers,
