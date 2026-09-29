@@ -41,3 +41,22 @@
 旧 2026-09-29 “完整 AI/Presence/React”等记录属于实现切片的历史笔记，不能作为当前 cutover 证据。`VNEXT_PROGRESS.md` 已将历史“READY FOR RELEASE”撤出当前状态。当前未部署，也未接触生产数据。未完成的路径继续保留 Legacy owner，不删除迁移源。
 
 本轮代码与验证记录见 [VNEXT_PROGRESS.md](worklogs/VNEXT_PROGRESS.md)。M2 只接入了登录页四种根控件；Legacy UI 包未退出，`apps/web` 全站尚未共享控件化。M3 的 SRT 已有 V-Web 真实下载入口，但 Legacy 仍为生产服务配置入口；分享与注册是有测试的局部修复，其他路由与持久化收敛仍是下一门槛。
+
+
+## 2026-09-29 Regression Stabilization
+
+Current implementation target: `master`. Product behavior reference: `5e86a0b`, overridden by later explicit user decisions.
+
+| Slice | Current evidence | Status | Next gate |
+| --- | --- | --- | --- |
+| Shot PATCH contract | V-Web sends changed fields; server revision is authoritative; `ShotService` has explicit patch whitelist and no-op suppression | INTEGRATED_NOT_CUT_OVER | actor/audit/history plus bulk/reorder/trash convergence |
+| Inspector draft safety | dirty drafts are preserved per Shot and rebased after a 409 refresh | INTEGRATED_NOT_CUT_OVER | browser regression for switch/refetch/conflict/close on desktop and narrow widths |
+| Inline edit | description/voice-over use real V-API PATCH and preserve input on conflict | INTEGRATED_NOT_CUT_OVER | expand field coverage and browser/keyboard conflict QA |
+| Mobile Shot table | table owns horizontal scroll, first columns are sticky, Inspector overlays on narrow widths, `100dvh`/safe-area added | BLOCKED_VISUAL | real 1440/1024/768/375/320 rendered inspection |
+| Presence | V-Web TopBar consumer disconnected again | BLOCKED | authenticated WS + Redis TTL/pubsub + multi-worker before reconnecting UI |
+| Project entry | unauthorized feature-card overview replaced by redirect to selected Shot workspace | VERIFIED | keep IA aligned while recovering remaining baseline capabilities |
+| Project cover | deterministic monogram/gradient fallback only; no fake media URL | INTEGRATED_NOT_CUT_OVER | canonical cover media read model + media resolver |
+| Shot Trash | soft delete/list/restore/purge exist; UI no longer promises unimplemented 30-day cleanup | INTEGRATED_NOT_CUT_OVER | service/command boundary, audit/tests, then any real retention policy |
+| Visual warning state | shared warning tokens and Tailwind mapping restored | IMPLEMENTED_NOT_INTEGRATED | verify conflict/dirty states in light/dark browser renders |
+
+Do not begin Narration, Moodboard, Lighting, or wider product recovery until this stabilization slice has passed CI and the Shot workspace has fresh rendered-browser QA.
