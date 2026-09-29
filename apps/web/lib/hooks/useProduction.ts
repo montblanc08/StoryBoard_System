@@ -92,6 +92,27 @@ export function useDeleteShot(productionId: string) {
   });
 }
 
+export function useBulkTrashShots(productionId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (shotIds: string[]) => {
+      return apiClient<{ ok: boolean; moved_count: number; already_trashed_count: number }>(
+        `/api/v1/productions/${productionId}/shots/bulk-trash`,
+        {
+          method: 'POST',
+          json: { shot_ids: shotIds }
+        }
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['shots', productionId] });
+      queryClient.invalidateQueries({ queryKey: ['production', productionId] });
+      queryClient.invalidateQueries({ queryKey: ['production', productionId, 'trash'] });
+    }
+  });
+}
+
 export function useBulkUpdateShots(productionId: string) {
   const queryClient = useQueryClient();
 
