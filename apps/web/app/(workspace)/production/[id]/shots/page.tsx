@@ -13,6 +13,7 @@ import { ShotInspector } from '@/components/shot/ShotInspector';
 import { ShotTrashModal } from '@/components/shot/ShotTrashModal';
 import { InlineEditCell } from '@/components/shot/InlineEditCell';
 import { shotMovementLabel } from '@/lib/shot-display';
+import { BulkActionToolbar } from '@/components/storyboard/BulkActionToolbar';
 
 export default function ShotListPage() {
   const params = useParams();
@@ -110,6 +111,8 @@ export default function ShotListPage() {
     filters.department !== 'all',
     filters.status !== 'all'
   ].filter(Boolean).length;
+
+  const filteredShotIds = filteredShots.map(s => s.id);
 
   const toggleLock = async (shot: Shot, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -382,6 +385,11 @@ export default function ShotListPage() {
           </>
         )}
       </div>
+
+      <BulkActionToolbar
+        production={production}
+        allShotIds={filteredShotIds}
+      />
     </div>
   );
 }
