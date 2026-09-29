@@ -23,16 +23,16 @@ export {
 export { buttonVariants } from './components/button';
 export { cn } from './lib/utils';
 import {
-  AlertTriangle, ArrowRight, ArrowUpDown, Check, ChevronLeft, ChevronRight,
+  AlertTriangle, Archive, ArrowRight, ArrowUpDown, Check, ChevronLeft, ChevronRight,
   CircleUserRound, Clapperboard, Clock, Clock3, Columns3, Download, Filter,
-  FileDown, Film, GripVertical, Image, Images, LayoutGrid, Lightbulb, ListVideo,
+  Eye, EyeOff, Eye, EyeOff, FileDown, Film, GripVertical, Image, Images, LayoutGrid, Lightbulb, ListVideo,
   Lock, LockOpen, MessageSquare, Mic, Moon, Palette, PanelRightOpen, Pause, Play, Plus,
   RefreshCw, Search, Settings, SlidersHorizontal, Sun, Table2, Trash2, TriangleAlert, Undo2, X
 } from 'lucide-react';
 
 // Keep the shared icon surface explicit so a consumer does not bundle all of Lucide.
 export const Icons = {
-  AlertTriangle, ArrowRight, ArrowUpDown, Check, ChevronLeft, ChevronRight,
+  AlertTriangle, Archive, ArrowRight, ArrowUpDown, Check, ChevronLeft, ChevronRight,
   CircleUserRound, Clapperboard, Clock, Clock3, Columns3, Download, Filter,
   FileDown, Film, GripVertical, Image, Images, LayoutGrid, Lightbulb, ListVideo,
   Lock, LockOpen, MessageSquare, Mic, Moon, Palette, PanelRightOpen, Pause, Play, Plus,
