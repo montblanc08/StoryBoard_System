@@ -934,7 +934,7 @@ export default function ShotListPage() {
                         >
                           <div className="flex min-w-0 items-center justify-between gap-3">
                             <div className="flex min-w-0 items-center gap-2">
-                              <Icons.Layers3 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                              <Icons.ListVideo className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
                               <span className="truncate font-medium">{group.label}</span>
                             </div>
                             <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
