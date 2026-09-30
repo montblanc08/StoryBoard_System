@@ -227,3 +227,111 @@ async def test_custom_field_archive_restore_purge_is_irreversible_and_scrubs_sav
         assert "custom:location_note" not in config["customColumns"]["widths"]
         assert config["sort"] == {"key": "default", "direction": "asc"}
         assert view["revision"] == 2
+
+
+
+@pytest.mark.asyncio
+async def test_custom_field_definition_update_is_revision_safe_and_preserves_used_select_options():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        login = await client.post("/api/v1/auth/login", json={
+            "email": settings.INITIAL_ADMIN_EMAIL,
+            "password": settings.INITIAL_ADMIN_PASSWORD,
+        })
+        assert login.status_code == 200
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+        production = await client.post("/api/v1/productions", headers=headers, json={
+            "name": "Field Definition Update Contract",
+            "template_type": "film",
+            "fps_num": 24,
+            "aspect_ratio": "16:9",
+        })
+        assert production.status_code == 201
+        production_id = production.json()["id"]
+
+        shot = await client.post(
+            f"/api/v1/productions/{production_id}/shots",
+            headers=headers,
+            json={
+                "display_number": "001",
+                "name": "Select field shot",
+                "description": "Definition update",
+            },
+        )
+        assert shot.status_code == 201
+        shot_id = shot.json()["id"]
+        assert shot.json()["revision"] == 1
+
+        created = await client.post(
+            f"/api/v1/productions/{production_id}/custom-fields",
+            headers=headers,
+            json={
+                "key": "location_status",
+                "label": "场地状态",
+                "description": "初始说明",
+                "field_type": "select",
+                "options": ["待定", "已确认"],
+                "required": False,
+            },
+        )
+        assert created.status_code == 201
+        field = created.json()
+        assert field["revision"] == 1
+        assert field["options"] == ["待定", "已确认"]
+
+        updated = await client.patch(
+            f"/api/v1/productions/{production_id}/custom-fields/{field['id']}",
+            headers=headers,
+            json={
+                "revision": 1,
+                "label": "场地确认状态",
+                "description": "供制片与导演统一填写",
+                "options": ["待定", "已确认", "驳回"],
+                "required": True,
+            },
+        )
+        assert updated.status_code == 200
+        updated_field = updated.json()
+        assert updated_field["revision"] == 2
+        assert updated_field["label"] == "场地确认状态"
+        assert updated_field["description"] == "供制片与导演统一填写"
+        assert updated_field["options"] == ["待定", "已确认", "驳回"]
+        assert updated_field["required"] is True
+        assert updated_field["key"] == "location_status"
+        assert updated_field["field_type"] == "select"
+
+        stale_update = await client.patch(
+            f"/api/v1/productions/{production_id}/custom-fields/{field['id']}",
+            headers=headers,
+            json={"revision": 1, "label": "过期客户端修改"},
+        )
+        assert stale_update.status_code == 409
+        assert stale_update.json()["error"]["code"] == "CUSTOM_FIELD_REVISION_CONFLICT"
+
+        value_write = await client.patch(
+            f"/api/v1/shots/{shot_id}/custom-fields/{field['id']}",
+            headers=headers,
+            json={"revision": 1, "value": "已确认"},
+        )
+        assert value_write.status_code == 200
+        assert value_write.json()["revision"] == 2
+
+        remove_used_option = await client.patch(
+            f"/api/v1/productions/{production_id}/custom-fields/{field['id']}",
+            headers=headers,
+            json={
+                "revision": 2,
+                "options": ["待定", "驳回"],
+            },
+        )
+        assert remove_used_option.status_code == 400
+        assert remove_used_option.json()["error"]["code"] == "FIELD_OPTION_IN_USE"
+
+        fields_after = await client.get(
+            f"/api/v1/productions/{production_id}/custom-fields",
+            headers=headers,
+        )
+        assert fields_after.status_code == 200
+        persisted = next(item for item in fields_after.json() if item["id"] == field["id"])
+        assert persisted["revision"] == 2
+        assert persisted["options"] == ["待定", "已确认", "驳回"]
