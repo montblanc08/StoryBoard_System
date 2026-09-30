@@ -4,17 +4,35 @@ on:
   push:
     branches: [master]
     paths:
-      - "apps/api/**"
-      - "storyboard-system/**"
-      - "AGENTS.md"
+      - "apps/api/app/core/config.py"
+      - "apps/api/main.py"
+      - "apps/api/app/models/**"
+      - "apps/api/requirements.txt"
+      - "**/.env"
+      - "**/.env.production"
+      - "**/*.pem"
+      - "**/*.key"
+      - "**/*.p12"
+      - "**/*.pfx"
+      - "**/id_rsa"
+      - "**/id_ed25519"
       - ".github/scripts/security_invariants.py"
       - ".github/workflows/security-invariants.yml"
   pull_request:
     branches: [master]
     paths:
-      - "apps/api/**"
-      - "storyboard-system/**"
-      - "AGENTS.md"
+      - "apps/api/app/core/config.py"
+      - "apps/api/main.py"
+      - "apps/api/app/models/**"
+      - "apps/api/requirements.txt"
+      - "**/.env"
+      - "**/.env.production"
+      - "**/*.pem"
+      - "**/*.key"
+      - "**/*.p12"
+      - "**/*.pfx"
+      - "**/id_rsa"
+      - "**/id_ed25519"
       - ".github/scripts/security_invariants.py"
       - ".github/workflows/security-invariants.yml"
   workflow_dispatch:
