@@ -56,6 +56,7 @@ export function ShotCustomFieldManager({ productionId }: ShotCustomFieldManagerP
   const [selectOptions, setSelectOptions] = useState('');
   const [editingField, setEditingField] = useState<CustomFieldDefinition | null>(null);
   const [editLabel, setEditLabel] = useState('');
+  const [editFieldType, setEditFieldType] = useState<CustomFieldType>('text');
   const [editDescription, setEditDescription] = useState('');
   const [editOptions, setEditOptions] = useState('');
   const [editRequired, setEditRequired] = useState(false);
@@ -83,6 +84,7 @@ export function ShotCustomFieldManager({ productionId }: ShotCustomFieldManagerP
     setPopoverOpen(false);
     setEditingField(field);
     setEditLabel(field.label);
+    setEditFieldType(field.field_type);
     setEditDescription(field.description || '');
     setEditOptions(field.options.join(', '));
     setEditRequired(field.required);
@@ -92,6 +94,7 @@ export function ShotCustomFieldManager({ productionId }: ShotCustomFieldManagerP
   const resetEditForm = () => {
     setEditingField(null);
     setEditLabel('');
+    setEditFieldType('text');
     setEditDescription('');
     setEditOptions('');
     setEditRequired(false);
@@ -104,7 +107,7 @@ export function ShotCustomFieldManager({ productionId }: ShotCustomFieldManagerP
     if (!nextLabel) return;
 
     const options =
-      editingField.field_type === 'select'
+      editFieldType === 'select'
         ? parseOptions(editOptions)
         : undefined;
 
@@ -114,6 +117,7 @@ export function ShotCustomFieldManager({ productionId }: ShotCustomFieldManagerP
         id: editingField.id,
         revision: editingField.revision,
         label: nextLabel,
+        fieldType: editFieldType,
         description: editDescription.trim(),
         options,
         required: editRequired
@@ -472,7 +476,7 @@ export function ShotCustomFieldManager({ productionId }: ShotCustomFieldManagerP
           <DialogTitle>编辑自定义列</DialogTitle>
           <DialogDescription>
             {editingField
-              ? `列键 ${editingField.column_key} 与字段类型 ${FIELD_TYPE_LABELS[editingField.field_type]} 保持固定，避免破坏已有镜头值；可调整名称、说明、必填状态与选项。`
+              ? `列键 ${editingField.column_key} 保持固定。字段类型可以修改；若已有镜头值需要实际改变数据类型，系统会阻止修改，避免绕过镜头 revision 静默重写数据。`
               : ''}
           </DialogDescription>
 
@@ -490,6 +494,29 @@ export function ShotCustomFieldManager({ productionId }: ShotCustomFieldManagerP
               />
             </div>
 
+            <Select
+              label="字段类型"
+              value={editFieldType}
+              onChange={value => {
+                const nextType = value as CustomFieldType;
+                setEditFieldType(nextType);
+                if (nextType === 'select' && editOptions.trim() === '' && editingField?.field_type === 'select') {
+                  setEditOptions(editingField.options.join(', '));
+                }
+              }}
+              options={(Object.keys(FIELD_TYPE_LABELS) as CustomFieldType[]).map(value => ({
+                value,
+                label: FIELD_TYPE_LABELS[value]
+              }))}
+            />
+
+            {editingField && editFieldType !== editingField.field_type && (
+              <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-[11px] leading-4 text-muted-foreground">
+                类型将从 {FIELD_TYPE_LABELS[editingField.field_type]} 改为 {FIELD_TYPE_LABELS[editFieldType]}。
+                已有值必须能被目标类型直接接受；需要转换的数据会保留原状并阻止保存。
+              </div>
+            )}
+
             <div className="space-y-2">
               <label htmlFor="custom-field-edit-description" className="text-sm font-medium text-foreground">
                 说明
@@ -504,7 +531,7 @@ export function ShotCustomFieldManager({ productionId }: ShotCustomFieldManagerP
               />
             </div>
 
-            {editingField?.field_type === 'select' && (
+            {editFieldType === 'select' && (
               <div className="space-y-2">
                 <label htmlFor="custom-field-edit-options" className="text-sm font-medium text-foreground">
                   选项
@@ -557,7 +584,7 @@ export function ShotCustomFieldManager({ productionId }: ShotCustomFieldManagerP
               disabled={
                 !editLabel.trim() ||
                 updateField.isPending ||
-                (editingField?.field_type === 'select' && parseOptions(editOptions).length === 0)
+                (editFieldType === 'select' && parseOptions(editOptions).length === 0)
               }
               onClick={() => void saveEdit()}
             >
