@@ -385,6 +385,72 @@ class CustomFieldService:
                 },
             )
 
+        next_field_type = req.field_type or field.field_type
+        if next_field_type not in CustomFieldService.FIELD_TYPES:
+            raise DomainError("不支持的自定义列类型", code="INVALID_FIELD_TYPE")
+        type_changed = next_field_type != field.field_type
+
+        value_rows: list[ShotCustomFieldValue] = []
+        if type_changed or req.options is not None:
+            values_result = await db.execute(
+                select(ShotCustomFieldValue)
+                .where(ShotCustomFieldValue.field_definition_id == field.id)
+                .with_for_update()
+            )
+            value_rows = list(values_result.scalars().all())
+
+        next_options = list(field.options or [])
+        if next_field_type == "select":
+            if req.options is not None:
+                next_options = CustomFieldService._normalize_options(req.options)
+            elif field.field_type != "select":
+                next_options = []
+
+            if not next_options:
+                raise DomainError("选择列至少需要一个选项", code="VALIDATION_ERROR")
+
+            used = {
+                row.value
+                for row in value_rows
+                if row.value is not None
+            }
+            removed_in_use = sorted(
+                str(value) for value in used if value not in next_options
+            )
+            if removed_in_use:
+                raise DomainError(
+                    "不能删除仍被镜头使用的选项：" + "、".join(removed_in_use[:10]),
+                    code="FIELD_OPTION_IN_USE",
+                )
+        else:
+            next_options = []
+
+        if type_changed:
+            incompatible_count = 0
+            for row in value_rows:
+                try:
+                    normalized = CustomFieldService._normalize_value(
+                        next_field_type,
+                        row.value,
+                        next_options,
+                    )
+                except DomainError:
+                    incompatible_count += 1
+                    continue
+
+                # Changing a field definition must not silently rewrite Shot
+                # business data without each Shot's expected revision. Permit a
+                # type edit only when the stored JSON value is already valid
+                # for the target type without representation changes.
+                if type(normalized) is not type(row.value) or normalized != row.value:
+                    incompatible_count += 1
+
+            if incompatible_count:
+                raise DomainError(
+                    f"已有 {incompatible_count} 个镜头值需要数据迁移，不能直接修改字段类型；请先调整或清空这些值。",
+                    code="FIELD_TYPE_VALUE_MIGRATION_REQUIRED",
+                )
+
         changed: list[str] = []
         if req.label is not None:
             label = req.label.strip()
@@ -406,51 +472,56 @@ class CustomFieldService:
                 field.group_name = group_name
                 changed.append("group_name")
 
-        next_options = list(field.options or [])
-        if req.options is not None:
-            next_options = CustomFieldService._normalize_options(req.options)
-            if field.field_type != "select":
-                next_options = []
-            elif not next_options:
-                raise DomainError("选择列至少需要一个选项", code="VALIDATION_ERROR")
+        if type_changed:
+            field.field_type = next_field_type
+            changed.append("field_type")
 
-            if field.field_type == "select" and next_options != list(field.options or []):
-                values_result = await db.execute(
-                    select(ShotCustomFieldValue.value).where(
-                        ShotCustomFieldValue.field_definition_id == field.id
-                    )
-                )
-                used = {
-                    value
-                    for value in values_result.scalars().all()
-                    if value is not None
-                }
-                removed_in_use = sorted(
-                    str(value) for value in used if value not in next_options
-                )
-                if removed_in_use:
-                    raise DomainError(
-                        "不能删除仍被镜头使用的选项：" + "、".join(removed_in_use[:10]),
-                        code="FIELD_OPTION_IN_USE",
-                    )
-
-            if list(field.options or []) != next_options:
-                field.options = next_options
-                changed.append("options")
+        if list(field.options or []) != next_options:
+            field.options = next_options
+            changed.append("options")
 
         if req.required is not None and field.required != req.required:
             field.required = req.required
             changed.append("required")
 
+        next_default = field.default_value
         if req.default_value_set:
             next_default = CustomFieldService._normalize_value(
-                field.field_type,
+                next_field_type,
                 req.default_value,
                 next_options,
             )
-            if field.default_value != next_default:
-                field.default_value = next_default
-                changed.append("default_value")
+        elif type_changed and field.default_value is not None:
+            try:
+                next_default = CustomFieldService._normalize_value(
+                    next_field_type,
+                    field.default_value,
+                    next_options,
+                )
+            except DomainError as error:
+                raise DomainError(
+                    "当前默认值与目标字段类型不兼容，请同时设置新的默认值。",
+                    code="FIELD_TYPE_DEFAULT_INCOMPATIBLE",
+                ) from error
+
+        if field.default_value != next_default:
+            field.default_value = next_default
+            changed.append("default_value")
+
+        if type_changed:
+            preference = await CustomFieldService._preference(
+                db,
+                production_id,
+                CustomFieldService._column_key(field),
+                for_update=True,
+            )
+            if preference is not None:
+                next_wrap = next_field_type == "textarea"
+                if preference.wrap_text != next_wrap:
+                    preference.wrap_text = next_wrap
+                    preference.updated_by = user.id
+                    preference.revision += 1
+                    preference.updated_at = datetime.now(timezone.utc)
 
         if changed:
             field.revision += 1
@@ -461,7 +532,11 @@ class CustomFieldService:
                 action="custom_field.update",
                 field_id=field.id,
                 production_id=production_id,
-                metadata={"changed_fields": changed, "revision": field.revision},
+                metadata={
+                    "changed_fields": changed,
+                    "revision": field.revision,
+                    "validated_values": len(value_rows) if type_changed else 0,
+                },
             )
             await db.flush()
 
