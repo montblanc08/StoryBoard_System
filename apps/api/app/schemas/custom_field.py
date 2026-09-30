@@ -25,6 +25,7 @@ class CustomFieldCreate(BaseModel):
 class CustomFieldUpdate(BaseModel):
     revision: int = Field(ge=1)
     label: str | None = Field(default=None, min_length=1, max_length=80)
+    field_type: CustomFieldType | None = None
     description: str | None = Field(default=None, max_length=1000)
     group_name: str | None = Field(default=None, max_length=80)
     options: list[str] | None = Field(default=None, max_length=100)
