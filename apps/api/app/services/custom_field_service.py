@@ -764,6 +764,7 @@ class CustomFieldService:
             db,
             shot.production_id,
             field_id,
+            for_update=True,
         )
         preference = await CustomFieldService._preference(
             db,
