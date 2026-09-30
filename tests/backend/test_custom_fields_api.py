@@ -327,11 +327,77 @@ async def test_custom_field_definition_update_is_revision_safe_and_preserves_use
         assert remove_used_option.status_code == 400
         assert remove_used_option.json()["error"]["code"] == "FIELD_OPTION_IN_USE"
 
+        rejected_snapshot = await client.get(
+            f"/api/v1/productions/{production_id}/custom-fields",
+            headers=headers,
+        )
+        assert rejected_snapshot.status_code == 200
+        rejected_field = next(
+            item for item in rejected_snapshot.json() if item["id"] == field["id"]
+        )
+        assert rejected_field["revision"] == 2
+        assert rejected_field["options"] == ["待定", "已确认", "驳回"]
+
+        # select -> text is safe because every persisted value is already a
+        # string. The definition changes, but Shot data/revision is untouched.
+        type_change = await client.patch(
+            f"/api/v1/productions/{production_id}/custom-fields/{field['id']}",
+            headers=headers,
+            json={
+                "revision": 2,
+                "field_type": "text",
+            },
+        )
+        assert type_change.status_code == 200
+        assert type_change.json()["revision"] == 3
+        assert type_change.json()["field_type"] == "text"
+        assert type_change.json()["options"] == []
+
+        numeric_text = await client.post(
+            f"/api/v1/productions/{production_id}/custom-fields",
+            headers=headers,
+            json={
+                "key": "numeric_text",
+                "label": "数字文本",
+                "field_type": "text",
+            },
+        )
+        assert numeric_text.status_code == 201
+        numeric_field = numeric_text.json()
+
+        numeric_value = await client.patch(
+            f"/api/v1/shots/{shot_id}/custom-fields/{numeric_field['id']}",
+            headers=headers,
+            json={"revision": 2, "value": "12"},
+        )
+        assert numeric_value.status_code == 200
+        assert numeric_value.json()["revision"] == 3
+
+        unsafe_type_change = await client.patch(
+            f"/api/v1/productions/{production_id}/custom-fields/{numeric_field['id']}",
+            headers=headers,
+            json={
+                "revision": 1,
+                "field_type": "number",
+            },
+        )
+        assert unsafe_type_change.status_code == 400
+        assert (
+            unsafe_type_change.json()["error"]["code"]
+            == "FIELD_TYPE_VALUE_MIGRATION_REQUIRED"
+        )
+
         fields_after = await client.get(
             f"/api/v1/productions/{production_id}/custom-fields",
             headers=headers,
         )
         assert fields_after.status_code == 200
         persisted = next(item for item in fields_after.json() if item["id"] == field["id"])
-        assert persisted["revision"] == 2
-        assert persisted["options"] == ["待定", "已确认", "驳回"]
+        assert persisted["revision"] == 3
+        assert persisted["field_type"] == "text"
+        assert persisted["options"] == []
+        numeric_persisted = next(
+            item for item in fields_after.json() if item["id"] == numeric_field["id"]
+        )
+        assert numeric_persisted["revision"] == 1
+        assert numeric_persisted["field_type"] == "text"
