@@ -40,6 +40,18 @@ export interface CustomFieldValueMatrix {
   values: Record<string, Record<string, unknown>>;
 }
 
+export interface UpdateCustomFieldInput {
+  id: string;
+  revision: number;
+  label?: string;
+  description?: string;
+  groupName?: string;
+  options?: string[];
+  required?: boolean;
+  defaultValue?: unknown;
+  defaultValueSet?: boolean;
+}
+
 export function useCustomFields(productionId: string) {
   return useQuery({
     queryKey: ['custom-fields', productionId],
@@ -85,6 +97,50 @@ export function useCreateCustomField(productionId: string) {
         }
       ),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['custom-fields', productionId] });
+    }
+  });
+}
+
+export function useUpdateCustomField(productionId: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      id,
+      revision,
+      label,
+      description,
+      groupName,
+      options,
+      required,
+      defaultValue,
+      defaultValueSet
+    }: UpdateCustomFieldInput) =>
+      apiClient<CustomFieldDefinition>(
+        `/api/v1/productions/${productionId}/custom-fields/${id}`,
+        {
+          method: 'PATCH',
+          json: {
+            revision,
+            ...(label !== undefined ? { label } : {}),
+            ...(description !== undefined ? { description } : {}),
+            ...(groupName !== undefined ? { group_name: groupName } : {}),
+            ...(options !== undefined ? { options } : {}),
+            ...(required !== undefined ? { required } : {}),
+            ...(defaultValueSet
+              ? { default_value: defaultValue ?? null, default_value_set: true }
+              : {})
+          }
+        }
+      ),
+    onSuccess: saved => {
+      queryClient.setQueryData<CustomFieldDefinition[]>(
+        ['custom-fields', productionId],
+        current => current?.map(field => (field.id === saved.id ? saved : field)) ?? [saved]
+      );
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['custom-fields', productionId] });
     }
   });
