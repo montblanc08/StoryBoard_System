@@ -37,6 +37,8 @@ import {
   type ShotTableRowHeight
 } from '@/lib/shot-table-presentation';
 
+type ShotTableGroupMode = 'none' | 'sequence' | 'method';
+
 const ROW_PADDING: Record<ShotTableRowHeight, string> = {
   compact: 'py-1',
   standard: 'py-2',
@@ -94,6 +96,7 @@ export default function ShotListPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [sortKey, setSortKey] = useState<'default' | ShotTableContextColumnKey>('default');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [groupMode, setGroupMode] = useState<ShotTableGroupMode>('none');
   const [tablePresentation, setTablePresentation] = useState<ShotTablePresentationPreferences>(
     () => defaultShotTablePresentationPreferences()
   );
@@ -207,6 +210,13 @@ export default function ShotListPage() {
     setSortKey(nextSortKey);
     setSortDirection(nextSortDirection);
 
+    const savedGrouping = isRecord(config.grouping) ? config.grouping : {};
+    const nextGroupMode: ShotTableGroupMode =
+      savedGrouping.mode === 'sequence' || savedGrouping.mode === 'method'
+        ? savedGrouping.mode
+        : 'none';
+    setGroupMode(nextGroupMode);
+
     const hasSavedFilters =
       Boolean(
         typeof savedFilters.searchQuery === 'string' &&
@@ -215,7 +225,12 @@ export default function ShotListPage() {
       (typeof savedFilters.primaryMethod === 'string' && savedFilters.primaryMethod !== 'all') ||
       (typeof savedFilters.department === 'string' && savedFilters.department !== 'all') ||
       (typeof savedFilters.status === 'string' && savedFilters.status !== 'all');
-    setShowFilters(hasSavedFilters);
+    setShowFilters(
+      hasSavedFilters ||
+      nextSortKey !== 'default' ||
+      nextSortDirection !== 'asc' ||
+      nextGroupMode !== 'none'
+    );
   };
 
   const resizeColumnBy = (column: ShotTableColumnKey, delta: number) => {
@@ -431,7 +446,35 @@ export default function ShotListPage() {
     });
   }, [shots, filters, sortKey, sortDirection, customFieldValueMatrix]);
 
-  const visibleShotIds = visibleShots.map(item => item.id);
+  const shotGroups = useMemo(() => {
+    if (groupMode === 'none') {
+      return [{ key: 'all', label: '', shots: visibleShots }];
+    }
+
+    const groups = new Map<string, { key: string; label: string; shots: Shot[] }>();
+    for (const shot of visibleShots) {
+      const key =
+        groupMode === 'sequence'
+          ? `sequence:${shot.sequence_id || 'unassigned'}`
+          : `method:${shot.primary_method || 'unassigned'}`;
+      const label =
+        groupMode === 'sequence'
+          ? shot.sequence_id
+            ? `场次 ${shot.sequence_id.slice(0, 8)}`
+            : '未分场镜头'
+          : shot.primary_method || '未指定制作方式';
+
+      const existing = groups.get(key);
+      if (existing) {
+        existing.shots.push(shot);
+      } else {
+        groups.set(key, { key, label, shots: [shot] });
+      }
+    }
+    return Array.from(groups.values());
+  }, [visibleShots, groupMode]);
+
+  const visibleShotIds = shotGroups.flatMap(group => group.shots.map(item => item.id));
   const visibleColumns = tablePresentation.columnOrder.filter(
     column => !tablePresentation.hiddenColumns.includes(column)
   );
@@ -449,6 +492,7 @@ export default function ShotListPage() {
       0
     );
   const rowPadding = ROW_PADDING[tablePresentation.rowHeight];
+  const tableColumnCount = 2 + visibleColumns.length + visibleCustomFields.length;
 
   const activeFilterCount = [
     filters.primaryMethod !== 'all',
@@ -468,6 +512,9 @@ export default function ShotListPage() {
       sort: {
         key: sortKey,
         direction: sortDirection
+      },
+      grouping: {
+        mode: groupMode
       }
     }),
     [
@@ -477,7 +524,8 @@ export default function ShotListPage() {
       filters.department,
       filters.status,
       sortKey,
-      sortDirection
+      sortDirection,
+      groupMode
     ]
   );
 
@@ -489,6 +537,7 @@ export default function ShotListPage() {
   );
 
   const canReorder =
+    groupMode === 'none' &&
     sortKey === 'default' &&
     sortDirection === 'asc' &&
     !filters.searchQuery.trim() &&
@@ -563,14 +612,14 @@ export default function ShotListPage() {
 
           <div className="ml-auto flex max-w-full items-center gap-1 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <Button
-              variant={showFilters || activeFilterCount > 0 ? 'secondary' : 'ghost'}
+              variant={showFilters || activeFilterCount > 0 || groupMode !== 'none' ? 'secondary' : 'ghost'}
               size="sm"
               onClick={() => setShowFilters(value => !value)}
               aria-expanded={showFilters}
               className="h-8 text-xs"
             >
               <Icons.Filter className="h-3.5 w-3.5" />
-              筛选{activeFilterCount ? ` · ${activeFilterCount}` : ''}
+              筛选/分组{activeFilterCount ? ` · ${activeFilterCount}` : ''}
             </Button>
 
             <Button
@@ -621,7 +670,7 @@ export default function ShotListPage() {
             {!canReorder && shots.length > 1 && (
               <span
                 className="hidden whitespace-nowrap text-[11px] text-muted-foreground xl:inline"
-                title="清除搜索/筛选并恢复默认升序后可拖动镜号旁的手柄调整顺序"
+                title="清除搜索/筛选/分组并恢复默认升序后可拖动镜号旁的手柄调整顺序"
               >
                 顺序已锁定
               </span>
@@ -642,7 +691,7 @@ export default function ShotListPage() {
 
       {showFilters && (
         <div className="z-10 shrink-0 border-b border-border bg-background px-3 py-3 sm:px-6">
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             <Select
               label="制作方式筛选"
               value={filters.primaryMethod}
@@ -670,6 +719,17 @@ export default function ShotListPage() {
               options={[
                 { value: 'all', label: '全部状态' },
                 ...statusOptions.map(value => ({ value, label: value }))
+              ]}
+              className="h-9 text-xs"
+            />
+            <Select
+              label="分组方式"
+              value={groupMode}
+              onChange={value => setGroupMode(value as ShotTableGroupMode)}
+              options={[
+                { value: 'none', label: '不分组' },
+                { value: 'sequence', label: '按场次 / 篇章' },
+                { value: 'method', label: '按制作方式' }
               ]}
               className="h-9 text-xs"
             />
@@ -706,6 +766,7 @@ export default function ShotListPage() {
                   resetFilters();
                   setSortKey('default');
                   setSortDirection('asc');
+                  setGroupMode('none');
                 }}
                 className="h-9 shrink-0 text-xs"
               >
@@ -863,7 +924,27 @@ export default function ShotListPage() {
               </thead>
 
               <tbody className="divide-y divide-border">
-                {visibleShots.map(shot => {
+                {shotGroups.map(group => (
+                  <React.Fragment key={group.key}>
+                    {groupMode !== 'none' && (
+                      <tr className="bg-muted/55">
+                        <td
+                          colSpan={tableColumnCount}
+                          className="px-3 py-2 text-xs text-foreground"
+                        >
+                          <div className="flex min-w-0 items-center justify-between gap-3">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <Icons.Layers3 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                              <span className="truncate font-medium">{group.label}</span>
+                            </div>
+                            <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+                              {group.shots.length} 镜头
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    {group.shots.map(shot => {
                   const isSelected = selectedShotIds.includes(shot.id);
                   const isInspected = inspectedShotId === shot.id;
                   const durationSec = ((shot.duration_frames || 0) / fps).toFixed(1);
@@ -963,7 +1044,7 @@ export default function ShotListPage() {
                             title={
                               canReorder
                                 ? '拖动调整镜头顺序；聚焦后使用 ↑ / ↓ 微调'
-                                : '清除筛选并恢复默认升序后可调整镜头顺序'
+                                : '清除筛选/分组并恢复默认升序后可调整镜头顺序'
                             }
                             disabled={!canReorder || reorderShots.isPending}
                             onClick={event => event.stopPropagation()}
@@ -1126,7 +1207,9 @@ export default function ShotListPage() {
                       ))}
                     </tr>
                   );
-                })}
+                    })}
+                  </React.Fragment>
+                ))}
               </tbody>
             </table>
           )}
