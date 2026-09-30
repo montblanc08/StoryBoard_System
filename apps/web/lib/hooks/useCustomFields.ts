@@ -44,6 +44,7 @@ export interface UpdateCustomFieldInput {
   id: string;
   revision: number;
   label?: string;
+  fieldType?: CustomFieldType;
   description?: string;
   groupName?: string;
   options?: string[];
@@ -110,6 +111,7 @@ export function useUpdateCustomField(productionId: string) {
       id,
       revision,
       label,
+      fieldType,
       description,
       groupName,
       options,
@@ -124,6 +126,7 @@ export function useUpdateCustomField(productionId: string) {
           json: {
             revision,
             ...(label !== undefined ? { label } : {}),
+            ...(fieldType !== undefined ? { field_type: fieldType } : {}),
             ...(description !== undefined ? { description } : {}),
             ...(groupName !== undefined ? { group_name: groupName } : {}),
             ...(options !== undefined ? { options } : {}),
