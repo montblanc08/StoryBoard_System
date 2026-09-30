@@ -3,8 +3,38 @@ name: FRAMEFORGE CI
 on:
   push:
     branches: [master]
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "tests/**"
+      - "storyboard-system/src/**"
+      - "storyboard-system/packages/**"
+      - "storyboard-system/tests/**"
+      - "storyboard-system/tools/**"
+      - "storyboard-system/*.py"
+      - "storyboard-system/package.json"
+      - "storyboard-system/package-lock.json"
+      - "storyboard-system/requirements*.txt"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/ci.yml"
   pull_request:
     branches: [master]
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "tests/**"
+      - "storyboard-system/src/**"
+      - "storyboard-system/packages/**"
+      - "storyboard-system/tests/**"
+      - "storyboard-system/tools/**"
+      - "storyboard-system/*.py"
+      - "storyboard-system/package.json"
+      - "storyboard-system/package-lock.json"
+      - "storyboard-system/requirements*.txt"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/ci.yml"
   workflow_dispatch:
 
 permissions:
