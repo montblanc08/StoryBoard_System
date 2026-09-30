@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import {
   Badge,
   Button,
+  Checkbox,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -14,7 +15,8 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-  Select
+  Select,
+  TextArea
 } from '@frameforge/ui';
 import {
   type CustomFieldDefinition,
@@ -22,7 +24,8 @@ import {
   useCreateCustomField,
   useCustomFields,
   usePurgeCustomField,
-  useSetCustomFieldState
+  useSetCustomFieldState,
+  useUpdateCustomField
 } from '@/lib/hooks/useCustomFields';
 
 const FIELD_TYPE_LABELS: Record<CustomFieldType, string> = {
@@ -42,6 +45,7 @@ interface ShotCustomFieldManagerProps {
 export function ShotCustomFieldManager({ productionId }: ShotCustomFieldManagerProps) {
   const { data: fields = [], isLoading } = useCustomFields(productionId);
   const createField = useCreateCustomField(productionId);
+  const updateField = useUpdateCustomField(productionId);
   const setFieldState = useSetCustomFieldState(productionId);
   const purgeField = usePurgeCustomField(productionId);
 
@@ -50,6 +54,11 @@ export function ShotCustomFieldManager({ productionId }: ShotCustomFieldManagerP
   const [label, setLabel] = useState('');
   const [fieldType, setFieldType] = useState<CustomFieldType>('text');
   const [selectOptions, setSelectOptions] = useState('');
+  const [editingField, setEditingField] = useState<CustomFieldDefinition | null>(null);
+  const [editLabel, setEditLabel] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editOptions, setEditOptions] = useState('');
+  const [editRequired, setEditRequired] = useState(false);
   const [pendingPurge, setPendingPurge] = useState<CustomFieldDefinition | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -60,17 +69,66 @@ export function ShotCustomFieldManager({ productionId }: ShotCustomFieldManagerP
     setActionError(null);
   };
 
+  const parseOptions = (raw: string) =>
+    Array.from(
+      new Set(
+        raw
+          .split(/[，,\n]/)
+          .map(item => item.trim())
+          .filter(Boolean)
+      )
+    );
+
+  const beginEdit = (field: CustomFieldDefinition) => {
+    setPopoverOpen(false);
+    setEditingField(field);
+    setEditLabel(field.label);
+    setEditDescription(field.description || '');
+    setEditOptions(field.options.join(', '));
+    setEditRequired(field.required);
+    setActionError(null);
+  };
+
+  const resetEditForm = () => {
+    setEditingField(null);
+    setEditLabel('');
+    setEditDescription('');
+    setEditOptions('');
+    setEditRequired(false);
+    setActionError(null);
+  };
+
+  const saveEdit = async () => {
+    if (!editingField) return;
+    const nextLabel = editLabel.trim();
+    if (!nextLabel) return;
+
+    const options =
+      editingField.field_type === 'select'
+        ? parseOptions(editOptions)
+        : undefined;
+
+    setActionError(null);
+    try {
+      await updateField.mutateAsync({
+        id: editingField.id,
+        revision: editingField.revision,
+        label: nextLabel,
+        description: editDescription.trim(),
+        options,
+        required: editRequired
+      });
+      resetEditForm();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : '修改自定义列失败');
+    }
+  };
+
   const create = async () => {
     const trimmedLabel = label.trim();
     if (!trimmedLabel) return;
 
-    const options =
-      fieldType === 'select'
-        ? selectOptions
-            .split(/[，,\n]/)
-            .map(item => item.trim())
-            .filter(Boolean)
-        : [];
+    const options = fieldType === 'select' ? parseOptions(selectOptions) : [];
 
     setActionError(null);
     try {
@@ -183,6 +241,20 @@ export function ShotCustomFieldManager({ productionId }: ShotCustomFieldManagerP
                       {field.column_key} · rev {field.revision}
                     </div>
                   </div>
+
+                  {field.state !== 'removed' && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 shrink-0"
+                      title="编辑列"
+                      aria-label={`编辑自定义列 ${field.label}`}
+                      disabled={updateField.isPending}
+                      onClick={() => beginEdit(field)}
+                    >
+                      <Icons.Settings className="h-3.5 w-3.5" aria-hidden="true" />
+                    </Button>
+                  )}
 
                   {field.state === 'visible' && (
                     <>
@@ -385,6 +457,111 @@ export function ShotCustomFieldManager({ productionId }: ShotCustomFieldManagerP
               onClick={() => void create()}
             >
               {createField.isPending ? '创建中…' : '创建列'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(editingField)}
+        onOpenChange={open => {
+          if (!open && !updateField.isPending) resetEditForm();
+        }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogTitle>编辑自定义列</DialogTitle>
+          <DialogDescription>
+            {editingField
+              ? `列键 ${editingField.column_key} 与字段类型 ${FIELD_TYPE_LABELS[editingField.field_type]} 保持固定，避免破坏已有镜头值；可调整名称、说明、必填状态与选项。`
+              : ''}
+          </DialogDescription>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label htmlFor="custom-field-edit-label" className="text-sm font-medium text-foreground">
+                列名称
+              </label>
+              <Input
+                id="custom-field-edit-label"
+                value={editLabel}
+                onChange={event => setEditLabel(event.target.value)}
+                maxLength={80}
+                autoFocus
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="custom-field-edit-description" className="text-sm font-medium text-foreground">
+                说明
+              </label>
+              <TextArea
+                id="custom-field-edit-description"
+                value={editDescription}
+                onChange={event => setEditDescription(event.target.value)}
+                placeholder="可选，用于说明这一列的填写口径"
+                maxLength={1000}
+                rows={3}
+              />
+            </div>
+
+            {editingField?.field_type === 'select' && (
+              <div className="space-y-2">
+                <label htmlFor="custom-field-edit-options" className="text-sm font-medium text-foreground">
+                  选项
+                </label>
+                <Input
+                  id="custom-field-edit-options"
+                  value={editOptions}
+                  onChange={event => setEditOptions(event.target.value)}
+                  placeholder="例如：待定, 已确认, 驳回"
+                />
+                <p className="text-[11px] leading-4 text-muted-foreground">
+                  使用逗号分隔；正在被镜头使用的选项不能直接删除。
+                </p>
+              </div>
+            )}
+
+            <label className="flex items-start gap-3 rounded-md border border-border px-3 py-2.5">
+              <Checkbox
+                checked={editRequired}
+                onCheckedChange={checked => setEditRequired(checked === true)}
+                aria-label="必填字段"
+              />
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-foreground">必填字段</span>
+                <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground">
+                  开启后，后续写入不允许保存空值；已有镜头值不会被自动补齐。
+                </span>
+              </span>
+            </label>
+          </div>
+
+          {actionError && (
+            <div
+              role="alert"
+              className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive"
+            >
+              {actionError}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={updateField.isPending}
+              onClick={resetEditForm}
+            >
+              取消
+            </Button>
+            <Button
+              disabled={
+                !editLabel.trim() ||
+                updateField.isPending ||
+                (editingField?.field_type === 'select' && parseOptions(editOptions).length === 0)
+              }
+              onClick={() => void saveEdit()}
+            >
+              {updateField.isPending ? '保存中…' : '保存修改'}
             </Button>
           </DialogFooter>
         </DialogContent>
